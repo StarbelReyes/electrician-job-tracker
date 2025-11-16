@@ -1,3 +1,6 @@
+// app/add-job.tsx
+import { useRouter } from "expo-router";
+import React, { useState } from "react";
 import {
   Keyboard,
   KeyboardAvoidingView,
@@ -9,8 +12,6 @@ import {
   TouchableOpacity,
   TouchableWithoutFeedback,
 } from "react-native";
-import { useState } from "react";
-import { useRouter } from "expo-router";
 import { useJobs } from "../context/JobsContext";
 
 export default function AddJobScreen() {

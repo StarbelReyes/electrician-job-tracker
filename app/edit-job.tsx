@@ -1,96 +1,97 @@
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useState } from "react";
 import {
+  Keyboard,
+  KeyboardAvoidingView,
+  Platform,
   ScrollView,
   StyleSheet,
   Text,
   TextInput,
   TouchableOpacity,
+  TouchableWithoutFeedback,
+  View,
 } from "react-native";
 import { useJobs } from "../context/JobsContext";
 
 export default function EditJobScreen() {
   const router = useRouter();
-  const params = useLocalSearchParams();
-  const id = params.id;
+  const { id } = useLocalSearchParams<{ id?: string }>();
   const { jobs, editJob } = useJobs();
 
   const job = jobs.find((j) => j.id === id);
 
-  const [customerName, setCustomerName] = useState(
-    job?.customerName || ""
-  );
+  const [customerName, setCustomerName] = useState(job?.customerName || "");
   const [jobAddress, setJobAddress] = useState(job?.jobAddress || "");
   const [jobDescription, setJobDescription] = useState(
     job?.jobDescription || ""
   );
 
   const handleSave = async () => {
-    if (!job) return;
-
-    await editJob(job.id, {
+    await editJob(job!.id, {
       customerName,
       jobAddress,
       jobDescription,
     });
 
-    router.back(); // go back to job details
+    router.back(); // return to Job Details
   };
 
   if (!job) {
     return (
-      <ScrollView contentContainerStyle={styles.container}>
-        <Text style={styles.title}>Job not found</Text>
-        <TouchableOpacity
-          style={styles.saveButton}
-          onPress={() => router.back()}
-        >
-          <Text style={styles.saveText}>Back</Text>
-        </TouchableOpacity>
-      </ScrollView>
+      <View style={styles.container}>
+        <Text style={styles.title}>Job not found.</Text>
+      </View>
     );
   }
 
   return (
-    <ScrollView contentContainerStyle={styles.container}>
-      <Text style={styles.title}>Edit Job</Text>
+    <KeyboardAvoidingView
+      style={{ flex: 1 }}
+      behavior={Platform.OS === "ios" ? "padding" : "height"}
+    >
+      <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
+        <ScrollView contentContainerStyle={styles.container}>
+          <Text style={styles.title}>Edit Job</Text>
 
-      <TextInput
-        style={styles.input}
-        value={customerName}
-        onChangeText={setCustomerName}
-        placeholder="Customer Name"
-        placeholderTextColor="#999"
-      />
+          <TextInput
+            style={styles.input}
+            value={customerName}
+            onChangeText={setCustomerName}
+            placeholder="Customer Name"
+            placeholderTextColor="#999"
+          />
 
-      <TextInput
-        style={styles.input}
-        value={jobAddress}
-        onChangeText={setJobAddress}
-        placeholder="Job Address"
-        placeholderTextColor="#999"
-      />
+          <TextInput
+            style={styles.input}
+            value={jobAddress}
+            onChangeText={setJobAddress}
+            placeholder="Job Address"
+            placeholderTextColor="#999"
+          />
 
-      <TextInput
-        style={[styles.input, { height: 100 }]}
-        value={jobDescription}
-        onChangeText={setJobDescription}
-        placeholder="Job Description"
-        placeholderTextColor="#999"
-        multiline
-      />
+          <TextInput
+            style={[styles.input, { height: 100 }]}
+            value={jobDescription}
+            onChangeText={setJobDescription}
+            placeholder="Job Description"
+            placeholderTextColor="#999"
+            multiline
+          />
 
-      <TouchableOpacity style={styles.saveButton} onPress={handleSave}>
-        <Text style={styles.saveText}>Save Changes</Text>
-      </TouchableOpacity>
+          <TouchableOpacity style={styles.saveButton} onPress={handleSave}>
+            <Text style={styles.saveText}>Save Changes</Text>
+          </TouchableOpacity>
 
-      <TouchableOpacity
-        style={styles.cancelButton}
-        onPress={() => router.back()}
-      >
-        <Text style={styles.cancelText}>Cancel</Text>
-      </TouchableOpacity>
-    </ScrollView>
+          <TouchableOpacity
+            style={styles.cancelButton}
+            onPress={() => router.back()}
+          >
+            <Text style={styles.cancelText}>Cancel</Text>
+          </TouchableOpacity>
+        </ScrollView>
+      </TouchableWithoutFeedback>
+    </KeyboardAvoidingView>
   );
 }
 

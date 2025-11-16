@@ -1,17 +1,18 @@
+// app/job-detail.tsx
+import { useLocalSearchParams, useRouter } from "expo-router";
 import {
-  View,
-  Text,
-  StyleSheet,
-  TouchableOpacity,
   Alert,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
 } from "react-native";
-import { useRouter, useLocalSearchParams } from "expo-router";
 import { useJobs } from "../context/JobsContext";
 
 export default function JobDetailScreen() {
   const router = useRouter();
-  const { id } = useLocalSearchParams();
-  const { jobs, deleteJob } = useJobs();
+  const { id } = useLocalSearchParams<{ id?: string }>();
+  const { jobs, deleteJob, toggleJobStatus } = useJobs();
 
   const job = jobs.find((j) => j.id === id);
 
@@ -40,9 +41,11 @@ export default function JobDetailScreen() {
     ]);
   };
 
-  const createdDate = job.createdAt
-    ? new Date(job.createdAt).toLocaleString()
-    : "";
+  const handleToggleStatus = async () => {
+    await toggleJobStatus(job.id);
+  };
+
+  const createdDate = new Date(job.createdAt).toLocaleString();
 
   return (
     <View style={styles.container}>
@@ -52,6 +55,16 @@ export default function JobDetailScreen() {
 
       <Text style={styles.title}>{job.customerName}</Text>
 
+      <Text style={styles.label}>Status:</Text>
+      <Text
+        style={[
+          styles.value,
+          job.status === "completed" && { color: "#4ade80" },
+        ]}
+      >
+        {job.status === "completed" ? "Completed" : "Active"}
+      </Text>
+
       <Text style={styles.label}>Address:</Text>
       <Text style={styles.value}>{job.jobAddress}</Text>
 
@@ -60,12 +73,8 @@ export default function JobDetailScreen() {
         {job.jobDescription || "No description added."}
       </Text>
 
-      {createdDate ? (
-        <>
-          <Text style={styles.label}>Created:</Text>
-          <Text style={styles.value}>{createdDate}</Text>
-        </>
-      ) : null}
+      <Text style={styles.label}>Created:</Text>
+      <Text style={styles.value}>{createdDate}</Text>
 
       <View style={styles.actions}>
         <TouchableOpacity
@@ -78,6 +87,12 @@ export default function JobDetailScreen() {
           }
         >
           <Text style={styles.editText}>Edit Job</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity style={styles.statusButton} onPress={handleToggleStatus}>
+          <Text style={styles.statusText}>
+            {job.status === "completed" ? "Mark Active" : "Mark Completed"}
+          </Text>
         </TouchableOpacity>
 
         <TouchableOpacity style={styles.deleteButton} onPress={handleDelete}>
@@ -135,6 +150,19 @@ const styles = StyleSheet.create({
   editText: {
     color: "white",
     fontSize: 16,
+    fontWeight: "600",
+  },
+  statusButton: {
+    padding: 14,
+    borderRadius: 8,
+    backgroundColor: "#22c55e",
+    flex: 1,
+    marginHorizontal: 6,
+    alignItems: "center",
+  },
+  statusText: {
+    color: "white",
+    fontSize: 14,
     fontWeight: "600",
   },
   deleteButton: {

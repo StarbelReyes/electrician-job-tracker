@@ -124,7 +124,7 @@ const toggleJobStatus = async (id: string) => {
 
   setJobs(updated);
   await persistJobs(updated);
-};
+};``
 
 
   return (
