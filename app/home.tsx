@@ -1,13 +1,19 @@
 // app/home.tsx
-import React, { useMemo, useState } from "react";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import React, { useEffect, useMemo, useState } from "react";
 import {
   Alert,
   FlatList,
+  Keyboard,
+  KeyboardAvoidingView,
   Modal,
+  Platform,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
   TouchableOpacity,
+  TouchableWithoutFeedback,
   View,
 } from "react-native";
 
@@ -50,10 +56,16 @@ const initialJobs: Job[] = [
 const sortOptions = ["Newest", "Oldest", "A-Z", "Z-A"] as const;
 type SortOption = (typeof sortOptions)[number];
 
+const STORAGE_KEYS = {
+  JOBS: "EJT_JOBS",
+  TRASH: "EJT_TRASH",
+  SORT: "EJT_SORT_OPTION",
+};
+
 const HomeScreen: React.FC = () => {
   // MAIN JOB DATA
   const [jobs, setJobs] = useState<Job[]>(initialJobs);
-  const [trashJobs, setTrashJobs] = useState<Job[]>([]); // 🗑️ soft-deleted jobs
+  const [trashJobs, setTrashJobs] = useState<Job[]>([]);
 
   // UI state
   const [searchQuery, setSearchQuery] = useState("");
@@ -66,7 +78,7 @@ const HomeScreen: React.FC = () => {
   const [newAddress, setNewAddress] = useState("");
   const [newDescription, setNewDescription] = useState("");
 
-  // Job Details modal
+  // Job Details screen
   const [selectedJob, setSelectedJob] = useState<Job | null>(null);
   const [isDetailsVisible, setIsDetailsVisible] = useState(false);
   const [editTitle, setEditTitle] = useState("");
@@ -76,132 +88,16 @@ const HomeScreen: React.FC = () => {
   // Trash modal
   const [isTrashVisible, setIsTrashVisible] = useState(false);
 
+  // Hydration flag (so we don't save before loading from storage)
+  const [isHydrated, setIsHydrated] = useState(false);
+
+  // ---------- SORT + FILTER ----------
+
   const handleSelectSort = (option: SortOption) => {
     setSortOption(option);
     setIsSortMenuVisible(false);
   };
 
-  const handleAddNewJobPress = () => {
-    setIsAddFormVisible((prev) => !prev);
-  };
-
-  const handleSaveNewJob = () => {
-    if (!newTitle.trim()) {
-      return;
-    }
-
-    const job: Job = {
-      id: Date.now().toString(),
-      title: newTitle.trim(),
-      address: newAddress.trim() || "N/A",
-      description:
-        newDescription.trim() || "No description / scope of work added.",
-      createdAt: new Date().toISOString(),
-      isDone: false,
-    };
-
-    setJobs((prev) => [...prev, job]);
-    setNewTitle("");
-    setNewAddress("");
-    setNewDescription("");
-    setIsAddFormVisible(false);
-  };
-
-  const openJobDetails = (job: Job) => {
-    setSelectedJob(job);
-    setEditTitle(job.title);
-    setEditAddress(job.address);
-    setEditDescription(job.description);
-    setIsDetailsVisible(true);
-  };
-
-  const closeJobDetails = () => {
-    setIsDetailsVisible(false);
-    setSelectedJob(null);
-  };
-
-  const handleSaveJobEdits = () => {
-    if (!selectedJob) return;
-
-    const updated: Job = {
-      ...selectedJob,
-      title: editTitle.trim() || selectedJob.title,
-      address: editAddress.trim() || selectedJob.address,
-      description: editDescription.trim() || selectedJob.description,
-    };
-
-    setJobs((prev) =>
-      prev.map((job) => (job.id === selectedJob.id ? updated : job))
-    );
-    setSelectedJob(updated);
-  };
-
-  const handleToggleDoneInDetails = () => {
-    if (!selectedJob) return;
-
-    const updated: Job = { ...selectedJob, isDone: !selectedJob.isDone };
-
-    setJobs((prev) =>
-      prev.map((job) => (job.id === selectedJob.id ? updated : job))
-    );
-    setSelectedJob(updated);
-  };
-
-  // 🗑️ Move to Trash (with confirm)
-  const confirmMoveToTrash = () => {
-    if (!selectedJob) return;
-
-    Alert.alert(
-      "Delete Job",
-      "Are you sure you want to move this job to Trash?",
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Move to Trash",
-          style: "destructive",
-          onPress: () => {
-            setJobs((prev) =>
-              prev.filter((job) => job.id !== selectedJob.id)
-            );
-            setTrashJobs((prev) => [...prev, selectedJob]);
-            closeJobDetails();
-          },
-        },
-      ]
-    );
-  };
-
-  // 🗑️ Restore from Trash
-  const handleRestoreFromTrash = (id: string) => {
-    const job = trashJobs.find((j) => j.id === id);
-    if (!job) return;
-
-    setTrashJobs((prev) => prev.filter((j) => j.id !== id));
-    setJobs((prev) => [...prev, job]);
-  };
-
-  // 🗑️ Delete forever (from Trash)
-  const handleDeleteForever = (id: string) => {
-    const job = trashJobs.find((j) => j.id === id);
-    if (!job) return;
-
-    Alert.alert(
-      "Delete Permanently",
-      "This job will be permanently deleted and cannot be recovered.",
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Delete",
-          style: "destructive",
-          onPress: () => {
-            setTrashJobs((prev) => prev.filter((j) => j.id !== id));
-          },
-        },
-      ]
-    );
-  };
-
-  // Filter + sort the jobs shown in main list
   const visibleJobs = useMemo(() => {
     let data = [...jobs];
 
@@ -238,322 +134,556 @@ const HomeScreen: React.FC = () => {
     return data;
   }, [jobs, searchQuery, sortOption]);
 
-  return (
-    <View style={styles.container}>
-      {/* Header row with title + Trash button */}
-      <View style={styles.headerRow}>
-        <Text style={styles.header}>TESTING HOME SCREEN 999</Text>
-        <TouchableOpacity
-          style={styles.trashButton}
-          onPress={() => setIsTrashVisible(true)}
-          activeOpacity={0.8}
-        >
-          <Text style={styles.trashButtonText}>Trash ({trashJobs.length})</Text>
-        </TouchableOpacity>
-      </View>
+  // ---------- ADD JOB ----------
 
-      {/* Search + Sort Row */}
-      <View style={styles.controlsRow}>
-        {/* Search */}
-        <View style={styles.searchContainer}>
-          <TextInput
-            style={styles.searchInput}
-            placeholder="Search jobs..."
-            value={searchQuery}
-            onChangeText={setSearchQuery}
-            placeholderTextColor="#888"
-          />
+  const handleAddNewJobPress = () => {
+    setIsAddFormVisible((prev) => !prev);
+    Keyboard.dismiss();
+  };
+
+  const handleSaveNewJob = () => {
+    if (!newTitle.trim()) return;
+
+    const job: Job = {
+      id: Date.now().toString(),
+      title: newTitle.trim(),
+      address: newAddress.trim() || "N/A",
+      description:
+        newDescription.trim() || "No description / scope of work added.",
+      createdAt: new Date().toISOString(),
+      isDone: false,
+    };
+
+    setJobs((prev) => [...prev, job]);
+    setNewTitle("");
+    setNewAddress("");
+    setNewDescription("");
+    setIsAddFormVisible(false);
+    Keyboard.dismiss();
+    Alert.alert("Job saved", "New job has been added.");
+  };
+
+  // ---------- JOB DETAILS ----------
+
+  const openJobDetails = (job: Job) => {
+    setSelectedJob(job);
+    setEditTitle(job.title);
+    setEditAddress(job.address);
+    setEditDescription(job.description);
+    setIsDetailsVisible(true);
+    Keyboard.dismiss();
+  };
+
+  const closeJobDetails = () => {
+    setIsDetailsVisible(false);
+    setSelectedJob(null);
+    Keyboard.dismiss();
+  };
+
+  const handleSaveJobEdits = () => {
+    if (!selectedJob) return;
+
+    const updated: Job = {
+      ...selectedJob,
+      title: editTitle.trim() || selectedJob.title,
+      address: editAddress.trim() || selectedJob.address,
+      description: editDescription.trim() || selectedJob.description,
+    };
+
+    setJobs((prev) =>
+      prev.map((job) => (job.id === selectedJob.id ? updated : job))
+    );
+    setSelectedJob(updated);
+    closeJobDetails();
+    Alert.alert("Changes saved", "Job details updated successfully.");
+  };
+
+  const handleToggleDoneInDetails = () => {
+    if (!selectedJob) return;
+
+    const updated: Job = { ...selectedJob, isDone: !selectedJob.isDone };
+
+    setJobs((prev) =>
+      prev.map((job) => (job.id === selectedJob.id ? updated : job))
+    );
+    setSelectedJob(updated);
+  };
+
+  // ---------- TRASH / DELETE ----------
+
+  const confirmMoveToTrash = () => {
+    if (!selectedJob) return;
+
+    Alert.alert(
+      "Delete Job",
+      "Are you sure you want to move this job to Trash?",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Move to Trash",
+          style: "destructive",
+          onPress: () => {
+            setJobs((prev) =>
+              prev.filter((job) => job.id !== selectedJob.id)
+            );
+            setTrashJobs((prev) => [...prev, selectedJob]);
+            closeJobDetails();
+          },
+        },
+      ]
+    );
+  };
+
+  const handleRestoreFromTrash = (id: string) => {
+    const job = trashJobs.find((j) => j.id === id);
+    if (!job) return;
+
+    setTrashJobs((prev) => prev.filter((j) => j.id !== id));
+    setJobs((prev) => [...prev, job]);
+  };
+
+  const handleDeleteForever = (id: string) => {
+    const job = trashJobs.find((j) => j.id === id);
+    if (!job) return;
+
+    Alert.alert(
+      "Delete Permanently",
+      "This job will be permanently deleted and cannot be recovered.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Delete",
+          style: "destructive",
+          onPress: () => {
+            setTrashJobs((prev) => prev.filter((j) => j.id !== id));
+          },
+        },
+      ]
+    );
+  };
+
+  // ---------- ASYNC STORAGE: LOAD ----------
+
+  useEffect(() => {
+    const loadData = async () => {
+      try {
+        const [[, jobsJson], [, trashJson], [, sortJson]] =
+          await AsyncStorage.multiGet([
+            STORAGE_KEYS.JOBS,
+            STORAGE_KEYS.TRASH,
+            STORAGE_KEYS.SORT,
+          ]);
+
+        if (jobsJson) {
+          setJobs(JSON.parse(jobsJson));
+        }
+
+        if (trashJson) {
+          setTrashJobs(JSON.parse(trashJson));
+        }
+
+        if (sortJson && sortOptions.includes(sortJson as SortOption)) {
+          setSortOption(sortJson as SortOption);
+        }
+      } catch (err) {
+        console.warn("Failed to load saved jobs:", err);
+      } finally {
+        setIsHydrated(true);
+      }
+    };
+
+    loadData();
+  }, []);
+
+  // ---------- ASYNC STORAGE: SAVE ----------
+
+  useEffect(() => {
+    if (!isHydrated) return;
+
+    const saveData = async () => {
+      try {
+        await AsyncStorage.multiSet([
+          [STORAGE_KEYS.JOBS, JSON.stringify(jobs)],
+          [STORAGE_KEYS.TRASH, JSON.stringify(trashJobs)],
+          [STORAGE_KEYS.SORT, sortOption],
+        ]);
+      } catch (err) {
+        console.warn("Failed to save jobs:", err);
+      }
+    };
+
+    saveData();
+  }, [jobs, trashJobs, sortOption, isHydrated]);
+
+  // ---------- RENDER ----------
+
+  return (
+    <TouchableWithoutFeedback onPress={Keyboard.dismiss} accessible={false}>
+      <View style={styles.container}>
+        {/* Header row with title + Trash button */}
+        <View style={styles.headerRow}>
+          <Text style={styles.header}>TESTING HOME SCREEN 999</Text>
+          <TouchableOpacity
+            style={styles.trashButton}
+            onPress={() => {
+              setIsTrashVisible(true);
+              Keyboard.dismiss();
+            }}
+            activeOpacity={0.8}
+          >
+            <Text style={styles.trashButtonText}>
+              Trash ({trashJobs.length})
+            </Text>
+          </TouchableOpacity>
         </View>
 
-        {/* Sort */}
-        <View style={styles.sortContainer}>
-          <TouchableOpacity
-            style={styles.sortButton}
-            onPress={() => setIsSortMenuVisible((prev) => !prev)}
-            activeOpacity={0.9}
-          >
-            <Text style={styles.sortLabel}>Sort by:</Text>
-            <Text style={styles.sortValue}>{sortOption}</Text>
-          </TouchableOpacity>
+        {/* Search + Sort Row */}
+        <View style={styles.controlsRow}>
+          <View style={styles.searchContainer}>
+            <TextInput
+              style={styles.searchInput}
+              placeholder="Search jobs..."
+              value={searchQuery}
+              onChangeText={setSearchQuery}
+              placeholderTextColor="#888"
+              returnKeyType="done"
+              onSubmitEditing={Keyboard.dismiss}
+            />
+          </View>
 
-          {isSortMenuVisible && (
-            <View style={styles.sortDropdown}>
-              {sortOptions.map((option) => (
-                <TouchableOpacity
-                  key={option}
-                  style={styles.sortOption}
-                  onPress={() => handleSelectSort(option)}
-                >
+          <View style={styles.sortContainer}>
+            <TouchableOpacity
+              style={styles.sortButton}
+              onPress={() => {
+                setIsSortMenuVisible((prev) => !prev);
+                Keyboard.dismiss();
+              }}
+              activeOpacity={0.9}
+            >
+              <Text style={styles.sortLabel}>Sort by:</Text>
+              <Text style={styles.sortValue}>{sortOption}</Text>
+            </TouchableOpacity>
+
+            {isSortMenuVisible && (
+              <View style={styles.sortDropdown}>
+                {sortOptions.map((option) => (
+                  <TouchableOpacity
+                    key={option}
+                    style={styles.sortOption}
+                    onPress={() => handleSelectSort(option)}
+                  >
+                    <Text
+                      style={[
+                        styles.sortOptionText,
+                        option === sortOption && styles.sortOptionTextActive,
+                      ]}
+                    >
+                      {option}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            )}
+          </View>
+        </View>
+
+        {/* Add New Job button */}
+        <TouchableOpacity
+          style={styles.addJobButton}
+          onPress={handleAddNewJobPress}
+          activeOpacity={0.9}
+        >
+          <Text style={styles.addJobButtonText}>
+            {isAddFormVisible ? "Cancel" : "Add New Job"}
+          </Text>
+        </TouchableOpacity>
+
+        {/* Add Job form */}
+        {isAddFormVisible && (
+          <View style={styles.addForm}>
+            <Text style={styles.addFormLabel}>Job Title</Text>
+            <TextInput
+              style={styles.addFormInput}
+              placeholder="Ex: Replace panel in basement"
+              placeholderTextColor="#6B7280"
+              value={newTitle}
+              onChangeText={setNewTitle}
+              returnKeyType="next"
+            />
+
+            <Text style={styles.addFormLabel}>Address</Text>
+            <TextInput
+              style={styles.addFormInput}
+              placeholder="Ex: 123 Main St, Brooklyn, NY"
+              placeholderTextColor="#6B7280"
+              value={newAddress}
+              onChangeText={setNewAddress}
+              returnKeyType="next"
+            />
+
+            <Text style={styles.addFormLabel}>Description / Scope of Work</Text>
+            <TextInput
+              style={styles.addFormInputMultiline}
+              placeholder="Ex: Replace main panel, add AFCI breakers, label circuits..."
+              placeholderTextColor="#6B7280"
+              value={newDescription}
+              onChangeText={setNewDescription}
+              multiline
+            />
+
+            <TouchableOpacity
+              style={styles.saveJobButton}
+              onPress={handleSaveNewJob}
+              activeOpacity={0.9}
+            >
+              <Text style={styles.saveJobButtonText}>Save Job</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
+        {/* Job list */}
+        <FlatList
+          data={visibleJobs}
+          keyExtractor={(item) => item.id}
+          contentContainerStyle={styles.listContent}
+          keyboardShouldPersistTaps="handled"
+          renderItem={({ item }) => (
+            <TouchableOpacity
+              onPress={() => openJobDetails(item)}
+              activeOpacity={0.9}
+            >
+              <View
+                style={[
+                  styles.jobCard,
+                  item.isDone && styles.jobCardDone,
+                ]}
+              >
+                <View style={styles.jobCardHeaderRow}>
                   <Text
                     style={[
-                      styles.sortOptionText,
-                      option === sortOption && styles.sortOptionTextActive,
+                      styles.jobTitle,
+                      item.isDone && styles.jobTitleDone,
                     ]}
                   >
-                    {option}
+                    {item.title}
                   </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-          )}
-        </View>
-      </View>
+                  {item.isDone && <Text style={styles.doneBadge}>Done</Text>}
+                </View>
 
-      {/* Add New Job button */}
-      <TouchableOpacity
-        style={styles.addJobButton}
-        onPress={handleAddNewJobPress}
-        activeOpacity={0.9}
-      >
-        <Text style={styles.addJobButtonText}>
-          {isAddFormVisible ? "Cancel" : "Add New Job"}
-        </Text>
-      </TouchableOpacity>
-
-      {/* Add Job form (inline) */}
-      {isAddFormVisible && (
-        <View style={styles.addForm}>
-          <Text style={styles.addFormLabel}>Job Title</Text>
-          <TextInput
-            style={styles.addFormInput}
-            placeholder="Ex: Replace panel in basement"
-            placeholderTextColor="#6B7280"
-            value={newTitle}
-            onChangeText={setNewTitle}
-          />
-
-          <Text style={styles.addFormLabel}>Address</Text>
-          <TextInput
-            style={styles.addFormInput}
-            placeholder="Ex: 123 Main St, Brooklyn, NY"
-            placeholderTextColor="#6B7280"
-            value={newAddress}
-            onChangeText={setNewAddress}
-          />
-
-          <Text style={styles.addFormLabel}>Description / Scope of Work</Text>
-          <TextInput
-            style={styles.addFormInputMultiline}
-            placeholder="Ex: Replace main panel, add AFCI breakers, label all circuits..."
-            placeholderTextColor="#6B7280"
-            value={newDescription}
-            onChangeText={setNewDescription}
-            multiline
-          />
-
-          <TouchableOpacity
-            style={styles.saveJobButton}
-            onPress={handleSaveNewJob}
-            activeOpacity={0.9}
-          >
-            <Text style={styles.saveJobButtonText}>Save Job</Text>
-          </TouchableOpacity>
-        </View>
-      )}
-
-      {/* Job list */}
-      <FlatList
-        data={visibleJobs}
-        keyExtractor={(item) => item.id}
-        contentContainerStyle={styles.listContent}
-        renderItem={({ item }) => (
-          <TouchableOpacity
-            onPress={() => openJobDetails(item)}
-            activeOpacity={0.9}
-          >
-            <View
-              style={[
-                styles.jobCard,
-                item.isDone && styles.jobCardDone,
-              ]}
-            >
-              <View style={styles.jobCardHeaderRow}>
                 <Text
                   style={[
-                    styles.jobTitle,
-                    item.isDone && styles.jobTitleDone,
+                    styles.jobAddress,
+                    item.isDone && styles.jobTextDone,
                   ]}
                 >
-                  {item.title}
+                  {item.address}
                 </Text>
-                {item.isDone && (
-                  <Text style={styles.doneBadge}>Done</Text>
-                )}
+                <Text
+                  style={[
+                    styles.jobDate,
+                    item.isDone && styles.jobTextDone,
+                  ]}
+                >
+                  {new Date(item.createdAt).toLocaleString()}
+                </Text>
               </View>
-
-              <Text
-                style={[
-                  styles.jobAddress,
-                  item.isDone && styles.jobTextDone,
-                ]}
-              >
-                {item.address}
-              </Text>
-              <Text
-                style={[
-                  styles.jobDate,
-                  item.isDone && styles.jobTextDone,
-                ]}
-              >
-                {new Date(item.createdAt).toLocaleString()}
-              </Text>
-            </View>
-          </TouchableOpacity>
-        )}
-        ListEmptyComponent={
-          <Text style={styles.emptyText}>No jobs match your search.</Text>
-        }
-      />
-
-      {/* Job Details Modal */}
-      <Modal
-        visible={isDetailsVisible}
-        transparent
-        animationType="slide"
-        onRequestClose={closeJobDetails}
-      >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>Job Details</Text>
-
-            <Text style={styles.modalLabel}>Title</Text>
-            <TextInput
-              style={styles.modalInput}
-              value={editTitle}
-              onChangeText={setEditTitle}
-              placeholderTextColor="#6B7280"
-            />
-
-            <Text style={styles.modalLabel}>Address</Text>
-            <TextInput
-              style={styles.modalInput}
-              value={editAddress}
-              onChangeText={setEditAddress}
-              placeholderTextColor="#6B7280"
-            />
-
-            <Text style={styles.modalLabel}>Description / Scope</Text>
-            <TextInput
-              style={styles.modalInputMultiline}
-              value={editDescription}
-              onChangeText={setEditDescription}
-              multiline
-              placeholderTextColor="#6B7280"
-            />
-
-            {selectedJob && (
-              <>
-                <Text style={styles.modalMeta}>
-                  Created:{" "}
-                  {new Date(selectedJob.createdAt).toLocaleString()}
-                </Text>
-                <Text style={styles.modalMeta}>
-                  Status: {selectedJob.isDone ? "Done" : "Open"}
-                </Text>
-              </>
-            )}
-
-            <View style={styles.modalButtonRow}>
-              <TouchableOpacity
-                style={[
-                  styles.modalButton,
-                  selectedJob?.isDone
-                    ? styles.modalButtonSecondary
-                    : styles.modalButtonPrimary,
-                ]}
-                onPress={handleToggleDoneInDetails}
-              >
-                <Text style={styles.modalButtonText}>
-                  {selectedJob?.isDone ? "Mark as Not Done" : "Mark as Done"}
-                </Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={[styles.modalButton, styles.modalButtonPrimary]}
-                onPress={handleSaveJobEdits}
-              >
-                <Text style={styles.modalButtonText}>Save Changes</Text>
-              </TouchableOpacity>
-            </View>
-
-            <TouchableOpacity
-              style={styles.modalDeleteButton}
-              onPress={confirmMoveToTrash}
-            >
-              <Text style={styles.modalDeleteText}>Move to Trash</Text>
             </TouchableOpacity>
+          )}
+          ListEmptyComponent={
+            <Text style={styles.emptyText}>No jobs match your search.</Text>
+          }
+        />
 
-            <TouchableOpacity
-              style={styles.modalCloseButton}
-              onPress={closeJobDetails}
+        {/* FULL-SCREEN Job Details */}
+        <Modal
+          visible={isDetailsVisible}
+          animationType="slide"
+          transparent={false}
+          onRequestClose={closeJobDetails}
+        >
+          <KeyboardAvoidingView
+            style={{ flex: 1, backgroundColor: "#020617" }} // 🔥 no white gap
+            behavior={Platform.OS === "ios" ? "padding" : "height"}
+            keyboardVerticalOffset={32}
+          >
+            <TouchableWithoutFeedback
+              onPress={Keyboard.dismiss}
+              accessible={false}
             >
-              <Text style={styles.modalCloseText}>Close</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
+              <View style={styles.detailsScreen}>
+                <ScrollView
+                  contentContainerStyle={styles.detailsScroll}
+                  keyboardShouldPersistTaps="handled"
+                  showsVerticalScrollIndicator={false}
+                >
+                  <Text style={styles.modalTitle}>Job Details</Text>
 
-      {/* Trash Modal */}
-      <Modal
-        visible={isTrashVisible}
-        transparent
-        animationType="slide"
-        onRequestClose={() => setIsTrashVisible(false)}
-      >
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>Trash</Text>
+                  <Text style={styles.modalLabel}>Title</Text>
+                  <TextInput
+                    style={styles.modalInput}
+                    value={editTitle}
+                    onChangeText={setEditTitle}
+                    placeholderTextColor="#6B7280"
+                    returnKeyType="done"
+                    onSubmitEditing={Keyboard.dismiss}
+                  />
 
-            {trashJobs.length === 0 ? (
-              <Text style={styles.emptyText}>Trash is empty.</Text>
-            ) : (
-              <FlatList
-                data={trashJobs}
-                keyExtractor={(item) => item.id}
-                contentContainerStyle={{ paddingBottom: 20 }}
-                renderItem={({ item }) => (
-                  <View style={styles.trashCard}>
-                    <Text style={styles.trashTitle}>{item.title}</Text>
-                    <Text style={styles.trashAddress}>{item.address}</Text>
-                    <Text style={styles.trashDate}>
-                      {new Date(item.createdAt).toLocaleString()}
-                    </Text>
+                  <Text style={styles.modalLabel}>Address</Text>
+                  <TextInput
+                    style={styles.modalInput}
+                    value={editAddress}
+                    onChangeText={setEditAddress}
+                    placeholderTextColor="#6B7280"
+                    returnKeyType="done"
+                    onSubmitEditing={Keyboard.dismiss}
+                  />
 
-                    <View style={styles.trashButtonRow}>
-                      <TouchableOpacity
-                        style={[styles.trashActionButton, styles.trashRestore]}
-                        onPress={() => handleRestoreFromTrash(item.id)}
-                      >
-                        <Text style={styles.trashRestoreText}>Restore</Text>
-                      </TouchableOpacity>
+                  <Text style={styles.modalLabel}>Description / Scope</Text>
+                  <TextInput
+                    style={styles.modalInputMultiline}
+                    value={editDescription}
+                    onChangeText={setEditDescription}
+                    multiline
+                    placeholderTextColor="#6B7280"
+                  />
 
-                      <TouchableOpacity
-                        style={[
-                          styles.trashActionButton,
-                          styles.trashDeleteForever,
-                        ]}
-                        onPress={() => handleDeleteForever(item.id)}
-                      >
-                        <Text style={styles.trashDeleteText}>
-                          Delete Forever
-                        </Text>
-                      </TouchableOpacity>
-                    </View>
+                  {selectedJob && (
+                    <>
+                      <Text style={styles.modalMeta}>
+                        Created:{" "}
+                        {new Date(selectedJob.createdAt).toLocaleString()}
+                      </Text>
+                      <Text style={styles.modalMeta}>
+                        Status: {selectedJob.isDone ? "Done" : "Open"}
+                      </Text>
+                    </>
+                  )}
+
+                  <View style={styles.modalButtonRow}>
+                    <TouchableOpacity
+                      style={[
+                        styles.modalButton,
+                        selectedJob?.isDone
+                          ? styles.modalButtonSecondary
+                          : styles.modalButtonPrimary,
+                      ]}
+                      onPress={handleToggleDoneInDetails}
+                    >
+                      <Text style={styles.modalButtonText}>
+                        {selectedJob?.isDone
+                          ? "Mark as Not Done"
+                          : "Mark as Done"}
+                      </Text>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                      style={[styles.modalButton, styles.modalButtonPrimary]}
+                      onPress={handleSaveJobEdits}
+                    >
+                      <Text style={styles.modalButtonText}>Save Changes</Text>
+                    </TouchableOpacity>
                   </View>
-                )}
-              />
-            )}
 
-            <TouchableOpacity
-              style={styles.modalCloseButton}
-              onPress={() => setIsTrashVisible(false)}
+                  <TouchableOpacity
+                    style={styles.modalDeleteButton}
+                    onPress={confirmMoveToTrash}
+                  >
+                    <Text style={styles.modalDeleteText}>Move to Trash</Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={styles.modalCloseButton}
+                    onPress={closeJobDetails}
+                  >
+                    <Text style={styles.modalCloseText}>Close</Text>
+                  </TouchableOpacity>
+                </ScrollView>
+              </View>
+            </TouchableWithoutFeedback>
+          </KeyboardAvoidingView>
+        </Modal>
+
+        {/* Trash Modal (bottom sheet) */}
+        <Modal
+          visible={isTrashVisible}
+          transparent
+          animationType="slide"
+          onRequestClose={() => setIsTrashVisible(false)}
+        >
+          <KeyboardAvoidingView
+            style={{ flex: 1 }}
+            behavior={Platform.OS === "ios" ? "padding" : "height"}
+            keyboardVerticalOffset={80}
+          >
+            <TouchableWithoutFeedback
+              onPress={Keyboard.dismiss}
+              accessible={false}
             >
-              <Text style={styles.modalCloseText}>Close</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
-    </View>
+              <View style={styles.modalOverlay}>
+                <View style={styles.modalContent}>
+                  <Text style={styles.modalTitle}>Trash</Text>
+
+                  {trashJobs.length === 0 ? (
+                    <Text style={styles.emptyText}>Trash is empty.</Text>
+                  ) : (
+                    <FlatList
+                      data={trashJobs}
+                      keyExtractor={(item) => item.id}
+                      contentContainerStyle={{ paddingBottom: 20 }}
+                      keyboardShouldPersistTaps="handled"
+                      renderItem={({ item }) => (
+                        <View style={styles.trashCard}>
+                          <Text style={styles.trashTitle}>{item.title}</Text>
+                          <Text style={styles.trashAddress}>
+                            {item.address}
+                          </Text>
+                          <Text style={styles.trashDate}>
+                            {new Date(item.createdAt).toLocaleString()}
+                          </Text>
+
+                          <View style={styles.trashButtonRow}>
+                            <TouchableOpacity
+                              style={[
+                                styles.trashActionButton,
+                                styles.trashRestore,
+                              ]}
+                              onPress={() => handleRestoreFromTrash(item.id)}
+                            >
+                              <Text style={styles.trashRestoreText}>
+                                Restore
+                              </Text>
+                            </TouchableOpacity>
+
+                            <TouchableOpacity
+                              style={[
+                                styles.trashActionButton,
+                                styles.trashDeleteForever,
+                              ]}
+                              onPress={() => handleDeleteForever(item.id)}
+                            >
+                              <Text style={styles.trashDeleteText}>
+                                Delete Forever
+                              </Text>
+                            </TouchableOpacity>
+                          </View>
+                        </View>
+                      )}
+                    />
+                  )}
+
+                  <TouchableOpacity
+                    style={styles.modalCloseButton}
+                    onPress={() => setIsTrashVisible(false)}
+                  >
+                    <Text style={styles.modalCloseText}>Close</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            </TouchableWithoutFeedback>
+          </KeyboardAvoidingView>
+        </Modal>
+      </View>
+    </TouchableWithoutFeedback>
   );
 };
 
@@ -751,7 +881,18 @@ const styles = StyleSheet.create({
     textAlign: "center",
     color: "#9CA3AF",
   },
-  // MODAL STYLES
+  // FULL-SCREEN DETAILS
+  detailsScreen: {
+    flex: 1,
+    backgroundColor: "#020617",
+    paddingTop: 56, // 🔥 push content below status bar
+  },
+  detailsScroll: {
+    flexGrow: 1,
+    paddingHorizontal: 16,
+    paddingBottom: 24,
+  },
+  // Bottom-sheet modal (Trash)
   modalOverlay: {
     flex: 1,
     backgroundColor: "rgba(0,0,0,0.6)",
@@ -846,7 +987,7 @@ const styles = StyleSheet.create({
     color: "#9CA3AF",
     fontSize: 13,
   },
-  // TRASH CARD
+  // Trash cards
   trashCard: {
     backgroundColor: "#111827",
     borderRadius: 10,
