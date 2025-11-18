@@ -29,6 +29,7 @@ import {
   View,
 } from "react-native";
 
+import { useRouter } from "expo-router";
 import ImageViewing from "react-native-image-viewing";
 
 type Job = {
@@ -42,13 +43,10 @@ type Job = {
   clientPhone?: string;
   clientNotes?: string;
   photoUris?: string[];
-
-  // 💵 Pricing (optional)
   laborHours?: number;
   hourlyRate?: number;
   materialCost?: number;
 };
-
 
 const initialJobs: Job[] = [
   {
@@ -62,6 +60,9 @@ const initialJobs: Job[] = [
     clientPhone: "555-123-4567",
     clientNotes: "Owner works nights, schedule after 3 PM.",
     photoUris: [],
+    laborHours: 0,
+    hourlyRate: 0,
+    materialCost: 0,
   },
   {
     id: "2",
@@ -74,6 +75,9 @@ const initialJobs: Job[] = [
     clientPhone: "555-987-6543",
     clientNotes: "Busy during lunch, go before 11 AM.",
     photoUris: [],
+    laborHours: 0,
+    hourlyRate: 0,
+    materialCost: 0,
   },
   {
     id: "3",
@@ -86,14 +90,14 @@ const initialJobs: Job[] = [
     clientPhone: "555-222-3333",
     clientNotes: "Garage access via side gate.",
     photoUris: [],
+    laborHours: 0,
+    hourlyRate: 0,
+    materialCost: 0,
   },
 ];
 
 const sortOptions = ["Newest", "Oldest", "A-Z", "Z-A"] as const;
 type SortOption = (typeof sortOptions)[number];
-
-// 🔵 Status filter options
-type FilterOption = "All" | "Open" | "Done";
 
 const STORAGE_KEYS = {
   JOBS: "EJT_JOBS",
@@ -120,6 +124,8 @@ const THUMB_SIZE =
   GRID_COLUMNS;
 
 const HomeScreen: FC = () => {
+  const router = useRouter();
+
   // MAIN DATA
   const [jobs, setJobs] = useState<Job[]>(initialJobs);
   const [trashJobs, setTrashJobs] = useState<Job[]>([]);
@@ -129,9 +135,6 @@ const HomeScreen: FC = () => {
   const [sortOption, setSortOption] = useState<SortOption>("Newest");
   const [isSortMenuVisible, setIsSortMenuVisible] = useState(false);
 
-  // 🔵 Status filter
-  const [filterOption, setFilterOption] = useState<FilterOption>("All");
-
   // Add Job form
   const [isAddFormVisible, setIsAddFormVisible] = useState(false);
   const [newTitle, setNewTitle] = useState("");
@@ -140,8 +143,11 @@ const HomeScreen: FC = () => {
   const [newClientName, setNewClientName] = useState("");
   const [newClientPhone, setNewClientPhone] = useState("");
   const [newClientNotes, setNewClientNotes] = useState("");
+  const [newLaborHours, setNewLaborHours] = useState("");
+  const [newHourlyRate, setNewHourlyRate] = useState("");
+  const [newMaterialCost, setNewMaterialCost] = useState("");
 
-  // Job details
+  // Job details (modal) – still in file but not used by card tap now
   const [selectedJob, setSelectedJob] = useState<Job | null>(null);
   const [isDetailsVisible, setIsDetailsVisible] = useState(false);
   const [editTitle, setEditTitle] = useState("");
@@ -150,22 +156,11 @@ const HomeScreen: FC = () => {
   const [editClientName, setEditClientName] = useState("");
   const [editClientPhone, setEditClientPhone] = useState("");
   const [editClientNotes, setEditClientNotes] = useState("");
-    // Pricing (edit fields as strings so TextInput is happy)
-    const [editLaborHours, setEditLaborHours] = useState("");
-    const [editHourlyRate, setEditHourlyRate] = useState("");
-    const [editMaterialCost, setEditMaterialCost] = useState("");
-      // Live pricing numbers for display
-  const laborHoursNum =
-  Number(editLaborHours.replace(/,/g, "").trim()) || 0;
-const hourlyRateNum =
-  Number(editHourlyRate.replace(/,/g, "").trim()) || 0;
-const materialCostNum =
-  Number(editMaterialCost.replace(/,/g, "").trim()) || 0;
 
-const laborTotal = laborHoursNum * hourlyRateNum;
-const jobTotal = laborTotal + materialCostNum;
-
-  
+  // Pricing in edit modal (optional – still wired for later)
+  const [editLaborHours, setEditLaborHours] = useState("");
+  const [editHourlyRate, setEditHourlyRate] = useState("");
+  const [editMaterialCost, setEditMaterialCost] = useState("");
 
   // Trash
   const [isTrashVisible, setIsTrashVisible] = useState(false);
@@ -184,9 +179,7 @@ const jobTotal = laborTotal + materialCostNum;
   // Add Photo mini menu
   const [isAddPhotoMenuVisible, setIsAddPhotoMenuVisible] = useState(false);
 
-  // ----------------------------
-  // 🔥 Button animation values
-  // ----------------------------
+  // Button animation values
   const markDoneScale = useRef(new Animated.Value(1)).current;
   const saveChangesScale = useRef(new Animated.Value(1)).current;
 
@@ -222,7 +215,6 @@ const jobTotal = laborTotal + materialCostNum;
   const visibleJobs = useMemo(() => {
     let data = [...jobs];
 
-    // 🔎 search
     if (searchQuery.trim().length > 0) {
       const q = searchQuery.toLowerCase();
       data = data.filter((job) => {
@@ -238,14 +230,6 @@ const jobTotal = laborTotal + materialCostNum;
       });
     }
 
-    // ✅ status filter
-    if (filterOption === "Open") {
-      data = data.filter((job) => !job.isDone);
-    } else if (filterOption === "Done") {
-      data = data.filter((job) => job.isDone);
-    }
-
-    // 🔽 sorting
     data.sort((a, b) => {
       if (sortOption === "Newest") {
         return (
@@ -267,7 +251,7 @@ const jobTotal = laborTotal + materialCostNum;
     });
 
     return data;
-  }, [jobs, searchQuery, sortOption, filterOption]);
+  }, [jobs, searchQuery, sortOption]);
 
   // -------- ADD JOB --------
 
@@ -278,6 +262,10 @@ const jobTotal = laborTotal + materialCostNum;
 
   const handleSaveNewJob = () => {
     if (!newTitle.trim()) return;
+
+    const laborHours = parseFloat(newLaborHours) || 0;
+    const hourlyRate = parseFloat(newHourlyRate) || 0;
+    const materialCost = parseFloat(newMaterialCost) || 0;
 
     const job: Job = {
       id: Date.now().toString(),
@@ -291,6 +279,9 @@ const jobTotal = laborTotal + materialCostNum;
       clientPhone: newClientPhone.trim() || undefined,
       clientNotes: newClientNotes.trim() || undefined,
       photoUris: [],
+      laborHours,
+      hourlyRate,
+      materialCost,
     };
 
     LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
@@ -302,12 +293,16 @@ const jobTotal = laborTotal + materialCostNum;
     setNewClientName("");
     setNewClientPhone("");
     setNewClientNotes("");
+    setNewLaborHours("");
+    setNewHourlyRate("");
+    setNewMaterialCost("");
     setIsAddFormVisible(false);
     Keyboard.dismiss();
     Alert.alert("Job saved", "New job has been added.");
   };
 
-  // -------- JOB DETAILS --------
+  // -------- JOB DETAILS (modal) – still here but not used from list tap --------
+
   const openJobDetails = (job: Job) => {
     setSelectedJob(job);
     setEditTitle(job.title);
@@ -316,8 +311,6 @@ const jobTotal = laborTotal + materialCostNum;
     setEditClientName(job.clientName || "");
     setEditClientPhone(job.clientPhone || "");
     setEditClientNotes(job.clientNotes || "");
-
-    // 💵 Load pricing into editable strings
     setEditLaborHours(
       job.laborHours !== undefined ? String(job.laborHours) : ""
     );
@@ -327,11 +320,9 @@ const jobTotal = laborTotal + materialCostNum;
     setEditMaterialCost(
       job.materialCost !== undefined ? String(job.materialCost) : ""
     );
-
     setIsDetailsVisible(true);
     Keyboard.dismiss();
   };
-
 
   const closeJobDetails = () => {
     setIsDetailsVisible(false);
@@ -344,14 +335,6 @@ const jobTotal = laborTotal + materialCostNum;
   const handleSaveJobEdits = () => {
     if (!selectedJob) return;
 
-    // Helper to safely parse a number
-    const parseNum = (value: string): number | undefined => {
-      const cleaned = value.replace(/,/g, "").trim();
-      if (!cleaned) return undefined;
-      const n = Number(cleaned);
-      return Number.isNaN(n) ? undefined : n;
-    };
-
     const updated: Job = {
       ...selectedJob,
       title: editTitle.trim() || selectedJob.title,
@@ -360,11 +343,9 @@ const jobTotal = laborTotal + materialCostNum;
       clientName: editClientName.trim() || undefined,
       clientPhone: editClientPhone.trim() || undefined,
       clientNotes: editClientNotes.trim() || undefined,
-
-      // 💵 pricing
-      laborHours: parseNum(editLaborHours),
-      hourlyRate: parseNum(editHourlyRate),
-      materialCost: parseNum(editMaterialCost),
+      laborHours: parseFloat(editLaborHours) || 0,
+      hourlyRate: parseFloat(editHourlyRate) || 0,
+      materialCost: parseFloat(editMaterialCost) || 0,
     };
 
     setJobs((prev) =>
@@ -374,7 +355,6 @@ const jobTotal = laborTotal + materialCostNum;
     closeJobDetails();
     Alert.alert("Changes saved", "Job details updated successfully.");
   };
-
 
   const handleToggleDoneInDetails = () => {
     if (!selectedJob) return;
@@ -387,7 +367,7 @@ const jobTotal = laborTotal + materialCostNum;
     setSelectedJob(updated);
   };
 
-  // -------- PHOTOS --------
+  // -------- PHOTOS (modal) – still wired to selectedJob --------
 
   const handleAddPhotoToJob = (uri: string) => {
     if (!selectedJob) return;
@@ -455,7 +435,6 @@ const jobTotal = laborTotal + materialCostNum;
     handleAddPhotoToJob(uri);
   };
 
-  // 🔴 Now with confirmation before delete
   const handleRemovePhotoFromJob = (uriToRemove: string) => {
     if (!selectedJob) return;
 
@@ -624,20 +603,31 @@ const jobTotal = laborTotal + materialCostNum;
       <View style={styles.container}>
         {/* HEADER */}
         <View style={styles.headerRow}>
-          <Text style={styles.header}>TESTING HOME SCREEN 999</Text>
-          <TouchableOpacity
-            style={styles.trashButton}
-            onPress={() => {
-              setIsTrashVisible(true);
-              Keyboard.dismiss();
-            }}
-            activeOpacity={0.8}
-          >
-            <Text style={styles.trashButtonText}>
-              Trash ({trashJobs.length})
-            </Text>
-          </TouchableOpacity>
-        </View>
+  <Text style={styles.header}>TESTING HOME SCREEN 99</Text>
+
+  <View style={styles.headerActionsRow}>
+    <TouchableOpacity
+      style={styles.settingsButton}
+      onPress={() => router.push("/settings")}
+      activeOpacity={0.8}
+    >
+      <Text style={styles.settingsButtonText}>Settings</Text>
+    </TouchableOpacity>
+
+    <TouchableOpacity
+      style={styles.trashButton}
+      onPress={() => {
+        setIsTrashVisible(true);
+        Keyboard.dismiss();
+      }}
+      activeOpacity={0.8}
+    >
+      <Text style={styles.trashButtonText}>
+        Trash ({trashJobs.length})
+      </Text>
+    </TouchableOpacity>
+  </View>
+</View>
 
         {/* SEARCH + SORT */}
         <View style={styles.controlsRow}>
@@ -687,33 +677,6 @@ const jobTotal = laborTotal + materialCostNum;
               </View>
             )}
           </View>
-        </View>
-
-        {/* FILTER CHIPS */}
-        <View style={styles.filterRow}>
-          {(["All", "Open", "Done"] as FilterOption[]).map((option) => {
-            const isActive = filterOption === option;
-            return (
-              <TouchableOpacity
-                key={option}
-                style={[
-                  styles.filterChip,
-                  isActive && styles.filterChipActive,
-                ]}
-                onPress={() => setFilterOption(option)}
-                activeOpacity={0.9}
-              >
-                <Text
-                  style={[
-                    styles.filterChipText,
-                    isActive && styles.filterChipTextActive,
-                  ]}
-                >
-                  {option}
-                </Text>
-              </TouchableOpacity>
-            );
-          })}
         </View>
 
         {/* ADD NEW JOB BUTTON */}
@@ -795,6 +758,42 @@ const jobTotal = laborTotal + materialCostNum;
               multiline
             />
 
+            {/* PRICING SECTION */}
+            <Text style={styles.addFormSectionTitle}>Pricing (optional)</Text>
+
+            <Text style={styles.addFormLabel}>Labor Hours</Text>
+            <TextInput
+              style={styles.addFormInput}
+              placeholder="Ex: 4.5"
+              placeholderTextColor="#6B7280"
+              value={newLaborHours}
+              onChangeText={setNewLaborHours}
+              keyboardType="numeric"
+              returnKeyType="next"
+            />
+
+            <Text style={styles.addFormLabel}>Hourly Rate ($/hr)</Text>
+            <TextInput
+              style={styles.addFormInput}
+              placeholder="Ex: 120"
+              placeholderTextColor="#6B7280"
+              value={newHourlyRate}
+              onChangeText={setNewHourlyRate}
+              keyboardType="numeric"
+              returnKeyType="next"
+            />
+
+            <Text style={styles.addFormLabel}>Material Cost ($)</Text>
+            <TextInput
+              style={styles.addFormInput}
+              placeholder="Ex: 350"
+              placeholderTextColor="#6B7280"
+              value={newMaterialCost}
+              onChangeText={setNewMaterialCost}
+              keyboardType="numeric"
+              returnKeyType="done"
+            />
+
             <TouchableOpacity
               style={styles.saveJobButton}
               onPress={handleSaveNewJob}
@@ -818,8 +817,25 @@ const jobTotal = laborTotal + materialCostNum;
 
             return (
               <TouchableOpacity
-                onPress={() => openJobDetails(item)}
                 activeOpacity={0.9}
+                onPress={() => {
+                  router.push({
+                    pathname: "/job-detail",
+                    params: {
+                      id: item.id,
+                      title: item.title,
+                      address: item.address,
+                      description: item.description,
+                      clientName: item.clientName ?? "",
+                      clientPhone: item.clientPhone ?? "",
+                      clientNotes: item.clientNotes ?? "",
+                      createdAt: item.createdAt,
+                      isDone: String(item.isDone),
+                      jobTotal: String(jobTotal),
+                      photoCount: String(item.photoUris?.length ?? 0),
+                    },
+                  });
+                }}
               >
                 <View
                   style={[
@@ -915,13 +931,12 @@ const jobTotal = laborTotal + materialCostNum;
               </TouchableOpacity>
             );
           }}
-
           ListEmptyComponent={
             <Text style={styles.emptyText}>No jobs match your search.</Text>
           }
         />
 
-        {/* JOB DETAILS SCREEN (FULL) */}
+        {/* JOB DETAILS SCREEN (FULL MODAL) – still here for now, not triggered from list */}
         <Modal
           visible={isDetailsVisible}
           animationType="slide"
@@ -1026,47 +1041,45 @@ const jobTotal = laborTotal + materialCostNum;
                         }
                       }}
                     />
-                            {/* 💵 Pricing */}
-        <Text style={styles.detailsSectionTitle}>Pricing (optional)</Text>
 
-<Text style={styles.modalLabel}>Labor hours</Text>
-<TextInput
-  style={styles.modalInput}
-  value={editLaborHours}
-  onChangeText={setEditLaborHours}
-  placeholder="e.g. 4"
-  placeholderTextColor="#6B7280"
-  keyboardType="numeric"
-/>
+                    {/* Pricing in details */}
+                    <Text style={styles.detailsSectionTitle}>
+                      Pricing
+                    </Text>
 
-<Text style={styles.modalLabel}>Hourly rate ($)</Text>
-<TextInput
-  style={styles.modalInput}
-  value={editHourlyRate}
-  onChangeText={setEditHourlyRate}
-  placeholder="e.g. 120"
-  placeholderTextColor="#6B7280"
-  keyboardType="numeric"
-/>
+                    <Text style={styles.modalLabel}>Labor Hours</Text>
+                    <TextInput
+                      style={styles.modalInput}
+                      value={editLaborHours}
+                      onChangeText={setEditLaborHours}
+                      placeholder="Ex: 4.5"
+                      placeholderTextColor="#6B7280"
+                      keyboardType="numeric"
+                    />
 
-<Text style={styles.modalLabel}>Material cost ($)</Text>
-<TextInput
-  style={styles.modalInput}
-  value={editMaterialCost}
-  onChangeText={setEditMaterialCost}
-  placeholder="e.g. 300"
-  placeholderTextColor="#6B7280"
-  keyboardType="numeric"
-/>
+                    <Text style={styles.modalLabel}>
+                      Hourly Rate ($/hr)
+                    </Text>
+                    <TextInput
+                      style={styles.modalInput}
+                      value={editHourlyRate}
+                      onChangeText={setEditHourlyRate}
+                      placeholder="Ex: 120"
+                      placeholderTextColor="#6B7280"
+                      keyboardType="numeric"
+                    />
 
-{/* Live totals */}
-<Text style={styles.pricingTotalText}>
-  Labor total: ${laborTotal.toFixed(2)}
-</Text>
-<Text style={styles.pricingTotalText}>
-  Job total: ${jobTotal.toFixed(2)}
-</Text>
-
+                    <Text style={styles.modalLabel}>
+                      Material Cost ($)
+                    </Text>
+                    <TextInput
+                      style={styles.modalInput}
+                      value={editMaterialCost}
+                      onChangeText={setEditMaterialCost}
+                      placeholder="Ex: 350"
+                      placeholderTextColor="#6B7280"
+                      keyboardType="numeric"
+                    />
 
                     {/* Photos */}
                     <Text style={styles.detailsSectionTitle}>Photos</Text>
@@ -1149,7 +1162,10 @@ const jobTotal = laborTotal + materialCostNum;
                                               }
                                             >
                                               +{" "}
-                                              {extraCount} more
+                                              {
+                                                extraCount
+                                              }{" "}
+                                              more
                                             </Text>
                                           </View>
                                         )}
@@ -1230,9 +1246,7 @@ const jobTotal = laborTotal + materialCostNum;
                       <Animated.View
                         style={{
                           flex: 1,
-                          transform: [
-                            { scale: saveChangesScale },
-                          ],
+                          transform: [{ scale: saveChangesScale }],
                         }}
                       >
                         <TouchableOpacity
@@ -1265,15 +1279,13 @@ const jobTotal = laborTotal + materialCostNum;
                       style={styles.modalCloseButton}
                       onPress={closeJobDetails}
                     >
-                      <Text style={styles.modalCloseText}>
-                        Close
-                      </Text>
+                      <Text style={styles.modalCloseText}>Close</Text>
                     </TouchableOpacity>
                   </View>
                 </TouchableWithoutFeedback>
               </ScrollView>
 
-              {/* 📸 Add Photo sheet: Camera / Gallery */}
+              {/* Add Photo sheet */}
               {isAddPhotoMenuVisible && (
                 <View style={styles.addPhotoMenuOverlay}>
                   <TouchableWithoutFeedback
@@ -1297,9 +1309,7 @@ const jobTotal = laborTotal + materialCostNum;
                       }}
                       activeOpacity={0.9}
                     >
-                      <Text
-                        style={styles.addPhotoMenuOptionText}
-                      >
+                      <Text style={styles.addPhotoMenuOptionText}>
                         📸 Take Photo
                       </Text>
                     </TouchableOpacity>
@@ -1312,9 +1322,7 @@ const jobTotal = laborTotal + materialCostNum;
                       }}
                       activeOpacity={0.9}
                     >
-                      <Text
-                        style={styles.addPhotoMenuOptionText}
-                      >
+                      <Text style={styles.addPhotoMenuOptionText}>
                         🖼️ Choose from Gallery
                       </Text>
                     </TouchableOpacity>
@@ -1326,9 +1334,7 @@ const jobTotal = laborTotal + materialCostNum;
                       }
                       activeOpacity={0.8}
                     >
-                      <Text
-                        style={styles.addPhotoMenuCancelText}
-                      >
+                      <Text style={styles.addPhotoMenuCancelText}>
                         Cancel
                       </Text>
                     </TouchableOpacity>
@@ -1336,7 +1342,7 @@ const jobTotal = laborTotal + materialCostNum;
                 </View>
               )}
 
-              {/* 🔥 Fullscreen viewer with pinch + swipe */}
+              {/* Fullscreen viewer with pinch + swipe */}
               {selectedJob?.photoUris &&
                 selectedJob.photoUris.length > 0 && (
                   <ImageViewing
@@ -1376,16 +1382,12 @@ const jobTotal = laborTotal + materialCostNum;
                   <Text style={styles.modalTitle}>Trash</Text>
 
                   {trashJobs.length === 0 ? (
-                    <Text style={styles.emptyText}>
-                      Trash is empty.
-                    </Text>
+                    <Text style={styles.emptyText}>Trash is empty.</Text>
                   ) : (
                     <FlatList
                       data={trashJobs}
                       keyExtractor={(item) => item.id}
-                      contentContainerStyle={{
-                        paddingBottom: 20,
-                      }}
+                      contentContainerStyle={{ paddingBottom: 20 }}
                       keyboardShouldPersistTaps="handled"
                       renderItem={({ item }) => (
                         <View style={styles.trashCard}>
@@ -1416,9 +1418,7 @@ const jobTotal = laborTotal + materialCostNum;
                                 handleRestoreFromTrash(item.id)
                               }
                             >
-                              <Text
-                                style={styles.trashRestoreText}
-                              >
+                              <Text style={styles.trashRestoreText}>
                                 Restore
                               </Text>
                             </TouchableOpacity>
@@ -1432,9 +1432,7 @@ const jobTotal = laborTotal + materialCostNum;
                                 handleDeleteForever(item.id)
                               }
                             >
-                              <Text
-                                style={styles.trashDeleteText}
-                              >
+                              <Text style={styles.trashDeleteText}>
                                 Delete Forever
                               </Text>
                             </TouchableOpacity>
@@ -1496,7 +1494,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 8,
-    marginBottom: 8,
+    marginBottom: 12,
   },
   searchContainer: {
     flex: 1,
@@ -1546,35 +1544,6 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     textDecorationLine: "underline",
   },
-
-  // 🔵 filter chips
-  filterRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginBottom: 8,
-    gap: 8,
-  },
-  filterChip: {
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 999,
-    backgroundColor: "#111827",
-    borderWidth: 1,
-    borderColor: "#4B5563",
-  },
-  filterChipActive: {
-    backgroundColor: "#2563EB",
-    borderColor: "#2563EB",
-  },
-  filterChipText: {
-    color: "#E5E7EB",
-    fontSize: 12,
-    fontWeight: "600",
-  },
-  filterChipTextActive: {
-    color: "#FFFFFF",
-  },
-
   addJobButton: {
     backgroundColor: "#2563EB",
     borderRadius: 12,
@@ -1682,6 +1651,11 @@ const styles = StyleSheet.create({
     color: "#E5E7EB",
     marginBottom: 2,
   },
+  jobAmount: {
+    fontSize: 12,
+    color: "#FCD34D",
+    marginBottom: 2,
+  },
   jobDate: {
     fontSize: 11,
     color: "#6B7280",
@@ -1779,13 +1753,6 @@ const styles = StyleSheet.create({
     color: "#9CA3AF",
     marginBottom: 2,
   },
-  pricingTotalText: {
-    fontSize: 13,
-    color: "#F9FAFB",
-    marginBottom: 4,
-    fontWeight: "600",
-  },
-
   modalButtonRow: {
     flexDirection: "row",
     justifyContent: "space-between",
@@ -1960,7 +1927,7 @@ const styles = StyleSheet.create({
     color: "#FCA5A5",
     fontWeight: "600",
   },
-  // Fullscreen image overlay with swipe
+  // Fullscreen image overlay with swipe (old style – now handled by ImageViewing)
   fullImageOverlay: {
     position: "absolute",
     top: 0,
@@ -2056,10 +2023,24 @@ const styles = StyleSheet.create({
     fontSize: 13,
     textAlign: "center",
   },
-  jobAmount: {
-    fontSize: 12,
-    color: "#FACC15",
-    marginBottom: 2,
+  headerActionsRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  settingsButton: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 999,
+    backgroundColor: "#111827",
+    borderWidth: 1,
+    borderColor: "#374151",
+    marginRight: 4,
+  },
+  settingsButtonText: {
+    fontSize: 11,
+    color: "#E5E7EB",
+    fontWeight: "500",
   },
 
 });
