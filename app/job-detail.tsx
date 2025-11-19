@@ -22,7 +22,7 @@ import {
 } from "react-native";
 import ImageViewing from "react-native-image-viewing";
 
-// 👇 Job shape must match home.tsx
+// 👇 Job shape must match home.tsx / add-job.tsx
 type Job = {
   id: string;
   title: string;
@@ -75,7 +75,7 @@ export default function JobDetailScreen() {
 
   const [photoUris, setPhotoUris] = useState<string[]>([]);
 
-  // 🔹 Scroll helpers – for ALL fields
+  // 🔹 Scroll + keyboard handling (unified like add-job)
   const scrollRef = useRef<ScrollView | null>(null);
   const sectionPositions = useRef<Record<string, number>>({});
 
@@ -123,6 +123,17 @@ export default function JobDetailScreen() {
 
   const markDoneAnim = createScaleHandlers(markDoneScale);
   const saveChangesAnim = createScaleHandlers(saveChangesScale);
+
+  // 🔹 Screen zoom (same vibe as Home: 1.04 → 1.0)
+  const screenScale = useRef(new Animated.Value(1.04)).current;
+
+  useEffect(() => {
+    Animated.timing(screenScale, {
+      toValue: 1,
+      duration: 200,
+      useNativeDriver: true,
+    }).start();
+  }, [screenScale]);
 
   // ---------- Load job from storage ----------
   useEffect(() => {
@@ -282,44 +293,50 @@ export default function JobDetailScreen() {
   const confirmMoveToTrash = () => {
     if (!job) return;
 
-    Alert.alert("Move to Trash", "Are you sure you want to move this job to Trash?", [
-      { text: "Cancel", style: "cancel" },
-      {
-        text: "Move",
-        style: "destructive",
-        onPress: async () => {
-          try {
-            const [jobsJson, trashJson] = await Promise.all([
-              AsyncStorage.getItem(STORAGE_KEYS.JOBS),
-              AsyncStorage.getItem(STORAGE_KEYS.TRASH),
-            ]);
+    Alert.alert(
+      "Move to Trash",
+      "Are you sure you want to move this job to Trash?",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Move",
+          style: "destructive",
+          onPress: async () => {
+            try {
+              const [jobsJson, trashJson] = await Promise.all([
+                AsyncStorage.getItem(STORAGE_KEYS.JOBS),
+                AsyncStorage.getItem(STORAGE_KEYS.TRASH),
+              ]);
 
-            const jobs: Job[] = jobsJson ? JSON.parse(jobsJson) : [];
-            const trash: Job[] = trashJson ? JSON.parse(trashJson) : [];
+              const jobs: Job[] = jobsJson ? JSON.parse(jobsJson) : [];
+              const trash: Job[] = trashJson ? JSON.parse(trashJson) : [];
 
-            const remaining = jobs.filter((j) => j.id !== job.id);
-            const newTrash = [...trash, job];
+              const remaining = jobs.filter((j) => j.id !== job.id);
+              const newTrash = [...trash, job];
 
-            LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-            await Promise.all([
-              AsyncStorage.setItem(
-                STORAGE_KEYS.JOBS,
-                JSON.stringify(remaining)
-              ),
-              AsyncStorage.setItem(
-                STORAGE_KEYS.TRASH,
-                JSON.stringify(newTrash)
-              ),
-            ]);
+              LayoutAnimation.configureNext(
+                LayoutAnimation.Presets.easeInEaseOut
+              );
+              await Promise.all([
+                AsyncStorage.setItem(
+                  STORAGE_KEYS.JOBS,
+                  JSON.stringify(remaining)
+                ),
+                AsyncStorage.setItem(
+                  STORAGE_KEYS.TRASH,
+                  JSON.stringify(newTrash)
+                ),
+              ]);
 
-            router.back();
-          } catch (e) {
-            console.warn("Failed to move to trash:", e);
-            Alert.alert("Error", "Could not move job to Trash.");
-          }
+              router.back();
+            } catch (e) {
+              console.warn("Failed to move to trash:", e);
+              Alert.alert("Error", "Could not move job to Trash.");
+            }
+          },
         },
-      },
-    ]);
+      ]
+    );
   };
 
   // ---------- Photos ----------
@@ -344,15 +361,21 @@ export default function JobDetailScreen() {
 
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      allowsMultipleSelection: false,
+      allowsMultipleSelection: true, // allow multi like Add Job
       quality: 0.7,
     });
 
-    if (result.canceled) return;
-    const uri = result.assets[0]?.uri;
-    if (!uri) return;
+    if (result.canceled || !result.assets?.length) return;
 
-    handleAddPhotoToLocal(uri);
+    const uris = result.assets
+      .map((asset) => asset.uri)
+      .filter(Boolean) as string[];
+
+    setPhotoUris((prev) => {
+      const next = [...prev, ...uris];
+      LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+      return next;
+    });
   };
 
   const handleAddPhotoFromCamera = async () => {
@@ -416,7 +439,10 @@ export default function JobDetailScreen() {
     return (
       <View style={styles.loadingScreen}>
         <Text style={styles.loadingText}>Job not found.</Text>
-        <TouchableOpacity style={styles.simpleButton} onPress={() => router.back()}>
+        <TouchableOpacity
+          style={styles.simpleButton}
+          onPress={() => router.back()}
+        >
           <Text style={styles.simpleButtonText}>Back</Text>
         </TouchableOpacity>
       </View>
@@ -429,7 +455,12 @@ export default function JobDetailScreen() {
       behavior={Platform.OS === "ios" ? "padding" : "height"}
       keyboardVerticalOffset={Platform.OS === "ios" ? 20 : 0}
     >
-      <View style={styles.detailsScreen}>
+      <Animated.View
+        style={[
+          styles.detailsScreen,
+          { transform: [{ scale: screenScale }] },
+        ]}
+      >
         {/* Header */}
         <View style={styles.headerRow}>
           <TouchableOpacity
@@ -450,13 +481,22 @@ export default function JobDetailScreen() {
           showsVerticalScrollIndicator={false}
           onScrollBeginDrag={Keyboard.dismiss}
         >
-          <TouchableWithoutFeedback onPress={Keyboard.dismiss} accessible={false}>
+          <TouchableWithoutFeedback
+            onPress={Keyboard.dismiss}
+            accessible={false}
+          >
             <View>
               {/* Job ID */}
-              <Text style={styles.sectionTitle}>Job ID</Text>
-              <Text style={styles.infoText}>{job.id}</Text>
+              <View
+                onLayout={(e) =>
+                  registerSection("jobId", e.nativeEvent.layout.y)
+                }
+              >
+                <Text style={styles.sectionTitle}>Job ID</Text>
+                <Text style={styles.infoText}>{job.id}</Text>
+              </View>
 
-              {/* TITLE */}
+              {/* Title */}
               <View
                 onLayout={(e) =>
                   registerSection("title", e.nativeEvent.layout.y)
@@ -472,7 +512,7 @@ export default function JobDetailScreen() {
                 />
               </View>
 
-              {/* ADDRESS */}
+              {/* Address */}
               <View
                 onLayout={(e) =>
                   registerSection("address", e.nativeEvent.layout.y)
@@ -488,7 +528,7 @@ export default function JobDetailScreen() {
                 />
               </View>
 
-              {/* DESCRIPTION */}
+              {/* Description */}
               <View
                 onLayout={(e) =>
                   registerSection("description", e.nativeEvent.layout.y)
@@ -506,40 +546,50 @@ export default function JobDetailScreen() {
               </View>
 
               {/* Status */}
-              <Text style={styles.sectionTitle}>Status</Text>
-              <Text style={styles.infoText}>{isDone ? "Done" : "Open"}</Text>
-
-              {/* Quick Actions */}
-              <View style={styles.quickActionsRow}>
-                {!!editClientPhone.trim() && (
-                  <TouchableOpacity
-                    style={styles.quickActionButton}
-                    onPress={handleCallClient}
-                    activeOpacity={0.9}
-                  >
-                    <Text style={styles.quickActionText}>📞 Call Client</Text>
-                  </TouchableOpacity>
-                )}
-
-                {!!editAddress.trim() && (
-                  <TouchableOpacity
-                    style={styles.quickActionButton}
-                    onPress={handleOpenInMaps}
-                    activeOpacity={0.9}
-                  >
-                    <Text style={styles.quickActionText}>📍 Open in Maps</Text>
-                  </TouchableOpacity>
-                )}
-              </View>
-
-              {/* CLIENT INFO */}
-              <Text style={styles.sectionTitle}>Client Info</Text>
-
               <View
                 onLayout={(e) =>
-                  registerSection("clientName", e.nativeEvent.layout.y)
+                  registerSection("status", e.nativeEvent.layout.y)
                 }
               >
+                <Text style={styles.sectionTitle}>Status</Text>
+                <Text style={styles.infoText}>
+                  {isDone ? "Done" : "Open"}
+                </Text>
+
+                {/* Quick Actions */}
+                <View style={styles.quickActionsRow}>
+                  {!!editClientPhone.trim() && (
+                    <TouchableOpacity
+                      style={styles.quickActionButton}
+                      onPress={handleCallClient}
+                      activeOpacity={0.9}
+                    >
+                      <Text style={styles.quickActionText}>📞 Call Client</Text>
+                    </TouchableOpacity>
+                  )}
+
+                  {!!editAddress.trim() && (
+                    <TouchableOpacity
+                      style={styles.quickActionButton}
+                      onPress={handleOpenInMaps}
+                      activeOpacity={0.9}
+                    >
+                      <Text style={styles.quickActionText}>
+                        📍 Open in Maps
+                      </Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
+              </View>
+
+              {/* Client Info */}
+              <View
+                onLayout={(e) =>
+                  registerSection("client", e.nativeEvent.layout.y)
+                }
+              >
+                <Text style={styles.sectionTitle}>Client Info</Text>
+
                 <Text style={styles.modalLabel}>Client Name</Text>
                 <TextInput
                   style={styles.modalInput}
@@ -547,15 +597,9 @@ export default function JobDetailScreen() {
                   onChangeText={setEditClientName}
                   placeholder="Client name..."
                   placeholderTextColor="#6B7280"
-                  onFocus={() => scrollToSection("clientName")}
+                  onFocus={() => scrollToSection("client")}
                 />
-              </View>
 
-              <View
-                onLayout={(e) =>
-                  registerSection("clientPhone", e.nativeEvent.layout.y)
-                }
-              >
                 <Text style={styles.modalLabel}>Client Phone</Text>
                 <TextInput
                   style={styles.modalInput}
@@ -564,15 +608,9 @@ export default function JobDetailScreen() {
                   placeholder="Phone number..."
                   placeholderTextColor="#6B7280"
                   keyboardType="phone-pad"
-                  onFocus={() => scrollToSection("clientPhone")}
+                  onFocus={() => scrollToSection("client")}
                 />
-              </View>
 
-              <View
-                onLayout={(e) =>
-                  registerSection("clientNotes", e.nativeEvent.layout.y)
-                }
-              >
                 <Text style={styles.modalLabel}>Client Notes</Text>
                 <TextInput
                   style={styles.modalInputMultiline}
@@ -581,156 +619,154 @@ export default function JobDetailScreen() {
                   placeholder="Gate codes, timing, special info..."
                   placeholderTextColor="#6B7280"
                   multiline
-                  onFocus={() => scrollToSection("clientNotes")}
+                  onFocus={() => scrollToSection("client")}
                 />
               </View>
 
-              {/* PRICING */}
-              <Text style={styles.sectionTitle}>Pricing</Text>
-
+              {/* Pricing */}
               <View
-                style={styles.pricingCard}
+                onLayout={(e) =>
+                  registerSection("pricing", e.nativeEvent.layout.y)
+                }
               >
-                {/* BIG TOTAL at the top */}
-                <View style={styles.pricingTotalHeader}>
-                  <Text style={styles.pricingTotalHeaderLabel}>Total</Text>
-                  <Text style={styles.pricingTotalHeaderValue}>
-                    $
-                    {totalAmount.toLocaleString("en-US", {
-                      minimumFractionDigits: 2,
-                    })}
-                  </Text>
-                </View>
+                <Text style={styles.sectionTitle}>Pricing</Text>
 
-                {/* Inputs in a grid */}
-                <View style={styles.pricingInputsRow}>
-                  <View
-                    style={styles.pricingColumn}
-                    onLayout={(e) =>
-                      registerSection("laborHours", e.nativeEvent.layout.y)
-                    }
-                  >
-                    <Text style={styles.modalLabel}>Labor hours</Text>
+                <View style={styles.pricingCard}>
+                  {/* BIG TOTAL at the top */}
+                  <View style={styles.pricingTotalHeader}>
+                    <Text style={styles.pricingTotalHeaderLabel}>Total</Text>
+                    <Text style={styles.pricingTotalHeaderValue}>
+                      $
+                      {totalAmount.toLocaleString("en-US", {
+                        minimumFractionDigits: 2,
+                      })}
+                    </Text>
+                  </View>
+
+                  {/* Inputs in a grid */}
+                  <View style={styles.pricingInputsRow}>
+                    <View style={styles.pricingColumn}>
+                      <Text style={styles.modalLabel}>Labor hours</Text>
+                      <TextInput
+                        style={[styles.modalInput, styles.pricingInput]}
+                        value={laborHours}
+                        onChangeText={setLaborHours}
+                        keyboardType="numeric"
+                        placeholder="e.g. 4"
+                        placeholderTextColor="#6B7280"
+                        onFocus={() => scrollToSection("pricing")}
+                      />
+                    </View>
+
+                    <View style={styles.pricingColumn}>
+                      <Text style={styles.modalLabel}>Hourly rate</Text>
+                      <TextInput
+                        style={[styles.modalInput, styles.pricingInput]}
+                        value={hourlyRate}
+                        onChangeText={setHourlyRate}
+                        keyboardType="numeric"
+                        placeholder="e.g. 125"
+                        placeholderTextColor="#6B7280"
+                        onFocus={() => scrollToSection("pricing")}
+                      />
+                    </View>
+                  </View>
+
+                  <View style={styles.pricingSingleRow}>
+                    <Text style={styles.modalLabel}>Material cost</Text>
                     <TextInput
                       style={[styles.modalInput, styles.pricingInput]}
-                      value={laborHours}
-                      onChangeText={setLaborHours}
+                      value={materialCost}
+                      onChangeText={setMaterialCost}
                       keyboardType="numeric"
-                      placeholder="e.g. 4"
+                      placeholder="e.g. 300"
                       placeholderTextColor="#6B7280"
-                      onFocus={() => scrollToSection("laborHours")}
+                      onFocus={() => scrollToSection("pricing")}
                     />
                   </View>
 
-                  <View
-                    style={styles.pricingColumn}
-                    onLayout={(e) =>
-                      registerSection("hourlyRate", e.nativeEvent.layout.y)
-                    }
-                  >
-                    <Text style={styles.modalLabel}>Hourly rate</Text>
-                    <TextInput
-                      style={[styles.modalInput, styles.pricingInput]}
-                      value={hourlyRate}
-                      onChangeText={setHourlyRate}
-                      keyboardType="numeric"
-                      placeholder="e.g. 125"
-                      placeholderTextColor="#6B7280"
-                      onFocus={() => scrollToSection("hourlyRate")}
-                    />
-                  </View>
-                </View>
+                  {/* Read-style breakdown */}
+                  <View style={styles.pricingSummaryBox}>
+                    <View style={styles.pricingSummaryRow}>
+                      <Text style={styles.pricingSummaryLabel}>Labor</Text>
+                      <Text style={styles.pricingSummaryValue}>
+                        {`${parseNumber(
+                          laborHours
+                        )} h × $${parseNumber(hourlyRate).toLocaleString(
+                          "en-US",
+                          { minimumFractionDigits: 2 }
+                        )}`}
+                      </Text>
+                    </View>
 
-                <View
-                  style={styles.pricingSingleRow}
-                  onLayout={(e) =>
-                    registerSection("materialCost", e.nativeEvent.layout.y)
-                  }
-                >
-                  <Text style={styles.modalLabel}>Material cost</Text>
-                  <TextInput
-                    style={[styles.modalInput, styles.pricingInput]}
-                    value={materialCost}
-                    onChangeText={setMaterialCost}
-                    keyboardType="numeric"
-                    placeholder="e.g. 300"
-                    placeholderTextColor="#6B7280"
-                    onFocus={() => scrollToSection("materialCost")}
-                  />
-                </View>
+                    <View style={styles.pricingSummaryRow}>
+                      <Text style={styles.pricingSummaryLabel}>Material</Text>
+                      <Text style={styles.pricingSummaryValue}>
+                        $
+                        {parseNumber(materialCost).toLocaleString("en-US", {
+                          minimumFractionDigits: 2,
+                        })}
+                      </Text>
+                    </View>
 
-                {/* Read-style breakdown */}
-                <View style={styles.pricingSummaryBox}>
-                  <View style={styles.pricingSummaryRow}>
-                    <Text style={styles.pricingSummaryLabel}>Labor</Text>
-                    <Text style={styles.pricingSummaryValue}>
-                      {`${parseNumber(laborHours)} h × $${parseNumber(
-                        hourlyRate
-                      ).toLocaleString("en-US", {
-                        minimumFractionDigits: 2,
-                      })}`}
-                    </Text>
-                  </View>
-
-                  <View style={styles.pricingSummaryRow}>
-                    <Text style={styles.pricingSummaryLabel}>Material</Text>
-                    <Text style={styles.pricingSummaryValue}>
-                      {`$${parseNumber(materialCost).toLocaleString("en-US", {
-                        minimumFractionDigits: 2,
-                      })}`}
-                    </Text>
-                  </View>
-
-                  <View style={styles.pricingTotalRow}>
-                    <Text style={styles.pricingTotalLabel}>Total</Text>
-                    <Text style={styles.pricingTotalValue}>
-                      {`$${totalAmount.toLocaleString("en-US", {
-                        minimumFractionDigits: 2,
-                      })}`}
-                    </Text>
+                    <View style={styles.pricingTotalRow}>
+                      <Text style={styles.pricingTotalLabel}>Total</Text>
+                      <Text style={styles.pricingTotalValue}>
+                        $
+                        {totalAmount.toLocaleString("en-US", {
+                          minimumFractionDigits: 2,
+                        })}
+                      </Text>
+                    </View>
                   </View>
                 </View>
               </View>
 
               {/* Photos */}
-              <Text style={styles.sectionTitle}>Photos</Text>
+              <View
+                onLayout={(e) =>
+                  registerSection("photos", e.nativeEvent.layout.y)
+                }
+              >
+                <Text style={styles.sectionTitle}>Photos</Text>
 
-              <View style={styles.photosRow}>
-                <TouchableOpacity
-                  style={styles.addPhotoButton}
-                  onPress={() => setIsAddPhotoMenuVisible(true)}
-                  activeOpacity={0.9}
-                >
-                  <Text style={styles.addPhotoButtonText}>+ Add Photo</Text>
-                </TouchableOpacity>
-              </View>
-
-              {photoUris.length > 0 && (
-                <View style={styles.photoGrid}>
-                  {photoUris.map((uri, index) => (
-                    <View key={uri} style={styles.photoWrapper}>
-                      <TouchableOpacity
-                        style={{ flex: 1 }}
-                        activeOpacity={0.9}
-                        onPress={() => handleOpenFullImage(index)}
-                      >
-                        <Image
-                          source={{ uri }}
-                          style={styles.photoThumb}
-                          resizeMode="cover"
-                        />
-                      </TouchableOpacity>
-
-                      <TouchableOpacity
-                        style={styles.photoRemoveButton}
-                        onPress={() => handleRemovePhoto(uri)}
-                      >
-                        <Text style={styles.photoRemoveText}>X</Text>
-                      </TouchableOpacity>
-                    </View>
-                  ))}
+                <View style={styles.photosRow}>
+                  <TouchableOpacity
+                    style={styles.addPhotoButton}
+                    onPress={() => setIsAddPhotoMenuVisible(true)}
+                    activeOpacity={0.9}
+                  >
+                    <Text style={styles.addPhotoButtonText}>+ Add Photo</Text>
+                  </TouchableOpacity>
                 </View>
-              )}
+
+                {photoUris.length > 0 && (
+                  <View style={styles.photoGrid}>
+                    {photoUris.map((uri, index) => (
+                      <View key={uri} style={styles.photoWrapper}>
+                        <TouchableOpacity
+                          style={{ flex: 1 }}
+                          activeOpacity={0.9}
+                          onPress={() => handleOpenFullImage(index)}
+                        >
+                          <Image
+                            source={{ uri }}
+                            style={styles.photoThumb}
+                            resizeMode="cover"
+                          />
+                        </TouchableOpacity>
+
+                        <TouchableOpacity
+                          style={styles.photoRemoveButton}
+                          onPress={() => handleRemovePhoto(uri)}
+                        >
+                          <Text style={styles.photoRemoveText}>X</Text>
+                        </TouchableOpacity>
+                      </View>
+                    ))}
+                  </View>
+                )}
+              </View>
 
               <Text style={styles.modalMeta}>
                 Created: {new Date(job.createdAt).toLocaleString()}
@@ -856,7 +892,7 @@ export default function JobDetailScreen() {
             backgroundColor="rgba(0,0,0,0.95)"
           />
         )}
-      </View>
+      </Animated.View>
     </KeyboardAvoidingView>
   );
 }
@@ -1106,7 +1142,7 @@ const styles = StyleSheet.create({
     textAlign: "center",
   },
 
-  // Pricing styles
+  // Pricing card
   pricingCard: {
     backgroundColor: "rgba(255,255,255,0.03)",
     borderRadius: 16,
