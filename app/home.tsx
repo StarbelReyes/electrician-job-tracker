@@ -3,6 +3,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as ImagePicker from "expo-image-picker";
 import React, {
   FC,
+  useCallback,
   useEffect,
   useMemo,
   useRef,
@@ -29,7 +30,7 @@ import {
   View,
 } from "react-native";
 
-import { useRouter } from "expo-router";
+import { useFocusEffect, useRouter } from "expo-router";
 import ImageViewing from "react-native-image-viewing";
 
 type Job = {
@@ -134,6 +135,10 @@ const HomeScreen: FC = () => {
   const [searchQuery, setSearchQuery] = useState("");
   const [sortOption, setSortOption] = useState<SortOption>("Newest");
   const [isSortMenuVisible, setIsSortMenuVisible] = useState(false);
+  const [statusFilter, setStatusFilter] = useState<"all" | "open" | "done">(
+    "all"
+  );
+
 
   // Add Job form
   const [isAddFormVisible, setIsAddFormVisible] = useState(false);
@@ -215,6 +220,14 @@ const HomeScreen: FC = () => {
   const visibleJobs = useMemo(() => {
     let data = [...jobs];
 
+    // 🔍 Status filter from summary cards
+    if (statusFilter === "open") {
+      data = data.filter((job) => !job.isDone);
+    } else if (statusFilter === "done") {
+      data = data.filter((job) => job.isDone);
+    }
+
+    // 🔍 Text search
     if (searchQuery.trim().length > 0) {
       const q = searchQuery.toLowerCase();
       data = data.filter((job) => {
@@ -230,15 +243,18 @@ const HomeScreen: FC = () => {
       });
     }
 
+    // 🔽 Sort
     data.sort((a, b) => {
       if (sortOption === "Newest") {
         return (
-          new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+          new Date(b.createdAt).getTime() -
+          new Date(a.createdAt).getTime()
         );
       }
       if (sortOption === "Oldest") {
         return (
-          new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
+          new Date(a.createdAt).getTime() -
+          new Date(b.createdAt).getTime()
         );
       }
       if (sortOption === "A-Z") {
@@ -251,14 +267,33 @@ const HomeScreen: FC = () => {
     });
 
     return data;
-  }, [jobs, searchQuery, sortOption]);
+  }, [jobs, searchQuery, sortOption, statusFilter]);
+
+
+  const totalJobs = jobs.length;
+  const openJobs = jobs.filter((job) => !job.isDone).length;
+  const doneJobs = totalJobs - openJobs;
+
+  const totalRevenue = useMemo(() => {
+    return jobs.reduce((sum, job) => {
+      const laborTotal =
+        (job.laborHours || 0) * (job.hourlyRate || 0);
+      const materialTotal = job.materialCost || 0;
+      return sum + laborTotal + materialTotal;
+    }, 0);
+  }, [jobs]);
+
+  const formattedTotalRevenue = totalRevenue.toLocaleString("en-US", {
+    minimumFractionDigits: 2,
+  });
 
   // -------- ADD JOB --------
 
   const handleAddNewJobPress = () => {
-    setIsAddFormVisible((prev) => !prev);
     Keyboard.dismiss();
+    router.push("/add-job");
   };
+  
 
   const handleSaveNewJob = () => {
     if (!newTitle.trim()) return;
@@ -551,30 +586,33 @@ const HomeScreen: FC = () => {
 
   // -------- ASYNC STORAGE LOAD --------
 
-  useEffect(() => {
-    const loadData = async () => {
-      try {
-        const [[, jobsJson], [, trashJson], [, sortJson]] =
-          await AsyncStorage.multiGet([
-            STORAGE_KEYS.JOBS,
-            STORAGE_KEYS.TRASH,
-            STORAGE_KEYS.SORT,
-          ]);
-
-        if (jobsJson) setJobs(JSON.parse(jobsJson));
-        if (trashJson) setTrashJobs(JSON.parse(trashJson));
-        if (sortJson && sortOptions.includes(sortJson as SortOption)) {
-          setSortOption(sortJson as SortOption);
+  useFocusEffect(
+    useCallback(() => {
+      const loadData = async () => {
+        try {
+          const [[, jobsJson], [, trashJson], [, sortJson]] =
+            await AsyncStorage.multiGet([
+              STORAGE_KEYS.JOBS,
+              STORAGE_KEYS.TRASH,
+              STORAGE_KEYS.SORT,
+            ]);
+  
+          if (jobsJson) setJobs(JSON.parse(jobsJson));
+          if (trashJson) setTrashJobs(JSON.parse(trashJson));
+          if (sortJson && sortOptions.includes(sortJson as SortOption)) {
+            setSortOption(sortJson as SortOption);
+          }
+        } catch (err) {
+          console.warn("Failed to load saved jobs:", err);
+        } finally {
+          setIsHydrated(true);
         }
-      } catch (err) {
-        console.warn("Failed to load saved jobs:", err);
-      } finally {
-        setIsHydrated(true);
-      }
-    };
-
-    loadData();
-  }, []);
+      };
+  
+      loadData();
+    }, [])
+  );
+  
 
   // -------- ASYNC STORAGE SAVE --------
 
@@ -599,35 +637,88 @@ const HomeScreen: FC = () => {
   // -------- RENDER --------
 
   return (
-    <TouchableWithoutFeedback onPress={Keyboard.dismiss} accessible={false}>
+    <KeyboardAvoidingView
+      style={{ flex: 1 }}
+      behavior={Platform.OS === "ios" ? "padding" : "height"}
+      keyboardVerticalOffset={Platform.OS === "ios" ? 20 : 0}
+    >
+      <TouchableWithoutFeedback onPress={Keyboard.dismiss} accessible={false}>
+
       <View style={styles.container}>
         {/* HEADER */}
         <View style={styles.headerRow}>
-  <Text style={styles.header}>TESTING HOME SCREEN 99</Text>
+          <Text style={styles.header}>TESTING HOME SCREEN 9</Text>
 
-  <View style={styles.headerActionsRow}>
-    <TouchableOpacity
-      style={styles.settingsButton}
-      onPress={() => router.push("/settings")}
-      activeOpacity={0.8}
-    >
-      <Text style={styles.settingsButtonText}>Settings</Text>
-    </TouchableOpacity>
+          <View style={styles.headerActionsRow}>
+            <TouchableOpacity
+              style={styles.settingsButton}
+              onPress={() => router.push("/settings")}
+              activeOpacity={0.8}
+            >
+              <Text style={styles.settingsButtonText}>Settings</Text>
+            </TouchableOpacity>
 
-    <TouchableOpacity
-      style={styles.trashButton}
-      onPress={() => {
-        setIsTrashVisible(true);
-        Keyboard.dismiss();
-      }}
-      activeOpacity={0.8}
-    >
-      <Text style={styles.trashButtonText}>
-        Trash ({trashJobs.length})
-      </Text>
-    </TouchableOpacity>
-  </View>
+            <TouchableOpacity
+              style={styles.trashButton}
+              onPress={() => {
+                setIsTrashVisible(true);
+                Keyboard.dismiss();
+              }}
+              activeOpacity={0.8}
+            >
+              <Text style={styles.trashButtonText}>
+                Trash ({trashJobs.length})
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+
+     {/* 📊 DAY 12 – DASHBOARD SUMMARY */}
+<View style={styles.summaryRow}>
+  {/* Open jobs card */}
+  <TouchableOpacity
+    style={[
+      styles.summaryCard,
+      statusFilter === "open" && styles.summaryCardActive,
+    ]}
+    activeOpacity={0.8}
+    onPress={() =>
+      setStatusFilter((prev) => (prev === "open" ? "all" : "open"))
+    }
+  >
+    <Text style={styles.summaryLabel}>Open Jobs</Text>
+    <Text style={styles.summaryValue}>{openJobs}</Text>
+  </TouchableOpacity>
+
+  {/* Done jobs card */}
+  <TouchableOpacity
+    style={[
+      styles.summaryCard,
+      statusFilter === "done" && styles.summaryCardActive,
+    ]}
+    activeOpacity={0.8}
+    onPress={() =>
+      setStatusFilter((prev) => (prev === "done" ? "all" : "done"))
+    }
+  >
+    <Text style={styles.summaryLabel}>Done</Text>
+    <Text style={styles.summaryValue}>{doneJobs}</Text>
+  </TouchableOpacity>
+
+  {/* Total jobs card → always resets to ALL */}
+  <TouchableOpacity
+    style={[
+      styles.summaryCard,
+      statusFilter === "all" && styles.summaryCardActive,
+    ]}
+    activeOpacity={0.8}
+    onPress={() => setStatusFilter("all")}
+  >
+    <Text style={styles.summaryLabel}>Total Jobs</Text>
+    <Text style={styles.summaryValue}>{totalJobs}</Text>
+  </TouchableOpacity>
 </View>
+
 
         {/* SEARCH + SORT */}
         <View style={styles.controlsRow}>
@@ -681,128 +772,15 @@ const HomeScreen: FC = () => {
 
         {/* ADD NEW JOB BUTTON */}
         <TouchableOpacity
-          style={styles.addJobButton}
-          onPress={handleAddNewJobPress}
-          activeOpacity={0.9}
-        >
-          <Text style={styles.addJobButtonText}>
-            {isAddFormVisible ? "Cancel" : "Add New Job"}
-          </Text>
-        </TouchableOpacity>
-
-        {/* ADD JOB FORM */}
-        {isAddFormVisible && (
-          <View style={styles.addForm}>
-            <Text style={styles.addFormLabel}>Job Title</Text>
-            <TextInput
-              style={styles.addFormInput}
-              placeholder="Ex: Replace panel in basement"
-              placeholderTextColor="#6B7280"
-              value={newTitle}
-              onChangeText={setNewTitle}
-              returnKeyType="next"
-            />
-
-            <Text style={styles.addFormLabel}>Address</Text>
-            <TextInput
-              style={styles.addFormInput}
-              placeholder="Ex: 123 Main St, Brooklyn, NY"
-              placeholderTextColor="#6B7280"
-              value={newAddress}
-              onChangeText={setNewAddress}
-              returnKeyType="next"
-            />
-
-            <Text style={styles.addFormLabel}>Description / Scope of Work</Text>
-            <TextInput
-              style={styles.addFormInputMultiline}
-              placeholder="Ex: Replace main panel, add AFCI breakers, label circuits..."
-              placeholderTextColor="#6B7280"
-              value={newDescription}
-              onChangeText={setNewDescription}
-              multiline
-            />
-
-            <Text style={styles.addFormSectionTitle}>
-              Client Info (optional)
-            </Text>
-
-            <Text style={styles.addFormLabel}>Client Name</Text>
-            <TextInput
-              style={styles.addFormInput}
-              placeholder="Ex: John Smith / Management"
-              placeholderTextColor="#6B7280"
-              value={newClientName}
-              onChangeText={setNewClientName}
-              returnKeyType="next"
-            />
-
-            <Text style={styles.addFormLabel}>Client Phone</Text>
-            <TextInput
-              style={styles.addFormInput}
-              placeholder="Ex: 555-123-4567"
-              placeholderTextColor="#6B7280"
-              value={newClientPhone}
-              onChangeText={setNewClientPhone}
-              keyboardType="phone-pad"
-              returnKeyType="next"
-            />
-
-            <Text style={styles.addFormLabel}>Client Notes</Text>
-            <TextInput
-              style={styles.addFormInputMultiline}
-              placeholder="Gate codes, best time to call, etc."
-              placeholderTextColor="#6B7280"
-              value={newClientNotes}
-              onChangeText={setNewClientNotes}
-              multiline
-            />
-
-            {/* PRICING SECTION */}
-            <Text style={styles.addFormSectionTitle}>Pricing (optional)</Text>
-
-            <Text style={styles.addFormLabel}>Labor Hours</Text>
-            <TextInput
-              style={styles.addFormInput}
-              placeholder="Ex: 4.5"
-              placeholderTextColor="#6B7280"
-              value={newLaborHours}
-              onChangeText={setNewLaborHours}
-              keyboardType="numeric"
-              returnKeyType="next"
-            />
-
-            <Text style={styles.addFormLabel}>Hourly Rate ($/hr)</Text>
-            <TextInput
-              style={styles.addFormInput}
-              placeholder="Ex: 120"
-              placeholderTextColor="#6B7280"
-              value={newHourlyRate}
-              onChangeText={setNewHourlyRate}
-              keyboardType="numeric"
-              returnKeyType="next"
-            />
-
-            <Text style={styles.addFormLabel}>Material Cost ($)</Text>
-            <TextInput
-              style={styles.addFormInput}
-              placeholder="Ex: 350"
-              placeholderTextColor="#6B7280"
-              value={newMaterialCost}
-              onChangeText={setNewMaterialCost}
-              keyboardType="numeric"
-              returnKeyType="done"
-            />
-
-            <TouchableOpacity
-              style={styles.saveJobButton}
-              onPress={handleSaveNewJob}
-              activeOpacity={0.9}
-            >
-              <Text style={styles.saveJobButtonText}>Save Job</Text>
-            </TouchableOpacity>
-          </View>
-        )}
+  style={styles.addJobButton}
+  onPress={() => {
+    Keyboard.dismiss();
+    router.push("/add-job");
+  }}
+  activeOpacity={0.9}
+>
+  <Text style={styles.addJobButtonText}>Add New Job</Text>
+</TouchableOpacity>
 
         {/* JOB LIST */}
         <FlatList
@@ -833,6 +811,10 @@ const HomeScreen: FC = () => {
                       isDone: String(item.isDone),
                       jobTotal: String(jobTotal),
                       photoCount: String(item.photoUris?.length ?? 0),
+                      // PRICE SYSTEM — Day 11D
+                      laborHours: String(item.laborHours ?? 0),
+                      hourlyRate: String(item.hourlyRate ?? 0),
+                      materialCost: String(item.materialCost ?? 0),
                     },
                   });
                 }}
@@ -1455,6 +1437,7 @@ const HomeScreen: FC = () => {
         </Modal>
       </View>
     </TouchableWithoutFeedback>
+    </KeyboardAvoidingView>
   );
 };
 
@@ -2042,5 +2025,41 @@ const styles = StyleSheet.create({
     color: "#E5E7EB",
     fontWeight: "500",
   },
+  summaryRow: {
+    flexDirection: "row",
+    gap: 8,
+    marginBottom: 10,
+  },
+  summaryCard: {
+    flex: 1,
+    backgroundColor: "#111827",
+    borderRadius: 12,
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    borderWidth: 1,
+    borderColor: "#1F2937",
+  },
+  summaryCardActive: {
+    borderColor: "#2563EB",
+    backgroundColor: "#020617",
+  },
 
+  summaryCardWide: {
+    flex: 1,
+  },
+  summaryLabel: {
+    fontSize: 11,
+    color: "#9CA3AF",
+    marginBottom: 4,
+  },
+  summaryValue: {
+    fontSize: 16,
+    fontWeight: "700",
+    color: "#F9FAFB",
+  },
+  summaryHint: {
+    marginTop: 2,
+    fontSize: 10,
+    color: "#6B7280",
+  },
 });

@@ -10,6 +10,7 @@ import {
   Keyboard,
   KeyboardAvoidingView,
   LayoutAnimation,
+  Linking,
   Platform,
   ScrollView,
   StyleSheet,
@@ -34,7 +35,7 @@ type Job = {
   clientNotes?: string;
   photoUris?: string[];
 
-  // pricing (Day 11 D)
+  // pricing
   laborHours?: number;
   hourlyRate?: number;
   materialCost?: number;
@@ -74,9 +75,23 @@ export default function JobDetailScreen() {
 
   const [photoUris, setPhotoUris] = useState<string[]>([]);
 
-  // Scroll helpers for Client Notes
-  const detailsScrollRef = useRef<ScrollView | null>(null);
-  const clientNotesYRef = useRef(0);
+  // 🔹 Scroll helpers – for ALL fields
+  const scrollRef = useRef<ScrollView | null>(null);
+  const sectionPositions = useRef<Record<string, number>>({});
+
+  const registerSection = (key: string, y: number) => {
+    sectionPositions.current[key] = y;
+  };
+
+  const scrollToSection = (key: string) => {
+    const y = sectionPositions.current[key];
+    if (scrollRef.current != null && y !== undefined) {
+      scrollRef.current.scrollTo({
+        y: Math.max(y - 80, 0),
+        animated: true,
+      });
+    }
+  };
 
   // Photos: full-screen + bottom sheet
   const [isImageOverlayVisible, setIsImageOverlayVisible] = useState(false);
@@ -168,10 +183,7 @@ export default function JobDetailScreen() {
     parseNumber(materialCost);
 
   const persistJobs = async (updatedJobs: Job[]) => {
-    await AsyncStorage.setItem(
-      STORAGE_KEYS.JOBS,
-      JSON.stringify(updatedJobs)
-    );
+    await AsyncStorage.setItem(STORAGE_KEYS.JOBS, JSON.stringify(updatedJobs));
   };
 
   // ---------- Actions ----------
@@ -234,53 +246,80 @@ export default function JobDetailScreen() {
     }
   };
 
+  const handleCallClient = () => {
+    const raw = editClientPhone.trim();
+    if (!raw) {
+      Alert.alert("No phone number", "Add a client phone number first.");
+      return;
+    }
+
+    const phone = raw.replace(/[^\d+]/g, "");
+    if (!phone) {
+      Alert.alert("Invalid phone", "The client phone number looks invalid.");
+      return;
+    }
+
+    Linking.openURL(`tel:${phone}`).catch(() => {
+      Alert.alert("Error", "Could not open the phone app.");
+    });
+  };
+
+  const handleOpenInMaps = () => {
+    const rawAddress = editAddress.trim();
+    if (!rawAddress) {
+      Alert.alert("No address", "Add a job address first.");
+      return;
+    }
+
+    const encoded = encodeURIComponent(rawAddress);
+    const url = `https://www.google.com/maps/search/?api=1&query=${encoded}`;
+
+    Linking.openURL(url).catch(() => {
+      Alert.alert("Error", "Could not open the Maps app.");
+    });
+  };
+
   const confirmMoveToTrash = () => {
     if (!job) return;
 
-    Alert.alert(
-      "Move to Trash",
-      "Are you sure you want to move this job to Trash?",
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Move",
-          style: "destructive",
-          onPress: async () => {
-            try {
-              const [jobsJson, trashJson] = await Promise.all([
-                AsyncStorage.getItem(STORAGE_KEYS.JOBS),
-                AsyncStorage.getItem(STORAGE_KEYS.TRASH),
-              ]);
+    Alert.alert("Move to Trash", "Are you sure you want to move this job to Trash?", [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Move",
+        style: "destructive",
+        onPress: async () => {
+          try {
+            const [jobsJson, trashJson] = await Promise.all([
+              AsyncStorage.getItem(STORAGE_KEYS.JOBS),
+              AsyncStorage.getItem(STORAGE_KEYS.TRASH),
+            ]);
 
-              const jobs: Job[] = jobsJson ? JSON.parse(jobsJson) : [];
-              const trash: Job[] = trashJson ? JSON.parse(trashJson) : [];
+            const jobs: Job[] = jobsJson ? JSON.parse(jobsJson) : [];
+            const trash: Job[] = trashJson ? JSON.parse(trashJson) : [];
 
-              const remaining = jobs.filter((j) => j.id !== job.id);
-              const newTrash = [...trash, job];
+            const remaining = jobs.filter((j) => j.id !== job.id);
+            const newTrash = [...trash, job];
 
-              LayoutAnimation.configureNext(
-                LayoutAnimation.Presets.easeInEaseOut
-              );
-              await Promise.all([
-                AsyncStorage.setItem(
-                  STORAGE_KEYS.JOBS,
-                  JSON.stringify(remaining)
-                ),
-                AsyncStorage.setItem(
-                  STORAGE_KEYS.TRASH,
-                  JSON.stringify(newTrash)
-                ),
-              ]);
+            LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+            await Promise.all([
+              AsyncStorage.setItem(
+                STORAGE_KEYS.JOBS,
+                JSON.stringify(remaining)
+              ),
+              AsyncStorage.setItem(
+                STORAGE_KEYS.TRASH,
+                JSON.stringify(newTrash)
+              ),
+            ]);
 
-              router.back();
-            } catch (e) {
-              console.warn("Failed to move to trash:", e);
-              Alert.alert("Error", "Could not move job to Trash.");
-            }
-          },
+            router.back();
+          } catch (e) {
+            console.warn("Failed to move to trash:", e);
+            Alert.alert("Error", "Could not move job to Trash.");
+          }
         },
-      ]
-    );
+      },
+    ]);
   };
 
   // ---------- Photos ----------
@@ -377,10 +416,7 @@ export default function JobDetailScreen() {
     return (
       <View style={styles.loadingScreen}>
         <Text style={styles.loadingText}>Job not found.</Text>
-        <TouchableOpacity
-          style={styles.simpleButton}
-          onPress={() => router.back()}
-        >
+        <TouchableOpacity style={styles.simpleButton} onPress={() => router.back()}>
           <Text style={styles.simpleButtonText}>Back</Text>
         </TouchableOpacity>
       </View>
@@ -408,134 +444,253 @@ export default function JobDetailScreen() {
         </View>
 
         <ScrollView
-          ref={detailsScrollRef}
+          ref={scrollRef}
           contentContainerStyle={styles.detailsScroll}
           keyboardShouldPersistTaps="always"
           showsVerticalScrollIndicator={false}
           onScrollBeginDrag={Keyboard.dismiss}
         >
-          <TouchableWithoutFeedback
-            onPress={Keyboard.dismiss}
-            accessible={false}
-          >
+          <TouchableWithoutFeedback onPress={Keyboard.dismiss} accessible={false}>
             <View>
               {/* Job ID */}
               <Text style={styles.sectionTitle}>Job ID</Text>
               <Text style={styles.infoText}>{job.id}</Text>
 
-              {/* Title */}
-              <Text style={styles.modalLabel}>Title</Text>
-              <TextInput
-                style={styles.modalInput}
-                value={editTitle}
-                onChangeText={setEditTitle}
-                placeholderTextColor="#6B7280"
-              />
+              {/* TITLE */}
+              <View
+                onLayout={(e) =>
+                  registerSection("title", e.nativeEvent.layout.y)
+                }
+              >
+                <Text style={styles.modalLabel}>Title</Text>
+                <TextInput
+                  style={styles.modalInput}
+                  value={editTitle}
+                  onChangeText={setEditTitle}
+                  placeholderTextColor="#6B7280"
+                  onFocus={() => scrollToSection("title")}
+                />
+              </View>
 
-              {/* Address */}
-              <Text style={styles.modalLabel}>Address</Text>
-              <TextInput
-                style={styles.modalInput}
-                value={editAddress}
-                onChangeText={setEditAddress}
-                placeholderTextColor="#6B7280"
-              />
+              {/* ADDRESS */}
+              <View
+                onLayout={(e) =>
+                  registerSection("address", e.nativeEvent.layout.y)
+                }
+              >
+                <Text style={styles.modalLabel}>Address</Text>
+                <TextInput
+                  style={styles.modalInput}
+                  value={editAddress}
+                  onChangeText={setEditAddress}
+                  placeholderTextColor="#6B7280"
+                  onFocus={() => scrollToSection("address")}
+                />
+              </View>
 
-              {/* Description */}
-              <Text style={styles.modalLabel}>Description / Scope</Text>
-              <TextInput
-                style={styles.modalInputMultiline}
-                value={editDescription}
-                onChangeText={setEditDescription}
-                multiline
-                placeholderTextColor="#6B7280"
-              />
+              {/* DESCRIPTION */}
+              <View
+                onLayout={(e) =>
+                  registerSection("description", e.nativeEvent.layout.y)
+                }
+              >
+                <Text style={styles.modalLabel}>Description / Scope</Text>
+                <TextInput
+                  style={styles.modalInputMultiline}
+                  value={editDescription}
+                  onChangeText={setEditDescription}
+                  multiline
+                  placeholderTextColor="#6B7280"
+                  onFocus={() => scrollToSection("description")}
+                />
+              </View>
 
               {/* Status */}
               <Text style={styles.sectionTitle}>Status</Text>
-              <Text style={styles.infoText}>
-                {isDone ? "Done" : "Open"}
-              </Text>
+              <Text style={styles.infoText}>{isDone ? "Done" : "Open"}</Text>
 
-              {/* Client Info */}
+              {/* Quick Actions */}
+              <View style={styles.quickActionsRow}>
+                {!!editClientPhone.trim() && (
+                  <TouchableOpacity
+                    style={styles.quickActionButton}
+                    onPress={handleCallClient}
+                    activeOpacity={0.9}
+                  >
+                    <Text style={styles.quickActionText}>📞 Call Client</Text>
+                  </TouchableOpacity>
+                )}
+
+                {!!editAddress.trim() && (
+                  <TouchableOpacity
+                    style={styles.quickActionButton}
+                    onPress={handleOpenInMaps}
+                    activeOpacity={0.9}
+                  >
+                    <Text style={styles.quickActionText}>📍 Open in Maps</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+
+              {/* CLIENT INFO */}
               <Text style={styles.sectionTitle}>Client Info</Text>
 
-              <Text style={styles.modalLabel}>Client Name</Text>
-              <TextInput
-                style={styles.modalInput}
-                value={editClientName}
-                onChangeText={setEditClientName}
-                placeholder="Client name..."
-                placeholderTextColor="#6B7280"
-              />
+              <View
+                onLayout={(e) =>
+                  registerSection("clientName", e.nativeEvent.layout.y)
+                }
+              >
+                <Text style={styles.modalLabel}>Client Name</Text>
+                <TextInput
+                  style={styles.modalInput}
+                  value={editClientName}
+                  onChangeText={setEditClientName}
+                  placeholder="Client name..."
+                  placeholderTextColor="#6B7280"
+                  onFocus={() => scrollToSection("clientName")}
+                />
+              </View>
 
-              <Text style={styles.modalLabel}>Client Phone</Text>
-              <TextInput
-                style={styles.modalInput}
-                value={editClientPhone}
-                onChangeText={setEditClientPhone}
-                placeholder="Phone number..."
-                placeholderTextColor="#6B7280"
-                keyboardType="phone-pad"
-              />
+              <View
+                onLayout={(e) =>
+                  registerSection("clientPhone", e.nativeEvent.layout.y)
+                }
+              >
+                <Text style={styles.modalLabel}>Client Phone</Text>
+                <TextInput
+                  style={styles.modalInput}
+                  value={editClientPhone}
+                  onChangeText={setEditClientPhone}
+                  placeholder="Phone number..."
+                  placeholderTextColor="#6B7280"
+                  keyboardType="phone-pad"
+                  onFocus={() => scrollToSection("clientPhone")}
+                />
+              </View>
 
-              <Text style={styles.modalLabel}>Client Notes</Text>
-              <TextInput
-                style={styles.modalInputMultiline}
-                value={editClientNotes}
-                onChangeText={setEditClientNotes}
-                placeholder="Gate codes, timing, special info..."
-                placeholderTextColor="#6B7280"
-                multiline
-                onLayout={(e) => {
-                  clientNotesYRef.current = e.nativeEvent.layout.y;
-                }}
-                onFocus={() => {
-                  if (detailsScrollRef.current) {
-                    detailsScrollRef.current.scrollTo({
-                      y: Math.max(clientNotesYRef.current - 80, 0),
-                      animated: true,
-                    });
-                  }
-                }}
-              />
+              <View
+                onLayout={(e) =>
+                  registerSection("clientNotes", e.nativeEvent.layout.y)
+                }
+              >
+                <Text style={styles.modalLabel}>Client Notes</Text>
+                <TextInput
+                  style={styles.modalInputMultiline}
+                  value={editClientNotes}
+                  onChangeText={setEditClientNotes}
+                  placeholder="Gate codes, timing, special info..."
+                  placeholderTextColor="#6B7280"
+                  multiline
+                  onFocus={() => scrollToSection("clientNotes")}
+                />
+              </View>
 
-              {/* Pricing */}
+              {/* PRICING */}
               <Text style={styles.sectionTitle}>Pricing</Text>
 
-              <Text style={styles.modalLabel}>Labor hours</Text>
-              <TextInput
-                style={styles.modalInput}
-                value={laborHours}
-                onChangeText={setLaborHours}
-                keyboardType="numeric"
-                placeholder="e.g. 4"
-                placeholderTextColor="#6B7280"
-              />
+              <View
+                style={styles.pricingCard}
+              >
+                {/* BIG TOTAL at the top */}
+                <View style={styles.pricingTotalHeader}>
+                  <Text style={styles.pricingTotalHeaderLabel}>Total</Text>
+                  <Text style={styles.pricingTotalHeaderValue}>
+                    $
+                    {totalAmount.toLocaleString("en-US", {
+                      minimumFractionDigits: 2,
+                    })}
+                  </Text>
+                </View>
 
-              <Text style={styles.modalLabel}>Hourly rate</Text>
-              <TextInput
-                style={styles.modalInput}
-                value={hourlyRate}
-                onChangeText={setHourlyRate}
-                keyboardType="numeric"
-                placeholder="e.g. 125"
-                placeholderTextColor="#6B7280"
-              />
+                {/* Inputs in a grid */}
+                <View style={styles.pricingInputsRow}>
+                  <View
+                    style={styles.pricingColumn}
+                    onLayout={(e) =>
+                      registerSection("laborHours", e.nativeEvent.layout.y)
+                    }
+                  >
+                    <Text style={styles.modalLabel}>Labor hours</Text>
+                    <TextInput
+                      style={[styles.modalInput, styles.pricingInput]}
+                      value={laborHours}
+                      onChangeText={setLaborHours}
+                      keyboardType="numeric"
+                      placeholder="e.g. 4"
+                      placeholderTextColor="#6B7280"
+                      onFocus={() => scrollToSection("laborHours")}
+                    />
+                  </View>
 
-              <Text style={styles.modalLabel}>Material cost</Text>
-              <TextInput
-                style={styles.modalInput}
-                value={materialCost}
-                onChangeText={setMaterialCost}
-                keyboardType="numeric"
-                placeholder="e.g. 300"
-                placeholderTextColor="#6B7280"
-              />
+                  <View
+                    style={styles.pricingColumn}
+                    onLayout={(e) =>
+                      registerSection("hourlyRate", e.nativeEvent.layout.y)
+                    }
+                  >
+                    <Text style={styles.modalLabel}>Hourly rate</Text>
+                    <TextInput
+                      style={[styles.modalInput, styles.pricingInput]}
+                      value={hourlyRate}
+                      onChangeText={setHourlyRate}
+                      keyboardType="numeric"
+                      placeholder="e.g. 125"
+                      placeholderTextColor="#6B7280"
+                      onFocus={() => scrollToSection("hourlyRate")}
+                    />
+                  </View>
+                </View>
 
-              <Text style={styles.modalMeta}>
-                Total: ${totalAmount.toFixed(2)}
-              </Text>
+                <View
+                  style={styles.pricingSingleRow}
+                  onLayout={(e) =>
+                    registerSection("materialCost", e.nativeEvent.layout.y)
+                  }
+                >
+                  <Text style={styles.modalLabel}>Material cost</Text>
+                  <TextInput
+                    style={[styles.modalInput, styles.pricingInput]}
+                    value={materialCost}
+                    onChangeText={setMaterialCost}
+                    keyboardType="numeric"
+                    placeholder="e.g. 300"
+                    placeholderTextColor="#6B7280"
+                    onFocus={() => scrollToSection("materialCost")}
+                  />
+                </View>
+
+                {/* Read-style breakdown */}
+                <View style={styles.pricingSummaryBox}>
+                  <View style={styles.pricingSummaryRow}>
+                    <Text style={styles.pricingSummaryLabel}>Labor</Text>
+                    <Text style={styles.pricingSummaryValue}>
+                      {`${parseNumber(laborHours)} h × $${parseNumber(
+                        hourlyRate
+                      ).toLocaleString("en-US", {
+                        minimumFractionDigits: 2,
+                      })}`}
+                    </Text>
+                  </View>
+
+                  <View style={styles.pricingSummaryRow}>
+                    <Text style={styles.pricingSummaryLabel}>Material</Text>
+                    <Text style={styles.pricingSummaryValue}>
+                      {`$${parseNumber(materialCost).toLocaleString("en-US", {
+                        minimumFractionDigits: 2,
+                      })}`}
+                    </Text>
+                  </View>
+
+                  <View style={styles.pricingTotalRow}>
+                    <Text style={styles.pricingTotalLabel}>Total</Text>
+                    <Text style={styles.pricingTotalValue}>
+                      {`$${totalAmount.toLocaleString("en-US", {
+                        minimumFractionDigits: 2,
+                      })}`}
+                    </Text>
+                  </View>
+                </View>
+              </View>
 
               {/* Photos */}
               <Text style={styles.sectionTitle}>Photos</Text>
@@ -546,9 +701,7 @@ export default function JobDetailScreen() {
                   onPress={() => setIsAddPhotoMenuVisible(true)}
                   activeOpacity={0.9}
                 >
-                  <Text style={styles.addPhotoButtonText}>
-                    + Add Photo
-                  </Text>
+                  <Text style={styles.addPhotoButtonText}>+ Add Photo</Text>
                 </TouchableOpacity>
               </View>
 
@@ -616,18 +769,13 @@ export default function JobDetailScreen() {
                   }}
                 >
                   <TouchableOpacity
-                    style={[
-                      styles.modalButton,
-                      styles.modalButtonPrimary,
-                    ]}
+                    style={[styles.modalButton, styles.modalButtonPrimary]}
                     onPress={handleSaveJobEdits}
                     activeOpacity={0.9}
                     onPressIn={saveChangesAnim.onPressIn}
                     onPressOut={saveChangesAnim.onPressOut}
                   >
-                    <Text style={styles.modalButtonText}>
-                      Save Changes
-                    </Text>
+                    <Text style={styles.modalButtonText}>Save Changes</Text>
                   </TouchableOpacity>
                 </Animated.View>
               </View>
@@ -636,9 +784,7 @@ export default function JobDetailScreen() {
                 style={styles.modalDeleteButton}
                 onPress={confirmMoveToTrash}
               >
-                <Text style={styles.modalDeleteText}>
-                  Move to Trash
-                </Text>
+                <Text style={styles.modalDeleteText}>Move to Trash</Text>
               </TouchableOpacity>
 
               <TouchableOpacity
@@ -671,9 +817,7 @@ export default function JobDetailScreen() {
                 }}
                 activeOpacity={0.9}
               >
-                <Text style={styles.addPhotoMenuOptionText}>
-                  📸 Take Photo
-                </Text>
+                <Text style={styles.addPhotoMenuOptionText}>📸 Take Photo</Text>
               </TouchableOpacity>
 
               <TouchableOpacity
@@ -960,5 +1104,116 @@ const styles = StyleSheet.create({
     color: "#9CA3AF",
     fontSize: 13,
     textAlign: "center",
+  },
+
+  // Pricing styles
+  pricingCard: {
+    backgroundColor: "rgba(255,255,255,0.03)",
+    borderRadius: 16,
+    padding: 14,
+    marginBottom: 14,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.06)",
+  },
+  pricingTotalHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    paddingBottom: 4,
+    marginBottom: 6,
+    borderBottomWidth: 1,
+    borderBottomColor: "rgba(255,255,255,0.06)",
+  },
+  pricingTotalHeaderLabel: {
+    fontSize: 13,
+    color: "#9CA3AF",
+    fontWeight: "600",
+  },
+  pricingTotalHeaderValue: {
+    fontSize: 18,
+    color: "#FCD34D",
+    fontWeight: "800",
+  },
+  pricingInputsRow: {
+    flexDirection: "row",
+    gap: 8,
+    marginTop: 4,
+  },
+  pricingColumn: {
+    flex: 1,
+  },
+  pricingInput: {
+    marginBottom: 8,
+  },
+  pricingSingleRow: {
+    marginTop: 4,
+    marginBottom: 6,
+  },
+  pricingSummaryBox: {
+    marginTop: 6,
+    backgroundColor: "rgba(255,255,255,0.04)",
+    borderRadius: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.07)",
+  },
+  pricingSummaryRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    paddingVertical: 4,
+  },
+  pricingSummaryLabel: {
+    fontSize: 12,
+    color: "#9CA3AF",
+    fontWeight: "500",
+  },
+  pricingSummaryValue: {
+    fontSize: 12,
+    color: "#F3F4F6",
+    fontWeight: "600",
+  },
+  pricingTotalRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginTop: 10,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: "rgba(255,255,255,0.12)",
+  },
+  pricingTotalLabel: {
+    fontSize: 13,
+    color: "#F9FAFB",
+    fontWeight: "700",
+  },
+  pricingTotalValue: {
+    fontSize: 15,
+    fontWeight: "800",
+    color: "#FCD34D",
+  },
+
+  quickActionsRow: {
+    flexDirection: "row",
+    gap: 8,
+    marginTop: 6,
+    marginBottom: 8,
+  },
+  quickActionButton: {
+    flex: 1,
+    backgroundColor: "#111827",
+    borderRadius: 999,
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    borderWidth: 1,
+    borderColor: "#374151",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  quickActionText: {
+    fontSize: 12,
+    color: "#E5E7EB",
+    fontWeight: "600",
   },
 });
