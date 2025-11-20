@@ -1,4 +1,5 @@
 // app/add-job.tsx
+import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as ImagePicker from "expo-image-picker";
 import { useRouter } from "expo-router";
@@ -10,7 +11,7 @@ import {
   Image,
   Keyboard,
   KeyboardAvoidingView,
-  Linking,
+  LayoutAnimation,
   Platform,
   ScrollView,
   StyleSheet,
@@ -18,15 +19,17 @@ import {
   TextInput,
   TouchableOpacity,
   TouchableWithoutFeedback,
+  UIManager,
   View,
 } from "react-native";
+import { THEME_STORAGE_KEY, ThemeName, themes } from "./theme";
 
 type Job = {
   id: string;
   title: string;
   address: string;
   description: string;
-  createdAt: string; // ISO string
+  createdAt: string; // ISO
   isDone: boolean;
   clientName?: string;
   clientPhone?: string;
@@ -37,68 +40,72 @@ type Job = {
   materialCost?: number;
 };
 
-const JOBS_STORAGE_KEY = "EJT_JOBS";
+const STORAGE_KEYS = {
+  JOBS: "EJT_JOBS",
+  TRASH: "EJT_TRASH",
+  SORT: "EJT_SORT_OPTION",
+};
 
 const screenWidth = Dimensions.get("window").width;
 const GRID_COLUMNS = 3;
 const GRID_HORIZONTAL_PADDING = 16 * 2;
 const GRID_GAP = 8;
-const MAX_THUMBS_TO_SHOW = 6;
 
 const THUMB_SIZE =
   (screenWidth - GRID_HORIZONTAL_PADDING - GRID_GAP * (GRID_COLUMNS - 1)) /
   GRID_COLUMNS;
 
-export default function AddJobScreen() {
+if (
+  Platform.OS === "android" &&
+  UIManager.setLayoutAnimationEnabledExperimental
+) {
+  UIManager.setLayoutAnimationEnabledExperimental(true);
+}
+
+const AddJobScreen = () => {
   const router = useRouter();
 
-  // MAIN FIELDS
+  // THEME
+  const [themeName, setThemeName] = useState<ThemeName>("dark");
+  const theme = themes[themeName];
+
+  useEffect(() => {
+    const loadTheme = async () => {
+      try {
+        const saved = await AsyncStorage.getItem(THEME_STORAGE_KEY);
+        if (
+          saved === "light" ||
+          saved === "dark" ||
+          saved === "midnight"
+        ) {
+          setThemeName(saved as ThemeName);
+        }
+      } catch (err) {
+        console.warn("Failed to load theme:", err);
+      }
+    };
+
+    loadTheme();
+  }, []);
+
+  // FORM STATE
   const [title, setTitle] = useState("");
   const [address, setAddress] = useState("");
   const [description, setDescription] = useState("");
 
-  // CLIENT
   const [clientName, setClientName] = useState("");
   const [clientPhone, setClientPhone] = useState("");
   const [clientNotes, setClientNotes] = useState("");
 
-  // PRICING
   const [laborHours, setLaborHours] = useState("");
   const [hourlyRate, setHourlyRate] = useState("");
   const [materialCost, setMaterialCost] = useState("");
 
-  // PHOTOS
   const [photoUris, setPhotoUris] = useState<string[]>([]);
-  const [isAddPhotoMenuVisible, setIsAddPhotoMenuVisible] = useState(false);
 
-  // ---- DERIVED TOTALS (for pricing card) ----
-  const hoursNum = parseFloat(laborHours) || 0;
-  const rateNum = parseFloat(hourlyRate) || 0;
-  const materialNum = parseFloat(materialCost) || 0;
-
-  const laborTotal = hoursNum * rateNum;
-  const total = laborTotal + materialNum;
-
-  // 🔹 Scroll + keyboard handling (same pattern as Job Detail)
-  const scrollRef = useRef<ScrollView | null>(null);
-  const sectionPositions = useRef<Record<string, number>>({});
-
-  const registerSection = (key: string, y: number) => {
-    sectionPositions.current[key] = y;
-  };
-
-  const scrollToSection = (key: string) => {
-    const y = sectionPositions.current[key];
-    if (scrollRef.current != null && y !== undefined) {
-      scrollRef.current.scrollTo({
-        y: Math.max(y - 80, 0),
-        animated: true,
-      });
-    }
-  };
-
-  // 🔹 Screen zoom (same vibe as Home / Job Detail: 1.04 → 1.0)
+  // ANIMATIONS
   const screenScale = useRef(new Animated.Value(1.04)).current;
+  const saveButtonScale = useRef(new Animated.Value(1)).current;
 
   useEffect(() => {
     Animated.timing(screenScale, {
@@ -108,29 +115,37 @@ export default function AddJobScreen() {
     }).start();
   }, [screenScale]);
 
-  // ---- MAPS ----
-  const handleOpenInMaps = () => {
-    const q = address.trim();
-    if (!q) {
-      Alert.alert("Address needed", "Enter the job address first.");
-      return;
-    }
+  const createScaleHandlers = (scale: Animated.Value) => ({
+    onPressIn: () => {
+      Animated.spring(scale, {
+        toValue: 0.96,
+        useNativeDriver: true,
+        friction: 5,
+        tension: 180,
+      }).start();
+    },
+    onPressOut: () => {
+      Animated.spring(scale, {
+        toValue: 1,
+        useNativeDriver: true,
+        friction: 5,
+        tension: 180,
+      }).start();
+    },
+  });
 
-    const encoded = encodeURIComponent(q);
-    const url = Platform.select({
-      ios: `http://maps.apple.com/?q=${encoded}`,
-      android: `geo:0,0?q=${encoded}`,
-      default: `https://www.google.com/maps/search/?api=1&query=${encoded}`,
-    });
+  const saveAnim = createScaleHandlers(saveButtonScale);
 
-    if (url) Linking.openURL(url).catch(() => {});
+  const parseNumber = (value: string) => {
+    const n = Number(value.replace(/[^0-9.]/g, ""));
+    return Number.isNaN(n) ? 0 : n;
   };
 
-  // ---- PHOTOS ----
-  const handleAddPhotoToState = (uri: string) => {
-    setPhotoUris((prev) => [...prev, uri]);
-  };
+  const totalAmount =
+    parseNumber(laborHours) * parseNumber(hourlyRate) +
+    parseNumber(materialCost);
 
+  // ---------- PHOTOS ----------
   const handleAddPhotoFromGallery = async () => {
     const { status } =
       await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -154,6 +169,7 @@ export default function AddJobScreen() {
       .map((asset) => asset.uri)
       .filter(Boolean) as string[];
 
+    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
     setPhotoUris((prev) => [...prev, ...uris]);
   };
 
@@ -177,21 +193,38 @@ export default function AddJobScreen() {
     const uri = result.assets[0]?.uri;
     if (!uri) return;
 
-    handleAddPhotoToState(uri);
+    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+    setPhotoUris((prev) => [...prev, uri]);
   };
 
   const handleRemovePhoto = (uriToRemove: string) => {
-    setPhotoUris((prev) => prev.filter((u) => u !== uriToRemove));
+    Alert.alert(
+      "Remove photo",
+      "Are you sure you want to remove this photo?",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Remove",
+          style: "destructive",
+          onPress: () => {
+            LayoutAnimation.configureNext(
+              LayoutAnimation.Presets.easeInEaseOut
+            );
+            setPhotoUris((prev) => prev.filter((u) => u !== uriToRemove));
+          },
+        },
+      ]
+    );
   };
 
-  // ---- SAVE JOB ----
-  const handleSave = async () => {
+  // ---------- SAVE ----------
+  const handleSaveJob = async () => {
     if (!title.trim()) {
       Alert.alert("Missing title", "Please enter a job title.");
       return;
     }
 
-    const newJob: Job = {
+    const job: Job = {
       id: Date.now().toString(),
       title: title.trim(),
       address: address.trim() || "N/A",
@@ -202,558 +235,621 @@ export default function AddJobScreen() {
       clientName: clientName.trim() || undefined,
       clientPhone: clientPhone.trim() || undefined,
       clientNotes: clientNotes.trim() || undefined,
-      photoUris,
-      laborHours: hoursNum,
-      hourlyRate: rateNum,
-      materialCost: materialNum,
+      photoUris: photoUris.length > 0 ? photoUris : [],
+      laborHours: parseNumber(laborHours),
+      hourlyRate: parseNumber(hourlyRate),
+      materialCost: parseNumber(materialCost),
     };
 
     try {
-      const existingJson = await AsyncStorage.getItem(JOBS_STORAGE_KEY);
-      const existing: Job[] = existingJson ? JSON.parse(existingJson) : [];
+      const jobsJson = await AsyncStorage.getItem(STORAGE_KEYS.JOBS);
+      const jobs: Job[] = jobsJson ? JSON.parse(jobsJson) : [];
 
-      const updated = [...existing, newJob];
-      await AsyncStorage.setItem(JOBS_STORAGE_KEY, JSON.stringify(updated));
+      const nextJobs = [...jobs, job];
 
-      router.back();
+      LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+      await AsyncStorage.setItem(
+        STORAGE_KEYS.JOBS,
+        JSON.stringify(nextJobs)
+      );
+
+      Alert.alert("Job saved", "New job has been added.", [
+        {
+          text: "OK",
+          onPress: () => router.back(),
+        },
+      ]);
     } catch (err) {
       console.warn("Failed to save new job:", err);
-      Alert.alert(
-        "Error",
-        "Something went wrong while saving the job. Please try again."
-      );
+      Alert.alert("Error", "Could not save job. Try again.");
     }
   };
 
   return (
     <KeyboardAvoidingView
-      style={{ flex: 1, backgroundColor: "#020617" }}
+      style={{ flex: 1, backgroundColor: theme.screenBackground }}
       behavior={Platform.OS === "ios" ? "padding" : "height"}
       keyboardVerticalOffset={Platform.OS === "ios" ? 20 : 0}
     >
-      <Animated.View
-        style={[styles.detailsScreen, { transform: [{ scale: screenScale }] }]}
-      >
-        <TouchableWithoutFeedback onPress={Keyboard.dismiss} accessible={false}>
+      <TouchableWithoutFeedback onPress={Keyboard.dismiss} accessible={false}>
+        <Animated.View
+          style={[
+            styles.container,
+            {
+              transform: [{ scale: screenScale }],
+              backgroundColor: theme.screenBackground,
+            },
+          ]}
+        >
+          {/* HEADER */}
+          <View style={styles.headerRow}>
+            <TouchableOpacity
+              style={styles.backButton}
+              onPress={() => router.back()}
+              activeOpacity={0.8}
+            >
+              <Ionicons
+                name="chevron-back"
+                size={20}
+                color={theme.headerMuted}
+              />
+              <Text
+                style={[
+                  styles.backText,
+                  { color: theme.headerMuted },
+                ]}
+              >
+                Back
+              </Text>
+            </TouchableOpacity>
+
+            <Text
+              style={[
+                styles.headerTitle,
+                { color: theme.headerText },
+              ]}
+            >
+              Add New Job
+            </Text>
+
+            <View style={{ width: 60 }} />
+          </View>
+
+          {/* FORM */}
           <ScrollView
-            ref={scrollRef}
-            contentContainerStyle={styles.detailsScroll}
-            keyboardShouldPersistTaps="handled"
-            onScrollBeginDrag={Keyboard.dismiss}
+            contentContainerStyle={styles.scrollContent}
+            keyboardShouldPersistTaps="always"
             showsVerticalScrollIndicator={false}
           >
-            {/* TITLE */}
+            {/* JOB INFO CARD */}
             <View
-              onLayout={(e) =>
-                registerSection("title", e.nativeEvent.layout.y)
-              }
+              style={[
+                styles.card,
+                {
+                  backgroundColor: theme.cardBackground,
+                  borderColor: theme.cardBorder,
+                },
+              ]}
             >
-              <Text style={styles.modalTitle}>Add New Job</Text>
+              <Text
+                style={[
+                  styles.cardTitle,
+                  { color: theme.textPrimary },
+                ]}
+              >
+                Job Info
+              </Text>
 
-              <Text style={styles.modalLabel}>Job Title</Text>
+              <Text
+                style={[
+                  styles.label,
+                  { color: theme.textMuted },
+                ]}
+              >
+                Title
+              </Text>
               <TextInput
-                style={styles.modalInput}
-                placeholder="Ex: Replace panel in basement"
-                placeholderTextColor="#6B7280"
+                style={[
+                  styles.input,
+                  {
+                    backgroundColor: theme.inputBackground,
+                    color: theme.inputText,
+                    borderColor: theme.inputBorder,
+                  },
+                ]}
                 value={title}
                 onChangeText={setTitle}
-                returnKeyType="next"
-                onFocus={() => scrollToSection("title")}
+                placeholder="Ex: Install Tesla Wall Charger"
+                placeholderTextColor={theme.textMuted}
               />
-            </View>
 
-            {/* ADDRESS + DESCRIPTION */}
-            <View
-              onLayout={(e) =>
-                registerSection("address", e.nativeEvent.layout.y)
-              }
-            >
-              <Text style={styles.modalLabel}>Address</Text>
+              <Text
+                style={[
+                  styles.label,
+                  { color: theme.textMuted },
+                ]}
+              >
+                Address
+              </Text>
               <TextInput
-                style={styles.modalInput}
-                placeholder="Ex: 123 Main St, Brooklyn, NY"
-                placeholderTextColor="#6B7280"
+                style={[
+                  styles.input,
+                  {
+                    backgroundColor: theme.inputBackground,
+                    color: theme.inputText,
+                    borderColor: theme.inputBorder,
+                  },
+                ]}
                 value={address}
                 onChangeText={setAddress}
-                returnKeyType="next"
-                onFocus={() => scrollToSection("address")}
+                placeholder="Job address"
+                placeholderTextColor={theme.textMuted}
               />
-            </View>
 
-            <View
-              onLayout={(e) =>
-                registerSection("description", e.nativeEvent.layout.y)
-              }
-            >
-              <Text style={styles.modalLabel}>Description / Scope</Text>
+              <Text
+                style={[
+                  styles.label,
+                  { color: theme.textMuted },
+                ]}
+              >
+                Description / Scope
+              </Text>
               <TextInput
-                style={styles.modalInputMultiline}
-                placeholder="Ex: Replace main panel, add AFCI breakers, label circuits..."
-                placeholderTextColor="#6B7280"
+                style={[
+                  styles.inputMultiline,
+                  {
+                    backgroundColor: theme.inputBackground,
+                    color: theme.inputText,
+                    borderColor: theme.inputBorder,
+                  },
+                ]}
                 value={description}
                 onChangeText={setDescription}
+                placeholder="What are you doing on this job?"
+                placeholderTextColor={theme.textMuted}
                 multiline
-                onFocus={() => scrollToSection("description")}
               />
             </View>
 
-            {/* STATUS + MAPS */}
+            {/* CLIENT INFO CARD */}
             <View
-              onLayout={(e) =>
-                registerSection("status", e.nativeEvent.layout.y)
-              }
+              style={[
+                styles.card,
+                {
+                  backgroundColor: theme.cardBackground,
+                  borderColor: theme.cardBorder,
+                },
+              ]}
             >
-              <Text style={styles.detailsSectionTitle}>Status</Text>
-              <Text style={styles.statusValue}>Open</Text>
-
-              <TouchableOpacity
-                style={styles.mapButton}
-                onPress={handleOpenInMaps}
-                activeOpacity={0.9}
+              <Text
+                style={[
+                  styles.cardTitle,
+                  { color: theme.textPrimary },
+                ]}
               >
-                <Text style={styles.mapPin}>📍</Text>
-                <Text style={styles.mapButtonText}>Open in Maps</Text>
-              </TouchableOpacity>
-            </View>
+                Client Info
+              </Text>
 
-            {/* CLIENT INFO */}
-            <View
-              onLayout={(e) =>
-                registerSection("clientName", e.nativeEvent.layout.y)
-              }
-            >
-              <Text style={styles.detailsSectionTitle}>Client Info</Text>
-
-              <Text style={styles.modalLabel}>Client Name</Text>
+              <Text
+                style={[
+                  styles.label,
+                  { color: theme.textMuted },
+                ]}
+              >
+                Client Name
+              </Text>
               <TextInput
-                style={styles.modalInput}
-                placeholder="Client name..."
-                placeholderTextColor="#6B7280"
+                style={[
+                  styles.input,
+                  {
+                    backgroundColor: theme.inputBackground,
+                    color: theme.inputText,
+                    borderColor: theme.inputBorder,
+                  },
+                ]}
                 value={clientName}
                 onChangeText={setClientName}
-                returnKeyType="next"
-                onFocus={() => scrollToSection("clientName")}
+                placeholder="Client name"
+                placeholderTextColor={theme.textMuted}
               />
-            </View>
 
-            <View
-              onLayout={(e) =>
-                registerSection("clientPhone", e.nativeEvent.layout.y)
-              }
-            >
-              <Text style={styles.modalLabel}>Client Phone</Text>
+              <Text
+                style={[
+                  styles.label,
+                  { color: theme.textMuted },
+                ]}
+              >
+                Client Phone
+              </Text>
               <TextInput
-                style={styles.modalInput}
-                placeholder="Phone number..."
-                placeholderTextColor="#6B7280"
+                style={[
+                  styles.input,
+                  {
+                    backgroundColor: theme.inputBackground,
+                    color: theme.inputText,
+                    borderColor: theme.inputBorder,
+                  },
+                ]}
                 value={clientPhone}
                 onChangeText={setClientPhone}
+                placeholder="Phone number"
                 keyboardType="phone-pad"
-                returnKeyType="next"
-                onFocus={() => scrollToSection("clientPhone")}
+                placeholderTextColor={theme.textMuted}
               />
-            </View>
 
-            <View
-              onLayout={(e) =>
-                registerSection("clientNotes", e.nativeEvent.layout.y)
-              }
-            >
-              <Text style={styles.modalLabel}>Client Notes</Text>
+              <Text
+                style={[
+                  styles.label,
+                  { color: theme.textMuted },
+                ]}
+              >
+                Notes (gate codes, timing, etc.)
+              </Text>
               <TextInput
-                style={styles.modalInputMultiline}
-                placeholder="Gate codes, timing, special info..."
-                placeholderTextColor="#6B7280"
+                style={[
+                  styles.inputMultiline,
+                  {
+                    backgroundColor: theme.inputBackground,
+                    color: theme.inputText,
+                    borderColor: theme.inputBorder,
+                  },
+                ]}
                 value={clientNotes}
                 onChangeText={setClientNotes}
+                placeholder="Any special info..."
+                placeholderTextColor={theme.textMuted}
                 multiline
-                onFocus={() => scrollToSection("clientNotes")}
               />
             </View>
 
             {/* PRICING CARD */}
             <View
-              onLayout={(e) =>
-                registerSection("pricing", e.nativeEvent.layout.y)
-              }
+              style={[
+                styles.card,
+                {
+                  backgroundColor: theme.cardBackground,
+                  borderColor: theme.cardBorder,
+                },
+              ]}
             >
-              <Text style={styles.detailsSectionTitle}>Pricing</Text>
+              <Text
+                style={[
+                  styles.cardTitle,
+                  { color: theme.textPrimary },
+                ]}
+              >
+                Pricing
+              </Text>
 
-              <View style={styles.pricingCard}>
-                <View style={styles.pricingHeaderRow}>
-                  <Text style={styles.pricingHeaderLabel}>Total</Text>
-                  <Text style={styles.pricingHeaderValue}>
-                    ${total.toFixed(2)}
-                  </Text>
-                </View>
-
-                <View style={styles.pricingInputsRow}>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.modalLabel}>Labor hours</Text>
-                    <TextInput
-                      style={styles.modalInput}
-                      placeholder="0"
-                      placeholderTextColor="#6B7280"
-                      value={laborHours}
-                      onChangeText={setLaborHours}
-                      keyboardType="numeric"
-                      returnKeyType="next"
-                      onFocus={() => scrollToSection("pricing")}
-                    />
-                  </View>
-
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.modalLabel}>Hourly rate</Text>
-                    <TextInput
-                      style={styles.modalInput}
-                      placeholder="0"
-                      placeholderTextColor="#6B7280"
-                      value={hourlyRate}
-                      onChangeText={setHourlyRate}
-                      keyboardType="numeric"
-                      returnKeyType="next"
-                      onFocus={() => scrollToSection("pricing")}
-                    />
-                  </View>
-                </View>
-
-                <Text style={styles.modalLabel}>Material cost</Text>
-                <TextInput
-                  style={styles.modalInput}
-                  placeholder="0"
-                  placeholderTextColor="#6B7280"
-                  value={materialCost}
-                  onChangeText={setMaterialCost}
-                  keyboardType="numeric"
-                  returnKeyType="done"
-                  onFocus={() => scrollToSection("pricing")}
-                />
-
-                <View style={styles.pricingBreakdownRow}>
-                  <Text style={styles.pricingBreakdownLabel}>Labor</Text>
-                  <Text style={styles.pricingBreakdownValue}>
-                    {hoursNum} h × ${rateNum.toFixed(2)}
-                  </Text>
-                </View>
-
-                <View style={styles.pricingBreakdownRow}>
-                  <Text style={styles.pricingBreakdownLabel}>Material</Text>
-                  <Text style={styles.pricingBreakdownValue}>
-                    ${materialNum.toFixed(2)}
-                  </Text>
-                </View>
-
-                <View style={styles.pricingDivider} />
-
-                <View style={styles.pricingBreakdownRow}>
+              <View style={styles.pricingRow}>
+                <View style={styles.pricingColumn}>
                   <Text
                     style={[
-                      styles.pricingBreakdownLabel,
-                      styles.pricingTotalLabel,
+                      styles.label,
+                      { color: theme.textMuted },
                     ]}
                   >
-                    Total
+                    Labor hours
                   </Text>
+                  <TextInput
+                    style={[
+                      styles.input,
+                      styles.inputCompact,
+                      {
+                        backgroundColor: theme.inputBackground,
+                        color: theme.inputText,
+                        borderColor: theme.inputBorder,
+                      },
+                    ]}
+                    value={laborHours}
+                    onChangeText={setLaborHours}
+                    placeholder="4.5"
+                    keyboardType="numeric"
+                    placeholderTextColor={theme.textMuted}
+                  />
+                </View>
+
+                <View style={styles.pricingColumn}>
                   <Text
                     style={[
-                      styles.pricingBreakdownValue,
-                      styles.pricingTotalValue,
+                      styles.label,
+                      { color: theme.textMuted },
                     ]}
                   >
-                    ${total.toFixed(2)}
+                    Hourly rate
                   </Text>
+                  <TextInput
+                    style={[
+                      styles.input,
+                      styles.inputCompact,
+                      {
+                        backgroundColor: theme.inputBackground,
+                        color: theme.inputText,
+                        borderColor: theme.inputBorder,
+                      },
+                    ]}
+                    value={hourlyRate}
+                    onChangeText={setHourlyRate}
+                    placeholder="120"
+                    keyboardType="numeric"
+                    placeholderTextColor={theme.textMuted}
+                  />
                 </View>
+              </View>
+
+              <Text
+                style={[
+                  styles.label,
+                  { color: theme.textMuted },
+                ]}
+              >
+                Material cost
+              </Text>
+              <TextInput
+                style={[
+                  styles.input,
+                  styles.inputCompact,
+                  {
+                    backgroundColor: theme.inputBackground,
+                    color: theme.inputText,
+                    borderColor: theme.inputBorder,
+                  },
+                ]}
+                value={materialCost}
+                onChangeText={setMaterialCost}
+                placeholder="350"
+                keyboardType="numeric"
+                placeholderTextColor={theme.textMuted}
+              />
+
+              <View style={styles.totalRow}>
+                <Text
+                  style={[
+                    styles.totalLabel,
+                    { color: theme.textMuted },
+                  ]}
+                >
+                  Estimated total
+                </Text>
+                <Text style={styles.totalValue}>
+                  $
+                  {totalAmount.toLocaleString("en-US", {
+                    minimumFractionDigits: 2,
+                  })}
+                </Text>
               </View>
             </View>
 
-            {/* PHOTOS */}
+            {/* PHOTOS CARD */}
             <View
-              onLayout={(e) =>
-                registerSection("photos", e.nativeEvent.layout.y)
-              }
+              style={[
+                styles.card,
+                {
+                  backgroundColor: theme.cardBackground,
+                  borderColor: theme.cardBorder,
+                },
+              ]}
             >
-              <Text style={styles.detailsSectionTitle}>Photos</Text>
+              <Text
+                style={[
+                  styles.cardTitle,
+                  { color: theme.textPrimary },
+                ]}
+              >
+                Photos
+              </Text>
 
-              <View style={styles.photosRow}>
+              <View style={styles.photosButtonRow}>
                 <TouchableOpacity
-                  style={styles.addPhotoButton}
-                  onPress={() => {
-                    scrollToSection("photos");
-                    setIsAddPhotoMenuVisible(true);
-                  }}
+                  style={[
+                    styles.photoActionButton,
+                    {
+                      backgroundColor: theme.secondaryButtonBackground,
+                    },
+                  ]}
+                  onPress={handleAddPhotoFromCamera}
                   activeOpacity={0.9}
                 >
-                  <Text style={styles.addPhotoButtonText}>+ Add Photo</Text>
+                  <Text
+                    style={[
+                      styles.photoActionText,
+                      { color: theme.secondaryButtonText },
+                    ]}
+                  >
+                    📸 Take photo
+                  </Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[
+                    styles.photoActionButton,
+                    {
+                      backgroundColor: theme.secondaryButtonBackground,
+                    },
+                  ]}
+                  onPress={handleAddPhotoFromGallery}
+                  activeOpacity={0.9}
+                >
+                  <Text
+                    style={[
+                      styles.photoActionText,
+                      { color: theme.secondaryButtonText },
+                    ]}
+                  >
+                    🖼️ From Gallery
+                  </Text>
                 </TouchableOpacity>
               </View>
 
               {photoUris.length > 0 && (
                 <View style={styles.photoGrid}>
-                  {photoUris.slice(0, MAX_THUMBS_TO_SHOW).map((uri, index) => {
-                    const isLastTile =
-                      index === MAX_THUMBS_TO_SHOW - 1 &&
-                      photoUris.length > MAX_THUMBS_TO_SHOW;
-                    const extraCount = photoUris.length - MAX_THUMBS_TO_SHOW;
-
-                    return (
-                      <View key={uri} style={styles.photoWrapper}>
-                        <TouchableOpacity
-                          style={{ flex: 1 }}
-                          activeOpacity={0.9}
-                        >
-                          <View style={styles.photoThumb}>
-                            <Image
-                              source={{ uri }}
-                              style={styles.photoThumbImage}
-                              resizeMode="cover"
-                            />
-                          </View>
-
-                          {isLastTile && extraCount > 0 && (
-                            <View style={styles.photoMoreOverlay}>
-                              <Text style={styles.photoMoreText}>
-                                + {extraCount} more
-                              </Text>
-                            </View>
-                          )}
-                        </TouchableOpacity>
-
-                        {!isLastTile && (
-                          <TouchableOpacity
-                            style={styles.photoRemoveButton}
-                            onPress={() => handleRemovePhoto(uri)}
-                          >
-                            <Text style={styles.photoRemoveText}>X</Text>
-                          </TouchableOpacity>
-                        )}
-                      </View>
-                    );
-                  })}
+                  {photoUris.map((uri) => (
+                    <View key={uri} style={styles.photoWrapper}>
+                      <Image
+                        source={{ uri }}
+                        style={styles.photoThumb}
+                        resizeMode="cover"
+                      />
+                      <TouchableOpacity
+                        style={styles.photoRemoveButton}
+                        onPress={() => handleRemovePhoto(uri)}
+                      >
+                        <Text style={styles.photoRemoveText}>X</Text>
+                      </TouchableOpacity>
+                    </View>
+                  ))}
                 </View>
               )}
             </View>
 
-            {/* BUTTONS (bottom) */}
-            <View style={styles.modalButtonRow}>
-              <TouchableOpacity
-                style={[styles.modalButton, styles.modalButtonSecondary]}
-                onPress={() => router.back()}
-                activeOpacity={0.9}
-              >
-                <Text style={styles.modalButtonText}>Cancel</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={[styles.modalButton, styles.modalButtonPrimary]}
-                onPress={handleSave}
-                activeOpacity={0.9}
-              >
-                <Text style={styles.modalButtonText}>Save Job</Text>
-              </TouchableOpacity>
-            </View>
-          </ScrollView>
-        </TouchableWithoutFeedback>
-
-        {/* Add Photo bottom sheet */}
-        {isAddPhotoMenuVisible && (
-          <View style={styles.addPhotoMenuOverlay}>
-            <TouchableWithoutFeedback
-              onPress={() => setIsAddPhotoMenuVisible(false)}
+            {/* SAVE BUTTON */}
+            <Animated.View
+              style={[
+                styles.saveButtonWrapper,
+                { transform: [{ scale: saveButtonScale }] },
+              ]}
             >
-              <View style={styles.addPhotoMenuBackdrop} />
-            </TouchableWithoutFeedback>
-
-            <View style={styles.addPhotoMenuSheet}>
-              <Text style={styles.addPhotoMenuTitle}>Add Photo</Text>
-
               <TouchableOpacity
-                style={styles.addPhotoMenuOption}
-                onPress={() => {
-                  setIsAddPhotoMenuVisible(false);
-                  handleAddPhotoFromCamera();
-                }}
+                style={[
+                  styles.saveButton,
+                  { backgroundColor: theme.primaryButtonBackground },
+                ]}
+                onPress={handleSaveJob}
                 activeOpacity={0.9}
+                onPressIn={saveAnim.onPressIn}
+                onPressOut={saveAnim.onPressOut}
               >
-                <Text style={styles.addPhotoMenuOptionText}>📸 Take Photo</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={styles.addPhotoMenuOption}
-                onPress={() => {
-                  setIsAddPhotoMenuVisible(false);
-                  handleAddPhotoFromGallery();
-                }}
-                activeOpacity={0.9}
-              >
-                <Text style={styles.addPhotoMenuOptionText}>
-                  🖼️ Choose from Gallery
+                <Text
+                  style={[
+                    styles.saveButtonText,
+                    { color: theme.primaryButtonText },
+                  ]}
+                >
+                  Save Job
                 </Text>
               </TouchableOpacity>
+            </Animated.View>
 
-              <TouchableOpacity
-                style={styles.addPhotoMenuCancel}
-                onPress={() => setIsAddPhotoMenuVisible(false)}
-                activeOpacity={0.8}
+            <TouchableOpacity
+              style={styles.cancelButton}
+              onPress={() => router.back()}
+              activeOpacity={0.8}
+            >
+              <Text
+                style={[
+                  styles.cancelText,
+                  { color: theme.textMuted },
+                ]}
               >
-                <Text style={styles.addPhotoMenuCancelText}>Cancel</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        )}
-      </Animated.View>
+                Cancel
+              </Text>
+            </TouchableOpacity>
+          </ScrollView>
+        </Animated.View>
+      </TouchableWithoutFeedback>
     </KeyboardAvoidingView>
   );
-}
+};
+
+export default AddJobScreen;
 
 const styles = StyleSheet.create({
-  detailsScreen: {
+  container: {
     flex: 1,
-    paddingTop: 56,
-  },
-  detailsScroll: {
-    flexGrow: 1,
     paddingHorizontal: 16,
-    paddingBottom: 24,
+    paddingTop: 48,
   },
-  modalTitle: {
+  headerRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 12,
+  },
+  backButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 2,
+  },
+  backText: {
+    fontSize: 13,
+  },
+  headerTitle: {
     fontSize: 18,
     fontWeight: "700",
-    color: "#F9FAFB",
-    marginBottom: 12,
-    textAlign: "center",
   },
-  modalLabel: {
+  scrollContent: {
+    paddingBottom: 32,
+  },
+  card: {
+    borderRadius: 16,
+    padding: 14,
+    borderWidth: 1,
+    marginBottom: 12,
+  },
+  cardTitle: {
+    fontSize: 14,
+    fontWeight: "700",
+    marginBottom: 8,
+  },
+  label: {
     fontSize: 12,
-    color: "#D1D5DB",
     marginBottom: 4,
   },
-  modalInput: {
-    backgroundColor: "#111827",
-    borderRadius: 8,
+  input: {
+    borderRadius: 10,
     paddingHorizontal: 10,
     paddingVertical: 8,
-    color: "#F9FAFB",
     fontSize: 13,
+    borderWidth: 1,
     marginBottom: 10,
   },
-  modalInputMultiline: {
-    backgroundColor: "#111827",
-    borderRadius: 8,
+  inputMultiline: {
+    borderRadius: 10,
     paddingHorizontal: 10,
     paddingVertical: 8,
-    color: "#F9FAFB",
     fontSize: 13,
+    borderWidth: 1,
     marginBottom: 10,
     minHeight: 90,
     textAlignVertical: "top",
   },
-  detailsSectionTitle: {
-    fontSize: 14,
-    color: "#E5E7EB",
-    fontWeight: "700",
-    marginTop: 16,
-    marginBottom: 6,
-  },
-  statusValue: {
-    fontSize: 14,
-    color: "#F9FAFB",
-    marginBottom: 6,
-  },
-  mapButton: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    borderRadius: 999,
-    borderWidth: 1,
-    borderColor: "#1F2937",
-    backgroundColor: "#020617",
-    paddingVertical: 10,
-    paddingHorizontal: 16,
-    marginBottom: 12,
-  },
-  mapPin: {
-    marginRight: 6,
-    fontSize: 14,
-  },
-  mapButtonText: {
-    color: "#E5E7EB",
-    fontSize: 13,
-    fontWeight: "600",
-  },
-  // Pricing card
-  pricingCard: {
-    backgroundColor: "#020617",
-    borderRadius: 18,
-    padding: 12,
-    borderWidth: 1,
-    borderColor: "#1F2937",
-    marginBottom: 12,
-    marginTop: 4,
-  },
-  pricingHeaderRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    marginBottom: 8,
-  },
-  pricingHeaderLabel: {
-    fontSize: 13,
-    color: "#E5E7EB",
-    fontWeight: "600",
-  },
-  pricingHeaderValue: {
-    fontSize: 18,
-    color: "#FACC15",
-    fontWeight: "700",
-  },
-  pricingInputsRow: {
+  pricingRow: {
     flexDirection: "row",
     gap: 8,
-    marginBottom: 4,
   },
-  pricingBreakdownRow: {
+  pricingColumn: {
+    flex: 1,
+  },
+  inputCompact: {
+    marginBottom: 6,
+  },
+  totalRow: {
+    marginTop: 6,
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    marginTop: 2,
   },
-  pricingBreakdownLabel: {
+  totalLabel: {
     fontSize: 12,
-    color: "#9CA3AF",
   },
-  pricingBreakdownValue: {
-    fontSize: 12,
-    color: "#E5E7EB",
+  totalValue: {
+    fontSize: 15,
+    fontWeight: "800",
+    color: "#FCD34D",
   },
-  pricingDivider: {
-    height: StyleSheet.hairlineWidth,
-    backgroundColor: "#1F2937",
-    marginVertical: 8,
-  },
-  pricingTotalLabel: {
-    fontWeight: "700",
-    color: "#E5E7EB",
-  },
-  pricingTotalValue: {
-    fontWeight: "700",
-    color: "#FACC15",
-  },
-  // Photos
-  photosRow: {
+  photosButtonRow: {
     flexDirection: "row",
-    alignItems: "center",
-    marginBottom: 8,
+    gap: 8,
+    marginBottom: 10,
   },
-  addPhotoButton: {
-    backgroundColor: "#111827",
-    paddingHorizontal: 12,
-    paddingVertical: 8,
+  photoActionButton: {
+    flex: 1,
     borderRadius: 999,
-    borderWidth: 1,
-    borderColor: "#4B5563",
+    paddingVertical: 8,
+    alignItems: "center",
+    justifyContent: "center",
   },
-  addPhotoButtonText: {
-    color: "#E5E7EB",
+  photoActionText: {
     fontSize: 12,
     fontWeight: "600",
   },
@@ -761,7 +857,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     flexWrap: "wrap",
     gap: GRID_GAP,
-    marginBottom: 10,
+    marginBottom: 4,
   },
   photoWrapper: {
     position: "relative",
@@ -772,12 +868,6 @@ const styles = StyleSheet.create({
     backgroundColor: "#020617",
   },
   photoThumb: {
-    width: "100%",
-    height: "100%",
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  photoThumbImage: {
     width: "100%",
     height: "100%",
   },
@@ -795,90 +885,23 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontWeight: "700",
   },
-  photoMoreOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: "rgba(0,0,0,0.55)",
-    justifyContent: "center",
+  saveButtonWrapper: {
+    marginTop: 8,
+  },
+  saveButton: {
+    borderRadius: 12,
+    paddingVertical: 14,
     alignItems: "center",
   },
-  photoMoreText: {
-    color: "#F9FAFB",
-    fontSize: 14,
-    fontWeight: "700",
-  },
-  // Bottom sheet for Add Photo
-  addPhotoMenuOverlay: {
-    position: "absolute",
-    left: 0,
-    right: 0,
-    bottom: 0,
-    top: 0,
-    justifyContent: "flex-end",
-  },
-  addPhotoMenuBackdrop: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: "rgba(0,0,0,0.4)",
-  },
-  addPhotoMenuSheet: {
-    backgroundColor: "#020617",
-    paddingHorizontal: 16,
-    paddingTop: 12,
-    paddingBottom: 24,
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-  },
-  addPhotoMenuTitle: {
-    fontSize: 14,
+  saveButtonText: {
+    fontSize: 16,
     fontWeight: "600",
-    color: "#E5E7EB",
-    marginBottom: 8,
-    textAlign: "center",
   },
-  addPhotoMenuOption: {
-    backgroundColor: "#111827",
-    borderRadius: 10,
-    paddingVertical: 10,
-    paddingHorizontal: 12,
-    marginBottom: 8,
-    borderWidth: 1,
-    borderColor: "#374151",
-  },
-  addPhotoMenuOptionText: {
-    color: "#F9FAFB",
-    fontSize: 14,
-    textAlign: "center",
-  },
-  addPhotoMenuCancel: {
-    marginTop: 4,
-    paddingVertical: 8,
-  },
-  addPhotoMenuCancelText: {
-    color: "#9CA3AF",
-    fontSize: 13,
-    textAlign: "center",
-  },
-  // Buttons row
-  modalButtonRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    marginTop: 16,
-    gap: 8,
-  },
-  modalButton: {
-    flex: 1,
-    borderRadius: 10,
-    paddingVertical: 10,
+  cancelButton: {
+    marginTop: 10,
     alignItems: "center",
   },
-  modalButtonPrimary: {
-    backgroundColor: "#2563EB",
-  },
-  modalButtonSecondary: {
-    backgroundColor: "#374151",
-  },
-  modalButtonText: {
-    color: "#FFFFFF",
+  cancelText: {
     fontSize: 13,
-    fontWeight: "600",
   },
 });

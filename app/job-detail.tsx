@@ -6,6 +6,7 @@ import React, { useEffect, useRef, useState } from "react";
 import {
   Alert,
   Animated,
+  Dimensions,
   Image,
   Keyboard,
   KeyboardAvoidingView,
@@ -21,6 +22,7 @@ import {
   View,
 } from "react-native";
 import ImageViewing from "react-native-image-viewing";
+import { THEME_STORAGE_KEY, ThemeName, themes } from "./theme";
 
 // 👇 Job shape must match home.tsx / add-job.tsx
 type Job = {
@@ -49,13 +51,34 @@ const STORAGE_KEYS = {
 const GRID_COLUMNS = 3;
 const GRID_HORIZONTAL_PADDING = 16 * 2;
 const GRID_GAP = 8;
+
+const screenWidth = Dimensions.get("window").width;
 const THUMB_SIZE =
-  (360 - GRID_HORIZONTAL_PADDING - GRID_GAP * (GRID_COLUMNS - 1)) /
-  GRID_COLUMNS; // 360 ≈ phone width; works fine visually
+  (screenWidth - GRID_HORIZONTAL_PADDING - GRID_GAP * (GRID_COLUMNS - 1)) /
+  GRID_COLUMNS;
 
 export default function JobDetailScreen() {
   const router = useRouter();
   const { id } = useLocalSearchParams<{ id?: string }>();
+
+  // THEME
+  const [themeName, setThemeName] = useState<ThemeName>("dark");
+  const theme = themes[themeName];
+
+  useEffect(() => {
+    const loadTheme = async () => {
+      try {
+        const saved = await AsyncStorage.getItem(THEME_STORAGE_KEY);
+        if (saved === "light" || saved === "dark" || saved === "midnight") {
+          setThemeName(saved as ThemeName);
+        }
+      } catch (err) {
+        console.warn("Failed to load theme:", err);
+      }
+    };
+
+    loadTheme();
+  }, []);
 
   const [job, setJob] = useState<Job | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -349,8 +372,7 @@ export default function JobDetailScreen() {
   };
 
   const handleAddPhotoFromGallery = async () => {
-    const { status } =
-      await ImagePicker.requestMediaLibraryPermissionsAsync();
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (status !== "granted") {
       Alert.alert(
         "Permission needed",
@@ -379,8 +401,7 @@ export default function JobDetailScreen() {
   };
 
   const handleAddPhotoFromCamera = async () => {
-    const { status } =
-      await ImagePicker.requestCameraPermissionsAsync();
+    const { status } = await ImagePicker.requestCameraPermissionsAsync();
     if (status !== "granted") {
       Alert.alert(
         "Permission needed",
@@ -429,21 +450,49 @@ export default function JobDetailScreen() {
   // ---------- Render states ----------
   if (isLoading) {
     return (
-      <View style={styles.loadingScreen}>
-        <Text style={styles.loadingText}>Loading job…</Text>
+      <View
+        style={[
+          styles.loadingScreen,
+          { backgroundColor: theme.screenBackground },
+        ]}
+      >
+        <Text
+          style={[styles.loadingText, { color: theme.textPrimary }]}
+        >
+          Loading job…
+        </Text>
       </View>
     );
   }
 
   if (!job) {
     return (
-      <View style={styles.loadingScreen}>
-        <Text style={styles.loadingText}>Job not found.</Text>
+      <View
+        style={[
+          styles.loadingScreen,
+          { backgroundColor: theme.screenBackground },
+        ]}
+      >
+        <Text
+          style={[styles.loadingText, { color: theme.textPrimary }]}
+        >
+          Job not found.
+        </Text>
         <TouchableOpacity
-          style={styles.simpleButton}
+          style={[
+            styles.simpleButton,
+            { backgroundColor: theme.primaryButtonBackground },
+          ]}
           onPress={() => router.back()}
         >
-          <Text style={styles.simpleButtonText}>Back</Text>
+          <Text
+            style={[
+              styles.simpleButtonText,
+              { color: theme.primaryButtonText },
+            ]}
+          >
+            Back
+          </Text>
         </TouchableOpacity>
       </View>
     );
@@ -451,14 +500,17 @@ export default function JobDetailScreen() {
 
   return (
     <KeyboardAvoidingView
-      style={{ flex: 1, backgroundColor: "#020617" }}
+      style={{ flex: 1, backgroundColor: theme.screenBackground }}
       behavior={Platform.OS === "ios" ? "padding" : "height"}
       keyboardVerticalOffset={Platform.OS === "ios" ? 20 : 0}
     >
       <Animated.View
         style={[
           styles.detailsScreen,
-          { transform: [{ scale: screenScale }] },
+          {
+            transform: [{ scale: screenScale }],
+            backgroundColor: theme.screenBackground,
+          },
         ]}
       >
         {/* Header */}
@@ -468,9 +520,20 @@ export default function JobDetailScreen() {
             style={styles.backButton}
             activeOpacity={0.8}
           >
-            <Text style={styles.backText}>← Back</Text>
+            <Text
+              style={[styles.backText, { color: theme.headerMuted }]}
+            >
+              ← Back
+            </Text>
           </TouchableOpacity>
-          <Text style={styles.headerTitle}>Job Detail</Text>
+          <Text
+            style={[
+              styles.headerTitle,
+              { color: theme.headerText },
+            ]}
+          >
+            Job Detail
+          </Text>
           <View style={{ width: 60 }} />
         </View>
 
@@ -492,8 +555,19 @@ export default function JobDetailScreen() {
                   registerSection("jobId", e.nativeEvent.layout.y)
                 }
               >
-                <Text style={styles.sectionTitle}>Job ID</Text>
-                <Text style={styles.infoText}>{job.id}</Text>
+                <Text
+                  style={[
+                    styles.sectionTitle,
+                    { color: theme.textSecondary },
+                  ]}
+                >
+                  Job ID
+                </Text>
+                <Text
+                  style={[styles.infoText, { color: theme.textPrimary }]}
+                >
+                  {job.id}
+                </Text>
               </View>
 
               {/* Title */}
@@ -502,12 +576,27 @@ export default function JobDetailScreen() {
                   registerSection("title", e.nativeEvent.layout.y)
                 }
               >
-                <Text style={styles.modalLabel}>Title</Text>
+                <Text
+                  style={[
+                    styles.modalLabel,
+                    { color: theme.textSecondary },
+                  ]}
+                >
+                  Title
+                </Text>
                 <TextInput
-                  style={styles.modalInput}
+                  style={[
+                    styles.modalInput,
+                    {
+                      backgroundColor: theme.inputBackground,
+                      color: theme.inputText,
+                      borderColor: theme.inputBorder,
+                      borderWidth: 1,
+                    },
+                  ]}
                   value={editTitle}
                   onChangeText={setEditTitle}
-                  placeholderTextColor="#6B7280"
+                  placeholderTextColor={theme.textMuted}
                   onFocus={() => scrollToSection("title")}
                 />
               </View>
@@ -518,12 +607,27 @@ export default function JobDetailScreen() {
                   registerSection("address", e.nativeEvent.layout.y)
                 }
               >
-                <Text style={styles.modalLabel}>Address</Text>
+                <Text
+                  style={[
+                    styles.modalLabel,
+                    { color: theme.textSecondary },
+                  ]}
+                >
+                  Address
+                </Text>
                 <TextInput
-                  style={styles.modalInput}
+                  style={[
+                    styles.modalInput,
+                    {
+                      backgroundColor: theme.inputBackground,
+                      color: theme.inputText,
+                      borderColor: theme.inputBorder,
+                      borderWidth: 1,
+                    },
+                  ]}
                   value={editAddress}
                   onChangeText={setEditAddress}
-                  placeholderTextColor="#6B7280"
+                  placeholderTextColor={theme.textMuted}
                   onFocus={() => scrollToSection("address")}
                 />
               </View>
@@ -534,13 +638,28 @@ export default function JobDetailScreen() {
                   registerSection("description", e.nativeEvent.layout.y)
                 }
               >
-                <Text style={styles.modalLabel}>Description / Scope</Text>
+                <Text
+                  style={[
+                    styles.modalLabel,
+                    { color: theme.textSecondary },
+                  ]}
+                >
+                  Description / Scope
+                </Text>
                 <TextInput
-                  style={styles.modalInputMultiline}
+                  style={[
+                    styles.modalInputMultiline,
+                    {
+                      backgroundColor: theme.inputBackground,
+                      color: theme.inputText,
+                      borderColor: theme.inputBorder,
+                      borderWidth: 1,
+                    },
+                  ]}
                   value={editDescription}
                   onChangeText={setEditDescription}
                   multiline
-                  placeholderTextColor="#6B7280"
+                  placeholderTextColor={theme.textMuted}
                   onFocus={() => scrollToSection("description")}
                 />
               </View>
@@ -551,8 +670,17 @@ export default function JobDetailScreen() {
                   registerSection("status", e.nativeEvent.layout.y)
                 }
               >
-                <Text style={styles.sectionTitle}>Status</Text>
-                <Text style={styles.infoText}>
+                <Text
+                  style={[
+                    styles.sectionTitle,
+                    { color: theme.textSecondary },
+                  ]}
+                >
+                  Status
+                </Text>
+                <Text
+                  style={[styles.infoText, { color: theme.textPrimary }]}
+                >
                   {isDone ? "Done" : "Open"}
                 </Text>
 
@@ -560,21 +688,45 @@ export default function JobDetailScreen() {
                 <View style={styles.quickActionsRow}>
                   {!!editClientPhone.trim() && (
                     <TouchableOpacity
-                      style={styles.quickActionButton}
+                      style={[
+                        styles.quickActionButton,
+                        {
+                          backgroundColor: theme.cardBackground,
+                          borderColor: theme.cardBorder,
+                        },
+                      ]}
                       onPress={handleCallClient}
                       activeOpacity={0.9}
                     >
-                      <Text style={styles.quickActionText}>📞 Call Client</Text>
+                      <Text
+                        style={[
+                          styles.quickActionText,
+                          { color: theme.textPrimary },
+                        ]}
+                      >
+                        📞 Call Client
+                      </Text>
                     </TouchableOpacity>
                   )}
 
                   {!!editAddress.trim() && (
                     <TouchableOpacity
-                      style={styles.quickActionButton}
+                      style={[
+                        styles.quickActionButton,
+                        {
+                          backgroundColor: theme.cardBackground,
+                          borderColor: theme.cardBorder,
+                        },
+                      ]}
                       onPress={handleOpenInMaps}
                       activeOpacity={0.9}
                     >
-                      <Text style={styles.quickActionText}>
+                      <Text
+                        style={[
+                          styles.quickActionText,
+                          { color: theme.textPrimary },
+                        ]}
+                      >
                         📍 Open in Maps
                       </Text>
                     </TouchableOpacity>
@@ -588,36 +740,88 @@ export default function JobDetailScreen() {
                   registerSection("client", e.nativeEvent.layout.y)
                 }
               >
-                <Text style={styles.sectionTitle}>Client Info</Text>
+                <Text
+                  style={[
+                    styles.sectionTitle,
+                    { color: theme.textSecondary },
+                  ]}
+                >
+                  Client Info
+                </Text>
 
-                <Text style={styles.modalLabel}>Client Name</Text>
+                <Text
+                  style={[
+                    styles.modalLabel,
+                    { color: theme.textSecondary },
+                  ]}
+                >
+                  Client Name
+                </Text>
                 <TextInput
-                  style={styles.modalInput}
+                  style={[
+                    styles.modalInput,
+                    {
+                      backgroundColor: theme.inputBackground,
+                      color: theme.inputText,
+                      borderColor: theme.inputBorder,
+                      borderWidth: 1,
+                    },
+                  ]}
                   value={editClientName}
                   onChangeText={setEditClientName}
                   placeholder="Client name..."
-                  placeholderTextColor="#6B7280"
+                  placeholderTextColor={theme.textMuted}
                   onFocus={() => scrollToSection("client")}
                 />
 
-                <Text style={styles.modalLabel}>Client Phone</Text>
+                <Text
+                  style={[
+                    styles.modalLabel,
+                    { color: theme.textSecondary },
+                  ]}
+                >
+                  Client Phone
+                </Text>
                 <TextInput
-                  style={styles.modalInput}
+                  style={[
+                    styles.modalInput,
+                    {
+                      backgroundColor: theme.inputBackground,
+                      color: theme.inputText,
+                      borderColor: theme.inputBorder,
+                      borderWidth: 1,
+                    },
+                  ]}
                   value={editClientPhone}
                   onChangeText={setEditClientPhone}
                   placeholder="Phone number..."
-                  placeholderTextColor="#6B7280"
+                  placeholderTextColor={theme.textMuted}
                   keyboardType="phone-pad"
                   onFocus={() => scrollToSection("client")}
                 />
 
-                <Text style={styles.modalLabel}>Client Notes</Text>
+                <Text
+                  style={[
+                    styles.modalLabel,
+                    { color: theme.textSecondary },
+                  ]}
+                >
+                  Client Notes
+                </Text>
                 <TextInput
-                  style={styles.modalInputMultiline}
+                  style={[
+                    styles.modalInputMultiline,
+                    {
+                      backgroundColor: theme.inputBackground,
+                      color: theme.inputText,
+                      borderColor: theme.inputBorder,
+                      borderWidth: 1,
+                    },
+                  ]}
                   value={editClientNotes}
                   onChangeText={setEditClientNotes}
                   placeholder="Gate codes, timing, special info..."
-                  placeholderTextColor="#6B7280"
+                  placeholderTextColor={theme.textMuted}
                   multiline
                   onFocus={() => scrollToSection("client")}
                 />
@@ -629,12 +833,34 @@ export default function JobDetailScreen() {
                   registerSection("pricing", e.nativeEvent.layout.y)
                 }
               >
-                <Text style={styles.sectionTitle}>Pricing</Text>
+                <Text
+                  style={[
+                    styles.sectionTitle,
+                    { color: theme.textSecondary },
+                  ]}
+                >
+                  Pricing
+                </Text>
 
-                <View style={styles.pricingCard}>
+                <View
+                  style={[
+                    styles.pricingCard,
+                    {
+                      backgroundColor: theme.cardSecondaryBackground,
+                      borderColor: theme.cardBorder,
+                    },
+                  ]}
+                >
                   {/* BIG TOTAL at the top */}
                   <View style={styles.pricingTotalHeader}>
-                    <Text style={styles.pricingTotalHeaderLabel}>Total</Text>
+                    <Text
+                      style={[
+                        styles.pricingTotalHeaderLabel,
+                        { color: theme.textMuted },
+                      ]}
+                    >
+                      Total
+                    </Text>
                     <Text style={styles.pricingTotalHeaderValue}>
                       $
                       {totalAmount.toLocaleString("en-US", {
@@ -646,62 +872,143 @@ export default function JobDetailScreen() {
                   {/* Inputs in a grid */}
                   <View style={styles.pricingInputsRow}>
                     <View style={styles.pricingColumn}>
-                      <Text style={styles.modalLabel}>Labor hours</Text>
+                      <Text
+                        style={[
+                          styles.modalLabel,
+                          { color: theme.textSecondary },
+                        ]}
+                      >
+                        Labor hours
+                      </Text>
                       <TextInput
-                        style={[styles.modalInput, styles.pricingInput]}
+                        style={[
+                          styles.modalInput,
+                          styles.pricingInput,
+                          {
+                            backgroundColor: theme.inputBackground,
+                            color: theme.inputText,
+                            borderColor: theme.inputBorder,
+                            borderWidth: 1,
+                          },
+                        ]}
                         value={laborHours}
                         onChangeText={setLaborHours}
                         keyboardType="numeric"
                         placeholder="e.g. 4"
-                        placeholderTextColor="#6B7280"
+                        placeholderTextColor={theme.textMuted}
                         onFocus={() => scrollToSection("pricing")}
                       />
                     </View>
 
                     <View style={styles.pricingColumn}>
-                      <Text style={styles.modalLabel}>Hourly rate</Text>
+                      <Text
+                        style={[
+                          styles.modalLabel,
+                          { color: theme.textSecondary },
+                        ]}
+                      >
+                        Hourly rate
+                      </Text>
                       <TextInput
-                        style={[styles.modalInput, styles.pricingInput]}
+                        style={[
+                          styles.modalInput,
+                          styles.pricingInput,
+                          {
+                            backgroundColor: theme.inputBackground,
+                            color: theme.inputText,
+                            borderColor: theme.inputBorder,
+                            borderWidth: 1,
+                          },
+                        ]}
                         value={hourlyRate}
                         onChangeText={setHourlyRate}
                         keyboardType="numeric"
                         placeholder="e.g. 125"
-                        placeholderTextColor="#6B7280"
+                        placeholderTextColor={theme.textMuted}
                         onFocus={() => scrollToSection("pricing")}
                       />
                     </View>
                   </View>
 
                   <View style={styles.pricingSingleRow}>
-                    <Text style={styles.modalLabel}>Material cost</Text>
+                    <Text
+                      style={[
+                        styles.modalLabel,
+                        { color: theme.textSecondary },
+                      ]}
+                    >
+                      Material cost
+                    </Text>
                     <TextInput
-                      style={[styles.modalInput, styles.pricingInput]}
+                      style={[
+                        styles.modalInput,
+                        styles.pricingInput,
+                        {
+                          backgroundColor: theme.inputBackground,
+                          color: theme.inputText,
+                          borderColor: theme.inputBorder,
+                          borderWidth: 1,
+                        },
+                      ]}
                       value={materialCost}
                       onChangeText={setMaterialCost}
                       keyboardType="numeric"
                       placeholder="e.g. 300"
-                      placeholderTextColor="#6B7280"
+                      placeholderTextColor={theme.textMuted}
                       onFocus={() => scrollToSection("pricing")}
                     />
                   </View>
 
                   {/* Read-style breakdown */}
-                  <View style={styles.pricingSummaryBox}>
+                  <View
+                    style={[
+                      styles.pricingSummaryBox,
+                      {
+                        backgroundColor: theme.cardBackground,
+                        borderColor: theme.cardBorder,
+                      },
+                    ]}
+                  >
                     <View style={styles.pricingSummaryRow}>
-                      <Text style={styles.pricingSummaryLabel}>Labor</Text>
-                      <Text style={styles.pricingSummaryValue}>
+                      <Text
+                        style={[
+                          styles.pricingSummaryLabel,
+                          { color: theme.textMuted },
+                        ]}
+                      >
+                        Labor
+                      </Text>
+                      <Text
+                        style={[
+                          styles.pricingSummaryValue,
+                          { color: theme.textPrimary },
+                        ]}
+                      >
                         {`${parseNumber(
                           laborHours
-                        )} h × $${parseNumber(hourlyRate).toLocaleString(
-                          "en-US",
-                          { minimumFractionDigits: 2 }
-                        )}`}
+                        )} h × $${parseNumber(
+                          hourlyRate
+                        ).toLocaleString("en-US", {
+                          minimumFractionDigits: 2,
+                        })}`}
                       </Text>
                     </View>
 
                     <View style={styles.pricingSummaryRow}>
-                      <Text style={styles.pricingSummaryLabel}>Material</Text>
-                      <Text style={styles.pricingSummaryValue}>
+                      <Text
+                        style={[
+                          styles.pricingSummaryLabel,
+                          { color: theme.textMuted },
+                        ]}
+                      >
+                        Material
+                      </Text>
+                      <Text
+                        style={[
+                          styles.pricingSummaryValue,
+                          { color: theme.textPrimary },
+                        ]}
+                      >
                         $
                         {parseNumber(materialCost).toLocaleString("en-US", {
                           minimumFractionDigits: 2,
@@ -710,7 +1017,14 @@ export default function JobDetailScreen() {
                     </View>
 
                     <View style={styles.pricingTotalRow}>
-                      <Text style={styles.pricingTotalLabel}>Total</Text>
+                      <Text
+                        style={[
+                          styles.pricingTotalLabel,
+                          { color: theme.textPrimary },
+                        ]}
+                      >
+                        Total
+                      </Text>
                       <Text style={styles.pricingTotalValue}>
                         $
                         {totalAmount.toLocaleString("en-US", {
@@ -728,15 +1042,35 @@ export default function JobDetailScreen() {
                   registerSection("photos", e.nativeEvent.layout.y)
                 }
               >
-                <Text style={styles.sectionTitle}>Photos</Text>
+                <Text
+                  style={[
+                    styles.sectionTitle,
+                    { color: theme.textSecondary },
+                  ]}
+                >
+                  Photos
+                </Text>
 
                 <View style={styles.photosRow}>
                   <TouchableOpacity
-                    style={styles.addPhotoButton}
+                    style={[
+                      styles.addPhotoButton,
+                      {
+                        backgroundColor: theme.cardBackground,
+                        borderColor: theme.cardBorder,
+                      },
+                    ]}
                     onPress={() => setIsAddPhotoMenuVisible(true)}
                     activeOpacity={0.9}
                   >
-                    <Text style={styles.addPhotoButtonText}>+ Add Photo</Text>
+                    <Text
+                      style={[
+                        styles.addPhotoButtonText,
+                        { color: theme.textPrimary },
+                      ]}
+                    >
+                      + Add Photo
+                    </Text>
                   </TouchableOpacity>
                 </View>
 
@@ -768,7 +1102,12 @@ export default function JobDetailScreen() {
                 )}
               </View>
 
-              <Text style={styles.modalMeta}>
+              <Text
+                style={[
+                  styles.modalMeta,
+                  { color: theme.textMuted },
+                ]}
+              >
                 Created: {new Date(job.createdAt).toLocaleString()}
               </Text>
 
@@ -783,16 +1122,27 @@ export default function JobDetailScreen() {
                   <TouchableOpacity
                     style={[
                       styles.modalButton,
-                      isDone
-                        ? styles.modalButtonSecondary
-                        : styles.modalButtonPrimary,
+                      {
+                        backgroundColor: isDone
+                          ? theme.secondaryButtonBackground
+                          : theme.primaryButtonBackground,
+                      },
                     ]}
                     onPress={handleToggleDone}
                     activeOpacity={0.9}
                     onPressIn={markDoneAnim.onPressIn}
                     onPressOut={markDoneAnim.onPressOut}
                   >
-                    <Text style={styles.modalButtonText}>
+                    <Text
+                      style={[
+                        styles.modalButtonText,
+                        {
+                          color: isDone
+                            ? theme.secondaryButtonText
+                            : theme.primaryButtonText,
+                        },
+                      ]}
+                    >
                       {isDone ? "Mark as Not Done" : "Mark as Done"}
                     </Text>
                   </TouchableOpacity>
@@ -805,29 +1155,56 @@ export default function JobDetailScreen() {
                   }}
                 >
                   <TouchableOpacity
-                    style={[styles.modalButton, styles.modalButtonPrimary]}
+                    style={[
+                      styles.modalButton,
+                      { backgroundColor: theme.primaryButtonBackground },
+                    ]}
                     onPress={handleSaveJobEdits}
                     activeOpacity={0.9}
                     onPressIn={saveChangesAnim.onPressIn}
                     onPressOut={saveChangesAnim.onPressOut}
                   >
-                    <Text style={styles.modalButtonText}>Save Changes</Text>
+                    <Text
+                      style={[
+                        styles.modalButtonText,
+                        { color: theme.primaryButtonText },
+                      ]}
+                    >
+                      Save Changes
+                    </Text>
                   </TouchableOpacity>
                 </Animated.View>
               </View>
 
               <TouchableOpacity
-                style={styles.modalDeleteButton}
+                style={[
+                  styles.modalDeleteButton,
+                  { borderColor: theme.dangerBorder },
+                ]}
                 onPress={confirmMoveToTrash}
               >
-                <Text style={styles.modalDeleteText}>Move to Trash</Text>
+                <Text
+                  style={[
+                    styles.modalDeleteText,
+                    { color: theme.dangerText },
+                  ]}
+                >
+                  Move to Trash
+                </Text>
               </TouchableOpacity>
 
               <TouchableOpacity
                 style={styles.modalCloseButton}
                 onPress={() => router.back()}
               >
-                <Text style={styles.modalCloseText}>Close</Text>
+                <Text
+                  style={[
+                    styles.modalCloseText,
+                    { color: theme.textMuted },
+                  ]}
+                >
+                  Close
+                </Text>
               </TouchableOpacity>
             </View>
           </TouchableWithoutFeedback>
@@ -842,29 +1219,65 @@ export default function JobDetailScreen() {
               <View style={styles.addPhotoMenuBackdrop} />
             </TouchableWithoutFeedback>
 
-            <View style={styles.addPhotoMenuSheet}>
-              <Text style={styles.addPhotoMenuTitle}>Add Photo</Text>
+            <View
+              style={[
+                styles.addPhotoMenuSheet,
+                { backgroundColor: theme.cardBackground },
+              ]}
+            >
+              <Text
+                style={[
+                  styles.addPhotoMenuTitle,
+                  { color: theme.textPrimary },
+                ]}
+              >
+                Add Photo
+              </Text>
 
               <TouchableOpacity
-                style={styles.addPhotoMenuOption}
+                style={[
+                  styles.addPhotoMenuOption,
+                  {
+                    backgroundColor: theme.cardBackground,
+                    borderColor: theme.cardBorder,
+                  },
+                ]}
                 onPress={() => {
                   setIsAddPhotoMenuVisible(false);
                   handleAddPhotoFromCamera();
                 }}
                 activeOpacity={0.9}
               >
-                <Text style={styles.addPhotoMenuOptionText}>📸 Take Photo</Text>
+                <Text
+                  style={[
+                    styles.addPhotoMenuOptionText,
+                    { color: theme.textPrimary },
+                  ]}
+                >
+                  📸 Take Photo
+                </Text>
               </TouchableOpacity>
 
               <TouchableOpacity
-                style={styles.addPhotoMenuOption}
+                style={[
+                  styles.addPhotoMenuOption,
+                  {
+                    backgroundColor: theme.cardBackground,
+                    borderColor: theme.cardBorder,
+                  },
+                ]}
                 onPress={() => {
                   setIsAddPhotoMenuVisible(false);
                   handleAddPhotoFromGallery();
                 }}
                 activeOpacity={0.9}
               >
-                <Text style={styles.addPhotoMenuOptionText}>
+                <Text
+                  style={[
+                    styles.addPhotoMenuOptionText,
+                    { color: theme.textPrimary },
+                  ]}
+                >
                   🖼️ Choose from Gallery
                 </Text>
               </TouchableOpacity>
@@ -874,7 +1287,14 @@ export default function JobDetailScreen() {
                 onPress={() => setIsAddPhotoMenuVisible(false)}
                 activeOpacity={0.8}
               >
-                <Text style={styles.addPhotoMenuCancelText}>Cancel</Text>
+                <Text
+                  style={[
+                    styles.addPhotoMenuCancelText,
+                    { color: theme.textMuted },
+                  ]}
+                >
+                  Cancel
+                </Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -900,12 +1320,10 @@ export default function JobDetailScreen() {
 const styles = StyleSheet.create({
   loadingScreen: {
     flex: 1,
-    backgroundColor: "#020617",
     alignItems: "center",
     justifyContent: "center",
   },
   loadingText: {
-    color: "#E5E7EB",
     fontSize: 16,
   },
   simpleButton: {
@@ -913,16 +1331,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 10,
     borderRadius: 10,
-    backgroundColor: "#2563EB",
   },
   simpleButtonText: {
-    color: "#FFFFFF",
     fontWeight: "600",
   },
 
   detailsScreen: {
     flex: 1,
-    backgroundColor: "#020617",
     paddingTop: 56,
   },
   headerRow: {
@@ -937,13 +1352,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: 4,
   },
   backText: {
-    color: "#9CA3AF",
     fontSize: 14,
   },
   headerTitle: {
     fontSize: 18,
     fontWeight: "700",
-    color: "#F9FAFB",
   },
   detailsScroll: {
     flexGrow: 1,
@@ -952,36 +1365,29 @@ const styles = StyleSheet.create({
   },
   sectionTitle: {
     fontSize: 14,
-    color: "#E5E7EB",
     fontWeight: "700",
     marginTop: 10,
     marginBottom: 4,
   },
   infoText: {
     fontSize: 13,
-    color: "#E5E7EB",
     marginBottom: 8,
   },
   modalLabel: {
     fontSize: 12,
-    color: "#D1D5DB",
     marginBottom: 4,
   },
   modalInput: {
-    backgroundColor: "#111827",
     borderRadius: 8,
     paddingHorizontal: 10,
     paddingVertical: 8,
-    color: "#F9FAFB",
     fontSize: 13,
     marginBottom: 10,
   },
   modalInputMultiline: {
-    backgroundColor: "#111827",
     borderRadius: 8,
     paddingHorizontal: 10,
     paddingVertical: 8,
-    color: "#F9FAFB",
     fontSize: 13,
     marginBottom: 10,
     minHeight: 90,
@@ -989,7 +1395,6 @@ const styles = StyleSheet.create({
   },
   modalMeta: {
     fontSize: 11,
-    color: "#9CA3AF",
     marginBottom: 6,
   },
   modalButtonRow: {
@@ -1004,14 +1409,7 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     alignItems: "center",
   },
-  modalButtonPrimary: {
-    backgroundColor: "#2563EB",
-  },
-  modalButtonSecondary: {
-    backgroundColor: "#374151",
-  },
   modalButtonText: {
-    color: "#FFFFFF",
     fontSize: 13,
     fontWeight: "600",
   },
@@ -1019,12 +1417,10 @@ const styles = StyleSheet.create({
     marginTop: 10,
     borderRadius: 10,
     borderWidth: 1,
-    borderColor: "#DC2626",
     paddingVertical: 8,
     alignItems: "center",
   },
   modalDeleteText: {
-    color: "#FCA5A5",
     fontSize: 13,
     fontWeight: "600",
   },
@@ -1034,7 +1430,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   modalCloseText: {
-    color: "#9CA3AF",
     fontSize: 13,
   },
 
@@ -1045,15 +1440,12 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   addPhotoButton: {
-    backgroundColor: "#111827",
     paddingHorizontal: 12,
     paddingVertical: 8,
     borderRadius: 999,
     borderWidth: 1,
-    borderColor: "#4B5563",
   },
   addPhotoButtonText: {
-    color: "#E5E7EB",
     fontSize: 12,
     fontWeight: "600",
   },
@@ -1069,7 +1461,6 @@ const styles = StyleSheet.create({
     height: THUMB_SIZE,
     borderRadius: 12,
     overflow: "hidden",
-    backgroundColor: "#020617",
   },
   photoThumb: {
     width: "100%",
@@ -1104,7 +1495,6 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(0,0,0,0.4)",
   },
   addPhotoMenuSheet: {
-    backgroundColor: "#020617",
     paddingHorizontal: 16,
     paddingTop: 12,
     paddingBottom: 24,
@@ -1114,21 +1504,17 @@ const styles = StyleSheet.create({
   addPhotoMenuTitle: {
     fontSize: 14,
     fontWeight: "600",
-    color: "#E5E7EB",
     marginBottom: 8,
     textAlign: "center",
   },
   addPhotoMenuOption: {
-    backgroundColor: "#111827",
     borderRadius: 10,
     paddingVertical: 10,
     paddingHorizontal: 12,
     marginBottom: 8,
     borderWidth: 1,
-    borderColor: "#374151",
   },
   addPhotoMenuOptionText: {
-    color: "#F9FAFB",
     fontSize: 14,
     textAlign: "center",
   },
@@ -1137,19 +1523,16 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
   },
   addPhotoMenuCancelText: {
-    color: "#9CA3AF",
     fontSize: 13,
     textAlign: "center",
   },
 
   // Pricing card
   pricingCard: {
-    backgroundColor: "rgba(255,255,255,0.03)",
     borderRadius: 16,
     padding: 14,
     marginBottom: 14,
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.06)",
   },
   pricingTotalHeader: {
     flexDirection: "row",
@@ -1162,7 +1545,6 @@ const styles = StyleSheet.create({
   },
   pricingTotalHeaderLabel: {
     fontSize: 13,
-    color: "#9CA3AF",
     fontWeight: "600",
   },
   pricingTotalHeaderValue: {
@@ -1187,12 +1569,10 @@ const styles = StyleSheet.create({
   },
   pricingSummaryBox: {
     marginTop: 6,
-    backgroundColor: "rgba(255,255,255,0.04)",
     borderRadius: 14,
     paddingHorizontal: 14,
     paddingVertical: 12,
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.07)",
   },
   pricingSummaryRow: {
     flexDirection: "row",
@@ -1202,12 +1582,10 @@ const styles = StyleSheet.create({
   },
   pricingSummaryLabel: {
     fontSize: 12,
-    color: "#9CA3AF",
     fontWeight: "500",
   },
   pricingSummaryValue: {
     fontSize: 12,
-    color: "#F3F4F6",
     fontWeight: "600",
   },
   pricingTotalRow: {
@@ -1221,7 +1599,6 @@ const styles = StyleSheet.create({
   },
   pricingTotalLabel: {
     fontSize: 13,
-    color: "#F9FAFB",
     fontWeight: "700",
   },
   pricingTotalValue: {
@@ -1238,18 +1615,15 @@ const styles = StyleSheet.create({
   },
   quickActionButton: {
     flex: 1,
-    backgroundColor: "#111827",
     borderRadius: 999,
     paddingVertical: 8,
     paddingHorizontal: 10,
     borderWidth: 1,
-    borderColor: "#374151",
     alignItems: "center",
     justifyContent: "center",
   },
   quickActionText: {
     fontSize: 12,
-    color: "#E5E7EB",
     fontWeight: "600",
   },
 });
