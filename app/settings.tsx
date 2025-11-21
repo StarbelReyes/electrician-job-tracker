@@ -1,14 +1,20 @@
 // app/settings.tsx
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import * as Clipboard from "expo-clipboard";
 import { useRouter } from "expo-router";
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
-    KeyboardAvoidingView,
-    Platform,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View,
+  Alert,
+  Keyboard,
+  KeyboardAvoidingView,
+  Modal,
+  Platform,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from "react-native";
 import { THEME_STORAGE_KEY, ThemeName, themes } from "./theme";
 
@@ -18,12 +24,32 @@ const themeLabels: Record<ThemeName, string> = {
   midnight: "Midnight Blue",
 };
 
+// Use the SAME key as Home/Add Job
+const JOBS_STORAGE_KEY = "EJT_JOBS";
+
 export default function SettingsScreen() {
   const router = useRouter();
 
   const [themeName, setThemeName] = useState<ThemeName>("dark");
   const [isThemeExpanded, setIsThemeExpanded] = useState(false);
   const theme = themes[themeName];
+
+  // Backup / restore state
+  const [isExportModalVisible, setIsExportModalVisible] = useState(false);
+  const [isImportModalVisible, setIsImportModalVisible] = useState(false);
+  const [exportJson, setExportJson] = useState("");
+  const [importJson, setImportJson] = useState("");
+
+  // Ref to force-blur the import TextInput
+  const importInputRef = useRef<TextInput | null>(null);
+
+  const blurImportInput = () => {
+    if (importInputRef.current) {
+      // @ts-ignore – fine at runtime
+      importInputRef.current.blur();
+    }
+    Keyboard.dismiss();
+  };
 
   const loadTheme = useCallback(async () => {
     try {
@@ -51,6 +77,127 @@ export default function SettingsScreen() {
     }
   };
 
+  // ---------- EXPORT (BACKUP) ----------
+  const handleExportJobs = async () => {
+    Keyboard.dismiss();
+    try {
+      const raw = await AsyncStorage.getItem(JOBS_STORAGE_KEY);
+
+      if (!raw || raw === "[]" || raw.trim() === "") {
+        Alert.alert(
+          "No jobs to export",
+          "You don't have any jobs saved yet on this device."
+        );
+        return;
+      }
+
+      let pretty = raw;
+      try {
+        const parsed = JSON.parse(raw);
+        pretty = JSON.stringify(parsed, null, 2);
+      } catch {
+        // if parse fails, use raw
+      }
+
+      setExportJson(pretty);
+      setIsExportModalVisible(true);
+    } catch (err) {
+      console.warn("Failed to export jobs:", err);
+      Alert.alert(
+        "Export failed",
+        "Something went wrong while reading your jobs from storage."
+      );
+    }
+  };
+
+  const handleCopyExport = async () => {
+    if (!exportJson.trim()) {
+      Alert.alert("Nothing to copy", "There is no backup text to copy.");
+      return;
+    }
+
+    try {
+      await Clipboard.setStringAsync(exportJson);
+      Alert.alert(
+        "Copied",
+        "Your backup JSON has been copied to the clipboard."
+      );
+    } catch (err) {
+      console.warn("Failed to copy backup JSON:", err);
+      Alert.alert(
+        "Copy failed",
+        "We couldn't copy the backup text to your clipboard."
+      );
+    }
+  };
+
+  // ---------- IMPORT (RESTORE) ----------
+  const openImportModal = () => {
+    Keyboard.dismiss();
+    setImportJson("");
+    setIsImportModalVisible(true);
+  };
+
+  const handleImportJobs = () => {
+    blurImportInput();
+    const trimmed = importJson.trim();
+    if (!trimmed) {
+      Alert.alert("Nothing to import", "Paste your JSON backup first.");
+      return;
+    }
+
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(trimmed);
+    } catch {
+      Alert.alert(
+        "Invalid JSON",
+        "That doesn't look like valid JSON. Make sure you pasted the full backup."
+      );
+      return;
+    }
+
+    if (!Array.isArray(parsed)) {
+      Alert.alert(
+        "Wrong format",
+        "This backup doesn't look like a list of jobs (expected an array)."
+      );
+      return;
+    }
+
+    Alert.alert(
+      "Replace existing jobs?",
+      "Importing this backup will overwrite all jobs currently stored on this device.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Import",
+          style: "destructive",
+          onPress: async () => {
+            blurImportInput();
+            try {
+              await AsyncStorage.setItem(
+                JOBS_STORAGE_KEY,
+                JSON.stringify(parsed)
+              );
+              setIsImportModalVisible(false);
+              Alert.alert(
+                "Import complete",
+                "Your jobs backup has been restored."
+              );
+            } catch (err) {
+              console.warn("Failed to import jobs:", err);
+              Alert.alert(
+                "Import failed",
+                "Something went wrong while saving the imported jobs."
+              );
+            }
+          },
+        },
+      ]
+    );
+  };
+
   return (
     <KeyboardAvoidingView
       style={{ flex: 1, backgroundColor: theme.screenBackground }}
@@ -66,7 +213,10 @@ export default function SettingsScreen() {
         {/* Header */}
         <View style={styles.headerRow}>
           <TouchableOpacity
-            onPress={() => router.back()}
+            onPress={() => {
+              Keyboard.dismiss();
+              router.back();
+            }}
             style={styles.backButton}
             activeOpacity={0.8}
           >
@@ -116,7 +266,10 @@ export default function SettingsScreen() {
             {/* Theme row */}
             <TouchableOpacity
               activeOpacity={0.9}
-              onPress={() => setIsThemeExpanded((prev) => !prev)}
+              onPress={() => {
+                Keyboard.dismiss();
+                setIsThemeExpanded((prev) => !prev);
+              }}
               style={styles.row}
             >
               <View style={styles.rowTextCol}>
@@ -343,7 +496,12 @@ export default function SettingsScreen() {
               },
             ]}
           >
-            <View style={styles.row}>
+            {/* Export */}
+            <TouchableOpacity
+              style={styles.row}
+              activeOpacity={0.9}
+              onPress={handleExportJobs}
+            >
               <View style={styles.rowTextCol}>
                 <Text
                   style={[
@@ -359,7 +517,7 @@ export default function SettingsScreen() {
                     { color: theme.textMuted },
                   ]}
                 >
-                  Copy all jobs as JSON text for backup.
+                  Open a backup screen and copy all jobs as JSON text.
                 </Text>
               </View>
               <Text
@@ -368,12 +526,18 @@ export default function SettingsScreen() {
                   { color: "#3B82F6" },
                 ]}
               >
-                Planned
+                Open
               </Text>
-            </View>
+            </TouchableOpacity>
 
             <View style={styles.rowDivider} />
-            <View style={styles.row}>
+
+            {/* Import */}
+            <TouchableOpacity
+              style={styles.row}
+              activeOpacity={0.9}
+              onPress={openImportModal}
+            >
               <View style={styles.rowTextCol}>
                 <Text
                   style={[
@@ -389,7 +553,7 @@ export default function SettingsScreen() {
                     { color: theme.textMuted },
                   ]}
                 >
-                  Restore jobs from a JSON backup.
+                  Paste a JSON backup to restore jobs on this device.
                 </Text>
               </View>
               <Text
@@ -398,9 +562,9 @@ export default function SettingsScreen() {
                   { color: theme.textMuted },
                 ]}
               >
-                Coming soon
+                Paste
               </Text>
-            </View>
+            </TouchableOpacity>
           </View>
 
           {/* About */}
@@ -482,6 +646,222 @@ export default function SettingsScreen() {
             </View>
           </View>
         </View>
+
+        {/* EXPORT MODAL */}
+        <Modal
+          visible={isExportModalVisible}
+          animationType="slide"
+          transparent
+          onRequestClose={() => {
+            Keyboard.dismiss();
+            setIsExportModalVisible(false);
+          }}
+        >
+          <View style={styles.modalBackdrop}>
+            <View
+              style={[
+                styles.modalCard,
+                { backgroundColor: theme.cardBackground },
+              ]}
+            >
+              <Text
+                style={[
+                  styles.modalTitle,
+                  { color: theme.textPrimary },
+                ]}
+              >
+                Backup JSON
+              </Text>
+              <Text
+                style={[
+                  styles.modalBodyText,
+                  { color: theme.textMuted },
+                ]}
+              >
+                This is your Traktr data as JSON.{"\n"}
+                Copy it and save it in Notes, email, or cloud storage.
+              </Text>
+
+              <ScrollView
+                style={styles.modalTextAreaWrapper}
+                contentContainerStyle={{ paddingBottom: 16 }}
+              >
+                <TextInput
+                  multiline
+                  editable={false}
+                  value={exportJson}
+                  style={[
+                    styles.modalTextArea,
+                    {
+                      color: theme.textPrimary,
+                      borderColor: theme.cardBorder,
+                      backgroundColor: theme.screenBackground,
+                    },
+                  ]}
+                />
+              </ScrollView>
+
+              <View style={styles.modalButtonsRow}>
+                <TouchableOpacity
+                  onPress={() => {
+                    Keyboard.dismiss();
+                    setIsExportModalVisible(false);
+                  }}
+                  style={[
+                    styles.modalButton,
+                    {
+                      backgroundColor: "transparent",
+                      borderColor: theme.cardBorder,
+                      borderWidth: 1,
+                    },
+                  ]}
+                  activeOpacity={0.85}
+                >
+                  <Text
+                    style={[
+                      styles.modalButtonText,
+                      { color: theme.textPrimary },
+                    ]}
+                  >
+                    Close
+                  </Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  onPress={handleCopyExport}
+                  style={[
+                    styles.modalButton,
+                    { backgroundColor: "#3B82F6" },
+                  ]}
+                  activeOpacity={0.9}
+                >
+                  <Text
+                    style={[
+                      styles.modalButtonText,
+                      { color: "#FFFFFF" },
+                    ]}
+                  >
+                    Copy JSON
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </Modal>
+
+        {/* IMPORT MODAL */}
+        <Modal
+          visible={isImportModalVisible}
+          animationType="slide"
+          transparent
+          onRequestClose={() => {
+            blurImportInput();
+            setIsImportModalVisible(false);
+          }}
+        >
+          <KeyboardAvoidingView
+            style={styles.modalBackdrop}
+            behavior={Platform.OS === "ios" ? "padding" : undefined}
+            keyboardVerticalOffset={40}
+          >
+            <View
+              style={[
+                styles.modalCard,
+                { backgroundColor: theme.cardBackground },
+              ]}
+            >
+              <Text
+                style={[
+                  styles.modalTitle,
+                  { color: theme.textPrimary },
+                ]}
+              >
+                Restore from JSON
+              </Text>
+              <Text
+                style={[
+                  styles.modalBodyText,
+                  { color: theme.textMuted },
+                ]}
+              >
+                Paste a backup exported from Traktr.{"\n"}
+                Existing jobs on this device will be replaced.
+              </Text>
+
+              <ScrollView
+                style={styles.modalTextAreaWrapper}
+                contentContainerStyle={{ paddingBottom: 16 }}
+                keyboardShouldPersistTaps="handled"
+              >
+                <TextInput
+                  ref={importInputRef}
+                  multiline
+                  value={importJson}
+                  onChangeText={setImportJson}
+                  placeholder="Paste your JSON backup here"
+                  placeholderTextColor={theme.textMuted}
+                  style={[
+                    styles.modalTextArea,
+                    {
+                      color: theme.textPrimary,
+                      borderColor: theme.cardBorder,
+                      backgroundColor: theme.screenBackground,
+                    },
+                  ]}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  blurOnSubmit
+                />
+              </ScrollView>
+
+              <View style={styles.modalButtonsRow}>
+                <TouchableOpacity
+                  onPress={() => {
+                    blurImportInput();
+                    setIsImportModalVisible(false);
+                  }}
+                  style={[
+                    styles.modalButton,
+                    {
+                      backgroundColor: "transparent",
+                      borderColor: theme.cardBorder,
+                      borderWidth: 1,
+                    },
+                  ]}
+                  activeOpacity={0.85}
+                >
+                  <Text
+                    style={[
+                      styles.modalButtonText,
+                      { color: theme.textPrimary },
+                    ]}
+                  >
+                    Cancel
+                  </Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  onPress={handleImportJobs}
+                  style={[
+                    styles.modalButton,
+                    { backgroundColor: "#EF4444" },
+                  ]}
+                  activeOpacity={0.9}
+                >
+                  <Text
+                    style={[
+                      styles.modalButtonText,
+                      { color: "#FFFFFF" },
+                    ]}
+                  >
+                    Import
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </KeyboardAvoidingView>
+        </Modal>
+
       </View>
     </KeyboardAvoidingView>
   );
@@ -581,5 +961,60 @@ const styles = StyleSheet.create({
   },
   themeOptionLabel: {
     fontSize: 14,
+  },
+
+  // Modals
+  modalBackdrop: {
+    flex: 1,
+    backgroundColor: "rgba(15,23,42,0.55)",
+    justifyContent: "center",
+    paddingHorizontal: 16,
+  },
+  modalCard: {
+    borderRadius: 18,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    maxHeight: "80%",
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: "700",
+    marginBottom: 6,
+  },
+  modalBodyText: {
+    fontSize: 13,
+    marginBottom: 8,
+  },
+  modalTextAreaWrapper: {
+    borderRadius: 12,
+    marginTop: 4,
+    marginBottom: 10,
+  },
+  modalTextArea: {
+    minHeight: 160,
+    maxHeight: 260,
+    borderRadius: 12,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    fontSize: 12,
+    fontFamily: Platform.select({
+      ios: "Menlo",
+      android: "monospace",
+      default: "monospace",
+    }),
+  },
+  modalButtonsRow: {
+    flexDirection: "row",
+    justifyContent: "flex-end",
+    gap: 8,
+  },
+  modalButton: {
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 999,
+  },
+  modalButtonText: {
+    fontSize: 14,
+    fontWeight: "600",
   },
 });
