@@ -314,7 +314,7 @@ const HomeScreen: FC = () => {
             <Text
               style={[styles.header, { color: theme.headerText }]}
             >
-              TRAKTR APP
+               THE TRAKTR APP
             </Text>
 
             <View style={styles.headerActionsRow}>
