@@ -46,6 +46,13 @@ const STORAGE_KEYS = {
   SORT: "EJT_SORT_OPTION",
 };
 
+// Same keys used in settings.tsx
+const DEFAULTS_STORAGE_KEYS = {
+  HOURLY: "EJT_DEFAULT_HOURLY",
+  CLIENT_NAME: "EJT_DEFAULT_CLIENT_NAME",
+  NOTES_TEMPLATE: "EJT_DEFAULT_NOTES_TEMPLATE",
+};
+
 const screenWidth = Dimensions.get("window").width;
 const GRID_COLUMNS = 3;
 const GRID_HORIZONTAL_PADDING = 16 * 2;
@@ -102,6 +109,35 @@ const AddJobScreen = () => {
   const [materialCost, setMaterialCost] = useState("");
 
   const [photoUris, setPhotoUris] = useState<string[]>([]);
+
+  // Load Job Defaults once when screen mounts
+  useEffect(() => {
+    const loadDefaults = async () => {
+      try {
+        const [[, defaultHourly], [, defaultClient], [, defaultNotes]] =
+          await AsyncStorage.multiGet([
+            DEFAULTS_STORAGE_KEYS.HOURLY,
+            DEFAULTS_STORAGE_KEYS.CLIENT_NAME,
+            DEFAULTS_STORAGE_KEYS.NOTES_TEMPLATE,
+          ]);
+
+        if (defaultHourly && !hourlyRate) {
+          setHourlyRate(defaultHourly);
+        }
+        if (defaultClient && !clientName) {
+          setClientName(defaultClient);
+        }
+        if (defaultNotes && !description) {
+          // Notes template goes into Description / Scope
+          setDescription(defaultNotes);
+        }
+      } catch (err) {
+        console.warn("Failed to load job defaults in Add Job:", err);
+      }
+    };
+
+    loadDefaults();
+  }, [hourlyRate, clientName, description]);
 
   // ANIMATIONS
   const screenScale = useRef(new Animated.Value(1.04)).current;
@@ -712,7 +748,7 @@ const AddJobScreen = () => {
               <TouchableOpacity
                 style={[
                   styles.saveButton,
-                  { backgroundColor: theme.primaryButtonBackground },
+                { backgroundColor: theme.primaryButtonBackground },
                 ]}
                 onPress={handleSaveJob}
                 activeOpacity={0.9}

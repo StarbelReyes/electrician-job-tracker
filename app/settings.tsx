@@ -7,6 +7,7 @@ import {
   Alert,
   Keyboard,
   KeyboardAvoidingView,
+  Linking,
   Modal,
   Platform,
   ScrollView,
@@ -14,6 +15,7 @@ import {
   Text,
   TextInput,
   TouchableOpacity,
+  TouchableWithoutFeedback,
   View,
 } from "react-native";
 import { THEME_STORAGE_KEY, ThemeName, themes } from "./theme";
@@ -27,18 +29,79 @@ const themeLabels: Record<ThemeName, string> = {
 // Use the SAME key as Home/Add Job
 const JOBS_STORAGE_KEY = "EJT_JOBS";
 
+// Accent color types + presets
+type AccentName = "blue" | "amber" | "emerald" | "purple" | "rose";
+
+const ACCENT_STORAGE_KEY = "EJT_ACCENT_COLOR";
+
+const accentPresets: Record<
+  AccentName,
+  { label: string; color: string; chipBg: string }
+> = {
+  blue: {
+    label: "Electric Blue",
+    color: "#3B82F6",
+    chipBg: "rgba(59,130,246,0.12)",
+  },
+  amber: {
+    label: "Jobsite Amber",
+    color: "#F59E0B",
+    chipBg: "rgba(245,158,11,0.12)",
+  },
+  emerald: {
+    label: "Emerald",
+    color: "#10B981",
+    chipBg: "rgba(16,185,129,0.12)",
+  },
+  purple: {
+    label: "Royal Purple",
+    color: "#8B5CF6",
+    chipBg: "rgba(139,92,246,0.12)",
+  },
+  rose: {
+    label: "Rose Red",
+    color: "#F97373",
+    chipBg: "rgba(248,113,113,0.12)",
+  },
+};
+
+// Job defaults storage keys
+const DEFAULTS_STORAGE_KEYS = {
+  HOURLY: "EJT_DEFAULT_HOURLY",
+  CLIENT_NAME: "EJT_DEFAULT_CLIENT_NAME",
+  NOTES_TEMPLATE: "EJT_DEFAULT_NOTES_TEMPLATE",
+};
+
 export default function SettingsScreen() {
   const router = useRouter();
 
   const [themeName, setThemeName] = useState<ThemeName>("dark");
   const [isThemeExpanded, setIsThemeExpanded] = useState(false);
+
+  const [accentName, setAccentName] = useState<AccentName>("blue");
+  const [isAccentExpanded, setIsAccentExpanded] = useState(false);
+
   const theme = themes[themeName];
+  const accent = accentPresets[accentName];
 
   // Backup / restore state
   const [isExportModalVisible, setIsExportModalVisible] = useState(false);
   const [isImportModalVisible, setIsImportModalVisible] = useState(false);
   const [exportJson, setExportJson] = useState("");
   const [importJson, setImportJson] = useState("");
+
+  // About modal
+  const [isAboutModalVisible, setIsAboutModalVisible] = useState(false);
+
+  // Job Defaults state (strings for TextInputs)
+  const [defaultHourly, setDefaultHourly] = useState("");
+  const [defaultClientName, setDefaultClientName] = useState("");
+  const [defaultNotesTemplate, setDefaultNotesTemplate] = useState("");
+
+  // Refs for focusing inputs
+  const hourlyRef = useRef<TextInput | null>(null);
+  const clientRef = useRef<TextInput | null>(null);
+  const notesRef = useRef<TextInput | null>(null);
 
   // Ref to force-blur the import TextInput
   const importInputRef = useRef<TextInput | null>(null);
@@ -62,9 +125,46 @@ export default function SettingsScreen() {
     }
   }, []);
 
+  const loadAccent = useCallback(async () => {
+    try {
+      const saved = await AsyncStorage.getItem(ACCENT_STORAGE_KEY);
+      const validValues: AccentName[] = [
+        "blue",
+        "amber",
+        "emerald",
+        "purple",
+        "rose",
+      ];
+      if (saved && (validValues as string[]).includes(saved)) {
+        setAccentName(saved as AccentName);
+      }
+    } catch (err) {
+      console.warn("Failed to load accent color:", err);
+    }
+  }, []);
+
+  const loadDefaults = useCallback(async () => {
+    try {
+      const [[, hourly], [, clientName], [, notesTemplate]] =
+        await AsyncStorage.multiGet([
+          DEFAULTS_STORAGE_KEYS.HOURLY,
+          DEFAULTS_STORAGE_KEYS.CLIENT_NAME,
+          DEFAULTS_STORAGE_KEYS.NOTES_TEMPLATE,
+        ]);
+
+      setDefaultHourly(hourly ?? "");
+      setDefaultClientName(clientName ?? "");
+      setDefaultNotesTemplate(notesTemplate ?? "");
+    } catch (err) {
+      console.warn("Failed to load job defaults:", err);
+    }
+  }, []);
+
   useEffect(() => {
     loadTheme();
-  }, [loadTheme]);
+    loadAccent();
+    loadDefaults();
+  }, [loadTheme, loadAccent, loadDefaults]);
 
   const handleSelectTheme = async (value: ThemeName) => {
     try {
@@ -74,6 +174,90 @@ export default function SettingsScreen() {
       console.warn("Failed to save theme:", err);
     } finally {
       setIsThemeExpanded(false);
+    }
+  };
+
+  const handleSelectAccent = async (value: AccentName) => {
+    try {
+      setAccentName(value);
+      await AsyncStorage.setItem(ACCENT_STORAGE_KEY, value);
+    } catch (err) {
+      console.warn("Failed to save accent color:", err);
+    } finally {
+      setIsAccentExpanded(false);
+    }
+  };
+
+  // ---------- Job Defaults save handlers (called when editing ends) ----------
+  const saveDefaultHourly = async (value: string) => {
+    const trimmed = value.trim();
+    if (!trimmed) {
+      setDefaultHourly("");
+      try {
+        await AsyncStorage.removeItem(DEFAULTS_STORAGE_KEYS.HOURLY);
+      } catch (err) {
+        console.warn("Failed to clear default hourly:", err);
+      }
+      return;
+    }
+
+    const cleaned = trimmed.replace(/[^0-9.]/g, "");
+    if (!cleaned) {
+      Alert.alert("Invalid rate", "Enter a valid number for hourly rate.");
+      return;
+    }
+
+    setDefaultHourly(cleaned);
+    try {
+      await AsyncStorage.setItem(DEFAULTS_STORAGE_KEYS.HOURLY, cleaned);
+    } catch (err) {
+      console.warn("Failed to save default hourly:", err);
+    }
+  };
+
+  const saveDefaultClientName = async (value: string) => {
+    const trimmed = value.trim();
+    setDefaultClientName(value);
+    if (!trimmed) {
+      try {
+        await AsyncStorage.removeItem(DEFAULTS_STORAGE_KEYS.CLIENT_NAME);
+      } catch (err) {
+        console.warn("Failed to clear default client name:", err);
+      }
+      return;
+    }
+
+    try {
+      await AsyncStorage.setItem(
+        DEFAULTS_STORAGE_KEYS.CLIENT_NAME,
+        trimmed
+      );
+    } catch (err) {
+      console.warn("Failed to save default client name:", err);
+    }
+  };
+
+  const saveDefaultNotesTemplate = async (value: string) => {
+    const trimmed = value.trim();
+    setDefaultNotesTemplate(value);
+    if (!trimmed) {
+      try {
+        await AsyncStorage.removeItem(
+          DEFAULTS_STORAGE_KEYS.NOTES_TEMPLATE
+        );
+      } catch (err) {
+        console.warn("Failed to clear notes template:", err);
+      }
+      return;
+    }
+
+    try {
+      await AsyncStorage.setItem(
+        DEFAULTS_STORAGE_KEYS.NOTES_TEMPLATE,
+        trimmed
+      );
+    } catch (err) {
+      console.warn("Failed to save notes template:", err);
     }
   };
 
@@ -198,261 +382,400 @@ export default function SettingsScreen() {
     );
   };
 
+  // ---------- Feedback (mailto) ----------
+  const handleFeedbackPress = async () => {
+    Keyboard.dismiss();
+
+    // Change this later to your real feedback email
+    const email = "traktr.feedback@example.com";
+    const subject = encodeURIComponent("Feedback about Traktr");
+    const body = encodeURIComponent(
+      "Tell us what you like, what is confusing, or what is missing.\n\n"
+    );
+
+    const url = `mailto:${email}?subject=${subject}&body=${body}`;
+
+    try {
+      const supported = await Linking.canOpenURL(url);
+      if (supported) {
+        await Linking.openURL(url);
+      } else {
+        Alert.alert(
+          "No mail app found",
+          "We couldn’t open your email app on this device."
+        );
+      }
+    } catch (err) {
+      console.warn("Failed to open mail app:", err);
+      Alert.alert(
+        "Something went wrong",
+        "We couldn't open your email app. You can send feedback to:\n" +
+          email
+      );
+    }
+  };
+
   return (
     <KeyboardAvoidingView
       style={{ flex: 1, backgroundColor: theme.screenBackground }}
       behavior={Platform.OS === "ios" ? "padding" : "height"}
-      keyboardVerticalOffset={Platform.OS === "ios" ? 20 : 0}
+      keyboardVerticalOffset={Platform.OS === "ios" ? 10 : 0}
     >
-      <View
-        style={[
-          styles.screen,
-          { backgroundColor: theme.screenBackground },
-        ]}
-      >
-        {/* Header */}
-        <View style={styles.headerRow}>
-          <TouchableOpacity
-            onPress={() => {
-              Keyboard.dismiss();
-              router.back();
-            }}
-            style={styles.backButton}
-            activeOpacity={0.8}
-          >
-            <Text
-              style={[
-                styles.backText,
-                { color: theme.textSecondary },
-              ]}
-            >
-              ← Back
-            </Text>
-          </TouchableOpacity>
-
-          <Text
-            style={[
-              styles.headerTitle,
-              { color: theme.headerText },
-            ]}
-          >
-            Settings
-          </Text>
-
-          <View style={{ width: 60 }} />
-        </View>
-
-        {/* Content */}
-        <View style={styles.content}>
-          {/* Appearance */}
-          <Text
-            style={[
-              styles.sectionLabel,
-              { color: theme.textSecondary },
-            ]}
-          >
-            Appearance
-          </Text>
-
-          <View
-            style={[
-              styles.sectionCard,
-              {
-                backgroundColor: theme.cardBackground,
-                borderColor: theme.cardBorder,
-              },
-            ]}
-          >
-            {/* Theme row */}
+      <TouchableWithoutFeedback onPress={Keyboard.dismiss} accessible={false}>
+        <View
+          style={[
+            styles.screen,
+            { backgroundColor: theme.screenBackground },
+          ]}
+        >
+          {/* Header */}
+          <View style={styles.headerRow}>
             <TouchableOpacity
-              activeOpacity={0.9}
               onPress={() => {
                 Keyboard.dismiss();
-                setIsThemeExpanded((prev) => !prev);
+                router.back();
               }}
-              style={styles.row}
+              style={styles.backButton}
+              activeOpacity={0.8}
             >
-              <View style={styles.rowTextCol}>
-                <Text
-                  style={[
-                    styles.rowTitle,
-                    { color: theme.textPrimary },
-                  ]}
-                >
-                  Theme
-                </Text>
-                <Text
-                  style={[
-                    styles.rowSubtitle,
-                    { color: theme.textMuted },
-                  ]}
-                >
-                  Choose between Light, Dark, and Midnight Blue.
-                </Text>
-              </View>
-
               <Text
                 style={[
-                  styles.rowValue,
-                  { color: "#3B82F6" },
+                  styles.backText,
+                  { color: theme.textSecondary },
                 ]}
               >
-                {themeLabels[themeName]}
+                ← Back
               </Text>
             </TouchableOpacity>
 
-            {isThemeExpanded && (
-              <View style={styles.themeOptions}>
-                {(["light", "dark", "midnight"] as ThemeName[]).map((value) => (
-                  <TouchableOpacity
-                    key={value}
-                    style={styles.themeOptionRow}
-                    activeOpacity={0.9}
-                    onPress={() => handleSelectTheme(value)}
-                  >
-                    <View style={styles.themeOptionDotWrap}>
-                      <View
-                        style={[
-                          styles.themeOptionDot,
-                          value === themeName && styles.themeOptionDotActive,
-                        ]}
-                      />
-                    </View>
-                    <Text
-                      style={[
-                        styles.themeOptionLabel,
-                        {
-                          color:
-                            value === themeName
-                              ? theme.textPrimary
-                              : theme.textSecondary,
-                        },
-                      ]}
-                    >
-                      {themeLabels[value]}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-            )}
+            <Text
+              style={[
+                styles.headerTitle,
+                { color: theme.headerText },
+              ]}
+            >
+              Settings
+            </Text>
 
-            {/* Accent color row (placeholder) */}
-            <View style={styles.rowDivider} />
-            <View style={styles.row}>
-              <View style={styles.rowTextCol}>
-                <Text
-                  style={[
-                    styles.rowTitle,
-                    { color: theme.textPrimary },
-                  ]}
-                >
-                  Accent color
-                </Text>
-                <Text
-                  style={[
-                    styles.rowSubtitle,
-                    { color: theme.textMuted },
-                  ]}
-                >
-                  Highlight color for buttons and tags.
-                </Text>
-              </View>
-              <Text
-                style={[
-                  styles.rowValue,
-                  { color: theme.textMuted },
-                ]}
-              >
-                Coming soon
-              </Text>
-            </View>
+            <View style={{ width: 60 }} />
           </View>
 
-          {/* Job Defaults */}
-          <Text
-            style={[
-              styles.sectionLabel,
-              { color: theme.textSecondary },
-            ]}
+          {/* Content as ScrollView so fields move above keyboard */}
+          <ScrollView
+            style={styles.content}
+            contentContainerStyle={{ paddingBottom: 32 }}
+            keyboardShouldPersistTaps="handled"
           >
-            Job Defaults
-          </Text>
+            {/* Appearance */}
+            <Text
+              style={[
+                styles.sectionLabel,
+                { color: theme.textSecondary },
+              ]}
+            >
+              Appearance
+            </Text>
 
-          <View
-            style={[
-              styles.sectionCard,
-              {
-                backgroundColor: theme.cardBackground,
-                borderColor: theme.cardBorder,
-              },
-            ]}
-          >
-            <View style={styles.row}>
-              <View style={styles.rowTextCol}>
-                <Text
-                  style={[
-                    styles.rowTitle,
-                    { color: theme.textPrimary },
-                  ]}
-                >
-                  Default hourly rate
-                </Text>
-                <Text
-                  style={[
-                    styles.rowSubtitle,
-                    { color: theme.textMuted },
-                  ]}
-                >
-                  Used when creating new jobs.
-                </Text>
-              </View>
-              <Text
-                style={[
-                  styles.rowValue,
-                  { color: theme.textMuted },
-                ]}
+            <View
+              style={[
+                styles.sectionCard,
+                {
+                  backgroundColor: theme.cardBackground,
+                  borderColor: theme.cardBorder,
+                },
+              ]}
+            >
+              {/* Theme row */}
+              <TouchableOpacity
+                activeOpacity={0.9}
+                onPress={() => {
+                  Keyboard.dismiss();
+                  setIsThemeExpanded((prev) => !prev);
+                }}
+                style={styles.row}
               >
-                Not set
-              </Text>
+                <View style={styles.rowTextCol}>
+                  <Text
+                    style={[
+                      styles.rowTitle,
+                      { color: theme.textPrimary },
+                    ]}
+                  >
+                    Theme
+                  </Text>
+                  <Text
+                    style={[
+                      styles.rowSubtitle,
+                      { color: theme.textMuted },
+                    ]}
+                  >
+                    Choose between Light, Dark, and Midnight Blue.
+                  </Text>
+                </View>
+
+                <Text
+                  style={[
+                    styles.rowValue,
+                    { color: accent.color },
+                  ]}
+                >
+                  {themeLabels[themeName]}
+                </Text>
+              </TouchableOpacity>
+
+              {isThemeExpanded && (
+                <View style={styles.themeOptions}>
+                  {(["light", "dark", "midnight"] as ThemeName[]).map(
+                    (value) => (
+                      <TouchableOpacity
+                        key={value}
+                        style={styles.themeOptionRow}
+                        activeOpacity={0.9}
+                        onPress={() => handleSelectTheme(value)}
+                      >
+                        <View style={styles.themeOptionDotWrap}>
+                          <View
+                            style={[
+                              styles.themeOptionDot,
+                              value === themeName &&
+                                styles.themeOptionDotActive,
+                            ]}
+                          />
+                        </View>
+                        <Text
+                          style={[
+                            styles.themeOptionLabel,
+                            {
+                              color:
+                                value === themeName
+                                  ? theme.textPrimary
+                                  : theme.textSecondary,
+                            },
+                          ]}
+                        >
+                          {themeLabels[value]}
+                        </Text>
+                      </TouchableOpacity>
+                    )
+                  )}
+                </View>
+              )}
+
+              {/* Accent color row */}
+              <View style={styles.rowDivider} />
+              <TouchableOpacity
+                style={styles.row}
+                activeOpacity={0.9}
+                onPress={() => {
+                  Keyboard.dismiss();
+                  setIsAccentExpanded((prev) => !prev);
+                }}
+              >
+                <View style={styles.rowTextCol}>
+                  <Text
+                    style={[
+                      styles.rowTitle,
+                      { color: theme.textPrimary },
+                    ]}
+                  >
+                    Accent color
+                  </Text>
+                  <Text
+                    style={[
+                      styles.rowSubtitle,
+                      { color: theme.textMuted },
+                    ]}
+                  >
+                    Highlight color for buttons and tags.
+                  </Text>
+                </View>
+                <Text
+                  style={[
+                    styles.rowValue,
+                    { color: accent.color },
+                  ]}
+                >
+                  {accent.label}
+                </Text>
+              </TouchableOpacity>
+
+              {isAccentExpanded && (
+                <View style={styles.accentOptionsRow}>
+                  {(
+                    ["blue", "amber", "emerald", "purple", "rose"] as AccentName[]
+                  ).map((value) => {
+                    const option = accentPresets[value];
+                    const isActive = value === accentName;
+                    return (
+                      <TouchableOpacity
+                        key={value}
+                        style={[
+                          styles.accentChip,
+                          {
+                            backgroundColor: option.chipBg,
+                            borderColor: isActive
+                              ? option.color
+                              : "transparent",
+                          },
+                        ]}
+                        activeOpacity={0.9}
+                        onPress={() => handleSelectAccent(value)}
+                      >
+                        <View
+                          style={[
+                            styles.accentDot,
+                            { backgroundColor: option.color },
+                          ]}
+                        />
+                        <Text
+                          style={[
+                            styles.accentLabel,
+                            {
+                              color: isActive
+                                ? option.color
+                                : theme.textSecondary,
+                            },
+                          ]}
+                        >
+                          {option.label}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+              )}
             </View>
 
-            <View style={styles.rowDivider} />
-            <View style={styles.row}>
-              <View style={styles.rowTextCol}>
-                <Text
-                  style={[
-                    styles.rowTitle,
-                    { color: theme.textPrimary },
-                  ]}
-                >
-                  Default client name
-                </Text>
-                <Text
-                  style={[
-                    styles.rowSubtitle,
-                    { color: theme.textMuted },
-                  ]}
-                >
-                  Optional default for repeat clients.
-                </Text>
-              </View>
-              <Text
-                style={[
-                  styles.rowValue,
-                  { color: theme.textMuted },
-                ]}
-              >
-                None
-              </Text>
-            </View>
+            {/* Job Defaults */}
+            <Text
+              style={[
+                styles.sectionLabel,
+                { color: theme.textSecondary },
+              ]}
+            >
+              Job Defaults
+            </Text>
 
-            <View style={styles.rowDivider} />
-            <View style={styles.row}>
-              <View style={styles.rowTextCol}>
+            <View
+              style={[
+                styles.sectionCard,
+                {
+                  backgroundColor: theme.cardBackground,
+                  borderColor: theme.cardBorder,
+                },
+              ]}
+            >
+              {/* Default hourly rate */}
+              <TouchableOpacity
+                style={styles.row}
+                activeOpacity={1}
+                onPress={() => {
+                  hourlyRef.current?.focus();
+                }}
+              >
+                <View style={styles.rowTextCol}>
+                  <Text
+                    style={[
+                      styles.rowTitle,
+                      { color: theme.textPrimary },
+                    ]}
+                  >
+                    Default hourly rate
+                  </Text>
+                  <Text
+                    style={[
+                      styles.rowSubtitle,
+                      { color: theme.textMuted },
+                    ]}
+                  >
+                    Used as the starting hourly rate for new jobs.
+                  </Text>
+                </View>
+                <TextInput
+                  ref={hourlyRef}
+                  style={[
+                    styles.defaultInput,
+                    {
+                      backgroundColor: theme.inputBackground,
+                      color: theme.inputText,
+                      borderColor: theme.inputBorder,
+                    },
+                  ]}
+                  value={defaultHourly}
+                  onChangeText={setDefaultHourly}
+                  onEndEditing={(e) => saveDefaultHourly(e.nativeEvent.text)}
+                  placeholder="Not set"
+                  placeholderTextColor={theme.textMuted}
+                  keyboardType="numeric"
+                  returnKeyType="next"
+                  onSubmitEditing={() => clientRef.current?.focus()}
+                />
+              </TouchableOpacity>
+
+              <View style={styles.rowDivider} />
+
+              {/* Default client name */}
+              <TouchableOpacity
+                style={styles.row}
+                activeOpacity={1}
+                onPress={() => {
+                  clientRef.current?.focus();
+                }}
+              >
+                <View style={styles.rowTextCol}>
+                  <Text
+                    style={[
+                      styles.rowTitle,
+                      { color: theme.textPrimary },
+                    ]}
+                  >
+                    Default client name
+                  </Text>
+                  <Text
+                    style={[
+                      styles.rowSubtitle,
+                      { color: theme.textMuted },
+                    ]}
+                  >
+                    Helpful for repeat clients or your company name.
+                  </Text>
+                </View>
+                <TextInput
+                  ref={clientRef}
+                  style={[
+                    styles.defaultInput,
+                    {
+                      backgroundColor: theme.inputBackground,
+                      color: theme.inputText,
+                      borderColor: theme.inputBorder,
+                    },
+                  ]}
+                  value={defaultClientName}
+                  onChangeText={setDefaultClientName}
+                  onEndEditing={(e) =>
+                    saveDefaultClientName(e.nativeEvent.text)
+                  }
+                  placeholder="None"
+                  placeholderTextColor={theme.textMuted}
+                  returnKeyType="next"
+                  onSubmitEditing={() => notesRef.current?.focus()}
+                />
+              </TouchableOpacity>
+
+              <View style={styles.rowDivider} />
+
+              {/* Default notes template */}
+              <TouchableOpacity
+                activeOpacity={1}
+                onPress={() => {
+                  notesRef.current?.focus();
+                }}
+                style={{ paddingVertical: 10 }}
+              >
                 <Text
                   style={[
                     styles.rowTitle,
-                    { color: theme.textPrimary },
+                    { color: theme.textPrimary, marginBottom: 4 },
                   ]}
                 >
                   Default notes template
@@ -460,409 +783,514 @@ export default function SettingsScreen() {
                 <Text
                   style={[
                     styles.rowSubtitle,
-                    { color: theme.textMuted },
+                    { color: theme.textMuted, marginBottom: 6 },
                   ]}
                 >
-                  Pre-fill scope / notes on new jobs.
+                  Pre-fills the Description / Scope on new jobs.
                 </Text>
-              </View>
-              <Text
-                style={[
-                  styles.rowValue,
-                  { color: theme.textMuted },
-                ]}
-              >
-                Standard
-              </Text>
-            </View>
-          </View>
-
-          {/* Data & Backup */}
-          <Text
-            style={[
-              styles.sectionLabel,
-              { color: theme.textSecondary },
-            ]}
-          >
-            Data & Backup
-          </Text>
-
-          <View
-            style={[
-              styles.sectionCard,
-              {
-                backgroundColor: theme.cardBackground,
-                borderColor: theme.cardBorder,
-              },
-            ]}
-          >
-            {/* Export */}
-            <TouchableOpacity
-              style={styles.row}
-              activeOpacity={0.9}
-              onPress={handleExportJobs}
-            >
-              <View style={styles.rowTextCol}>
-                <Text
-                  style={[
-                    styles.rowTitle,
-                    { color: theme.textPrimary },
-                  ]}
-                >
-                  Export jobs (JSON)
-                </Text>
-                <Text
-                  style={[
-                    styles.rowSubtitle,
-                    { color: theme.textMuted },
-                  ]}
-                >
-                  Open a backup screen and copy all jobs as JSON text.
-                </Text>
-              </View>
-              <Text
-                style={[
-                  styles.rowValue,
-                  { color: "#3B82F6" },
-                ]}
-              >
-                Open
-              </Text>
-            </TouchableOpacity>
-
-            <View style={styles.rowDivider} />
-
-            {/* Import */}
-            <TouchableOpacity
-              style={styles.row}
-              activeOpacity={0.9}
-              onPress={openImportModal}
-            >
-              <View style={styles.rowTextCol}>
-                <Text
-                  style={[
-                    styles.rowTitle,
-                    { color: theme.textPrimary },
-                  ]}
-                >
-                  Import from JSON
-                </Text>
-                <Text
-                  style={[
-                    styles.rowSubtitle,
-                    { color: theme.textMuted },
-                  ]}
-                >
-                  Paste a JSON backup to restore jobs on this device.
-                </Text>
-              </View>
-              <Text
-                style={[
-                  styles.rowValue,
-                  { color: theme.textMuted },
-                ]}
-              >
-                Paste
-              </Text>
-            </TouchableOpacity>
-          </View>
-
-          {/* About */}
-          <Text
-            style={[
-              styles.sectionLabel,
-              { color: theme.textSecondary },
-            ]}
-          >
-            About Traktr
-          </Text>
-
-          <View
-            style={[
-              styles.sectionCard,
-              {
-                backgroundColor: theme.cardBackground,
-                borderColor: theme.cardBorder,
-              },
-            ]}
-          >
-            <View style={styles.row}>
-              <View style={styles.rowTextCol}>
-                <Text
-                  style={[
-                    styles.rowTitle,
-                    { color: theme.textPrimary },
-                  ]}
-                >
-                  About this app
-                </Text>
-                <Text
-                  style={[
-                    styles.rowSubtitle,
-                    { color: theme.textMuted },
-                  ]}
-                >
-                  See version, purpose, and future plans.
-                </Text>
-              </View>
-              <Text
-                style={[
-                  styles.rowValue,
-                  { color: "#3B82F6" },
-                ]}
-              >
-                Details
-              </Text>
-            </View>
-
-            <View style={styles.rowDivider} />
-            <View style={styles.row}>
-              <View style={styles.rowTextCol}>
-                <Text
-                  style={[
-                    styles.rowTitle,
-                    { color: theme.textPrimary },
-                  ]}
-                >
-                  Feedback
-                </Text>
-                <Text
-                  style={[
-                    styles.rowSubtitle,
-                    { color: theme.textMuted },
-                  ]}
-                >
-                  Share ideas or report issues.
-                </Text>
-              </View>
-              <Text
-                style={[
-                  styles.rowValue,
-                  { color: theme.textMuted },
-                ]}
-              >
-                Not set up
-              </Text>
-            </View>
-          </View>
-        </View>
-
-        {/* EXPORT MODAL */}
-        <Modal
-          visible={isExportModalVisible}
-          animationType="slide"
-          transparent
-          onRequestClose={() => {
-            Keyboard.dismiss();
-            setIsExportModalVisible(false);
-          }}
-        >
-          <View style={styles.modalBackdrop}>
-            <View
-              style={[
-                styles.modalCard,
-                { backgroundColor: theme.cardBackground },
-              ]}
-            >
-              <Text
-                style={[
-                  styles.modalTitle,
-                  { color: theme.textPrimary },
-                ]}
-              >
-                Backup JSON
-              </Text>
-              <Text
-                style={[
-                  styles.modalBodyText,
-                  { color: theme.textMuted },
-                ]}
-              >
-                This is your Traktr data as JSON.{"\n"}
-                Copy it and save it in Notes, email, or cloud storage.
-              </Text>
-
-              <ScrollView
-                style={styles.modalTextAreaWrapper}
-                contentContainerStyle={{ paddingBottom: 16 }}
-              >
                 <TextInput
-                  multiline
-                  editable={false}
-                  value={exportJson}
+                  ref={notesRef}
                   style={[
-                    styles.modalTextArea,
+                    styles.defaultNotesInput,
                     {
-                      color: theme.textPrimary,
-                      borderColor: theme.cardBorder,
-                      backgroundColor: theme.screenBackground,
+                      backgroundColor: theme.inputBackground,
+                      color: theme.inputText,
+                      borderColor: theme.inputBorder,
                     },
                   ]}
+                  value={defaultNotesTemplate}
+                  onChangeText={setDefaultNotesTemplate}
+                  onEndEditing={(e) =>
+                    saveDefaultNotesTemplate(e.nativeEvent.text)
+                  }
+                  placeholder="Standard (empty)"
+                  placeholderTextColor={theme.textMuted}
+                  multiline
+                  returnKeyType="done"
                 />
-              </ScrollView>
+              </TouchableOpacity>
+            </View>
 
-              <View style={styles.modalButtonsRow}>
+            {/* Data & Backup */}
+            <Text
+              style={[
+                styles.sectionLabel,
+                { color: theme.textSecondary },
+              ]}
+            >
+              Data & Backup
+            </Text>
+
+            <View
+              style={[
+                styles.sectionCard,
+                {
+                  backgroundColor: theme.cardBackground,
+                  borderColor: theme.cardBorder,
+                },
+              ]}
+            >
+              {/* Export */}
+              <TouchableOpacity
+                style={styles.row}
+                activeOpacity={0.9}
+                onPress={handleExportJobs}
+              >
+                <View style={styles.rowTextCol}>
+                  <Text
+                    style={[
+                      styles.rowTitle,
+                      { color: theme.textPrimary },
+                    ]}
+                  >
+                    Export jobs (JSON)
+                  </Text>
+                  <Text
+                    style={[
+                      styles.rowSubtitle,
+                      { color: theme.textMuted },
+                    ]}
+                  >
+                    Open a backup screen and copy all jobs as JSON text.
+                  </Text>
+                </View>
+                <Text
+                  style={[
+                    styles.rowValue,
+                    { color: accent.color },
+                  ]}
+                >
+                  Open
+                </Text>
+              </TouchableOpacity>
+
+              <View style={styles.rowDivider} />
+
+              {/* Import */}
+              <TouchableOpacity
+                style={styles.row}
+                activeOpacity={0.9}
+                onPress={openImportModal}
+              >
+                <View style={styles.rowTextCol}>
+                  <Text
+                    style={[
+                      styles.rowTitle,
+                      { color: theme.textPrimary },
+                    ]}
+                  >
+                    Import from JSON
+                  </Text>
+                  <Text
+                    style={[
+                      styles.rowSubtitle,
+                      { color: theme.textMuted },
+                    ]}
+                  >
+                    Paste a JSON backup to restore jobs on this device.
+                  </Text>
+                </View>
+                <Text
+                  style={[
+                    styles.rowValue,
+                    { color: theme.textMuted },
+                  ]}
+                >
+                  Paste
+                </Text>
+              </TouchableOpacity>
+            </View>
+
+            {/* About */}
+            <Text
+              style={[
+                styles.sectionLabel,
+                { color: theme.textSecondary },
+              ]}
+            >
+              About Traktr
+            </Text>
+
+            <View
+              style={[
+                styles.sectionCard,
+                {
+                  backgroundColor: theme.cardBackground,
+                  borderColor: theme.cardBorder,
+                },
+              ]}
+            >
+              {/* About this app row */}
+              <TouchableOpacity
+                style={styles.row}
+                activeOpacity={0.9}
+                onPress={() => {
+                  Keyboard.dismiss();
+                  setIsAboutModalVisible(true);
+                }}
+              >
+                <View style={styles.rowTextCol}>
+                  <Text
+                    style={[
+                      styles.rowTitle,
+                      { color: theme.textPrimary },
+                    ]}
+                  >
+                    About this app
+                  </Text>
+                  <Text
+                    style={[
+                      styles.rowSubtitle,
+                      { color: theme.textMuted },
+                    ]}
+                  >
+                    See version, purpose, and future plans.
+                  </Text>
+                </View>
+                <Text
+                  style={[
+                    styles.rowValue,
+                    { color: accent.color },
+                  ]}
+                >
+                  Details
+                </Text>
+              </TouchableOpacity>
+
+              <View style={styles.rowDivider} />
+
+              {/* Feedback row */}
+              <TouchableOpacity
+                style={styles.row}
+                activeOpacity={0.9}
+                onPress={handleFeedbackPress}
+              >
+                <View style={styles.rowTextCol}>
+                  <Text
+                    style={[
+                      styles.rowTitle,
+                      { color: theme.textPrimary },
+                    ]}
+                  >
+                    Feedback
+                  </Text>
+                  <Text
+                    style={[
+                      styles.rowSubtitle,
+                      { color: theme.textMuted },
+                    ]}
+                  >
+                    Share ideas or report issues.
+                  </Text>
+                </View>
+                <Text
+                  style={[
+                    styles.rowValue,
+                    { color: accent.color },
+                  ]}
+                >
+                  Email
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </ScrollView>
+
+          {/* ABOUT MODAL */}
+          <Modal
+            visible={isAboutModalVisible}
+            animationType="fade"
+            transparent
+            onRequestClose={() => setIsAboutModalVisible(false)}
+          >
+            <View style={styles.modalBackdrop}>
+              <View
+                style={[
+                  styles.modalCard,
+                  { backgroundColor: theme.cardBackground },
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.modalTitle,
+                    { color: theme.textPrimary },
+                  ]}
+                >
+                  About Traktr
+                </Text>
+
+                <Text
+                  style={[
+                    styles.modalBodyText,
+                    { color: theme.textMuted },
+                  ]}
+                >
+                  Traktr is your electrician job tracker. Keep jobs, photos,
+                  pricing, and notes in one place — even when you're offline.
+                </Text>
+
+                <View style={{ marginTop: 8, marginBottom: 12 }}>
+                  <Text
+                    style={[
+                      styles.modalBodyText,
+                      { color: theme.textMuted },
+                    ]}
+                  >
+                    Version: 0.1 (dev build)
+                  </Text>
+                  <Text
+                    style={[
+                      styles.modalBodyText,
+                      { color: theme.textMuted },
+                    ]}
+                  >
+                    Built for solo electricians, small teams, and bigger
+                    companies — all in the same app.
+                  </Text>
+                </View>
+
                 <TouchableOpacity
-                  onPress={() => {
-                    Keyboard.dismiss();
-                    setIsExportModalVisible(false);
-                  }}
+                  onPress={() => setIsAboutModalVisible(false)}
                   style={[
                     styles.modalButton,
                     {
-                      backgroundColor: "transparent",
-                      borderColor: theme.cardBorder,
-                      borderWidth: 1,
+                      alignSelf: "flex-end",
+                      borderRadius: 999,
+                      paddingHorizontal: 16,
+                      paddingVertical: 8,
+                      backgroundColor: accent.color,
                     },
                   ]}
-                  activeOpacity={0.85}
+                  activeOpacity={0.9}
                 >
                   <Text
                     style={[
                       styles.modalButtonText,
-                      { color: theme.textPrimary },
+                      { color: "#FFFFFF" },
                     ]}
                   >
                     Close
                   </Text>
                 </TouchableOpacity>
-
-                <TouchableOpacity
-                  onPress={handleCopyExport}
-                  style={[
-                    styles.modalButton,
-                    { backgroundColor: "#3B82F6" },
-                  ]}
-                  activeOpacity={0.9}
-                >
-                  <Text
-                    style={[
-                      styles.modalButtonText,
-                      { color: "#FFFFFF" },
-                    ]}
-                  >
-                    Copy JSON
-                  </Text>
-                </TouchableOpacity>
               </View>
             </View>
-          </View>
-        </Modal>
+          </Modal>
 
-        {/* IMPORT MODAL */}
-        <Modal
-          visible={isImportModalVisible}
-          animationType="slide"
-          transparent
-          onRequestClose={() => {
-            blurImportInput();
-            setIsImportModalVisible(false);
-          }}
-        >
-          <KeyboardAvoidingView
-            style={styles.modalBackdrop}
-            behavior={Platform.OS === "ios" ? "padding" : undefined}
-            keyboardVerticalOffset={40}
+          {/* EXPORT MODAL */}
+          <Modal
+            visible={isExportModalVisible}
+            animationType="slide"
+            transparent
+            onRequestClose={() => {
+              Keyboard.dismiss();
+              setIsExportModalVisible(false);
+            }}
           >
-            <View
-              style={[
-                styles.modalCard,
-                { backgroundColor: theme.cardBackground },
-              ]}
-            >
-              <Text
+            <View style={styles.modalBackdrop}>
+              <View
                 style={[
-                  styles.modalTitle,
-                  { color: theme.textPrimary },
+                  styles.modalCard,
+                  { backgroundColor: theme.cardBackground },
                 ]}
               >
-                Restore from JSON
-              </Text>
-              <Text
-                style={[
-                  styles.modalBodyText,
-                  { color: theme.textMuted },
-                ]}
-              >
-                Paste a backup exported from Traktr.{"\n"}
-                Existing jobs on this device will be replaced.
-              </Text>
-
-              <ScrollView
-                style={styles.modalTextAreaWrapper}
-                contentContainerStyle={{ paddingBottom: 16 }}
-                keyboardShouldPersistTaps="handled"
-              >
-                <TextInput
-                  ref={importInputRef}
-                  multiline
-                  value={importJson}
-                  onChangeText={setImportJson}
-                  placeholder="Paste your JSON backup here"
-                  placeholderTextColor={theme.textMuted}
+                <Text
                   style={[
-                    styles.modalTextArea,
-                    {
-                      color: theme.textPrimary,
-                      borderColor: theme.cardBorder,
-                      backgroundColor: theme.screenBackground,
-                    },
+                    styles.modalTitle,
+                    { color: theme.textPrimary },
                   ]}
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                  blurOnSubmit
-                />
-              </ScrollView>
-
-              <View style={styles.modalButtonsRow}>
-                <TouchableOpacity
-                  onPress={() => {
-                    blurImportInput();
-                    setIsImportModalVisible(false);
-                  }}
-                  style={[
-                    styles.modalButton,
-                    {
-                      backgroundColor: "transparent",
-                      borderColor: theme.cardBorder,
-                      borderWidth: 1,
-                    },
-                  ]}
-                  activeOpacity={0.85}
                 >
-                  <Text
-                    style={[
-                      styles.modalButtonText,
-                      { color: theme.textPrimary },
-                    ]}
-                  >
-                    Cancel
-                  </Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  onPress={handleImportJobs}
+                  Backup JSON
+                </Text>
+                <Text
                   style={[
-                    styles.modalButton,
-                    { backgroundColor: "#EF4444" },
+                    styles.modalBodyText,
+                    { color: theme.textMuted },
                   ]}
-                  activeOpacity={0.9}
                 >
-                  <Text
+                  This is your Traktr data as JSON.{"\n"}
+                  Copy it and save it in Notes, email, or cloud storage.
+                </Text>
+
+                <ScrollView
+                  style={styles.modalTextAreaWrapper}
+                  contentContainerStyle={{ paddingBottom: 16 }}
+                >
+                  <TextInput
+                    multiline
+                    editable={false}
+                    value={exportJson}
                     style={[
-                      styles.modalButtonText,
-                      { color: "#FFFFFF" },
+                      styles.modalTextArea,
+                      {
+                        color: theme.textPrimary,
+                        borderColor: theme.cardBorder,
+                        backgroundColor: theme.screenBackground,
+                      },
                     ]}
+                  />
+                </ScrollView>
+
+                <View style={styles.modalButtonsRow}>
+                  <TouchableOpacity
+                    onPress={() => {
+                      Keyboard.dismiss();
+                      setIsExportModalVisible(false);
+                    }}
+                    style={[
+                      styles.modalButton,
+                      {
+                        backgroundColor: "transparent",
+                        borderColor: theme.cardBorder,
+                        borderWidth: 1,
+                      },
+                    ]}
+                    activeOpacity={0.85}
                   >
-                    Import
-                  </Text>
-                </TouchableOpacity>
+                    <Text
+                      style={[
+                        styles.modalButtonText,
+                        { color: theme.textPrimary },
+                      ]}
+                    >
+                      Close
+                    </Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    onPress={handleCopyExport}
+                    style={[
+                      styles.modalButton,
+                      { backgroundColor: accent.color },
+                    ]}
+                    activeOpacity={0.9}
+                  >
+                    <Text
+                      style={[
+                        styles.modalButtonText,
+                        { color: "#FFFFFF" },
+                      ]}
+                    >
+                      Copy JSON
+                    </Text>
+                  </TouchableOpacity>
+                </View>
               </View>
             </View>
-          </KeyboardAvoidingView>
-        </Modal>
+          </Modal>
 
-      </View>
+          {/* IMPORT MODAL */}
+          <Modal
+            visible={isImportModalVisible}
+            animationType="slide"
+            transparent
+            onRequestClose={() => {
+              blurImportInput();
+              setIsImportModalVisible(false);
+            }}
+          >
+            <KeyboardAvoidingView
+              style={styles.modalBackdrop}
+              behavior={Platform.OS === "ios" ? "padding" : undefined}
+              keyboardVerticalOffset={Platform.OS === "ios" ? 10 : 0}
+            >
+              <View
+                style={[
+                  styles.modalCard,
+                  { backgroundColor: theme.cardBackground },
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.modalTitle,
+                    { color: theme.textPrimary },
+                  ]}
+                >
+                  Restore from JSON
+                </Text>
+                <Text
+                  style={[
+                    styles.modalBodyText,
+                    { color: theme.textMuted },
+                  ]}
+                >
+                  Paste a backup exported from Traktr.{"\n"}
+                  Existing jobs on this device will be replaced.
+                </Text>
+
+                <ScrollView
+                  style={styles.modalTextAreaWrapper}
+                  contentContainerStyle={{ paddingBottom: 16 }}
+                  keyboardShouldPersistTaps="handled"
+                >
+                  <TextInput
+                    ref={importInputRef}
+                    multiline
+                    value={importJson}
+                    onChangeText={setImportJson}
+                    placeholder="Paste your JSON backup here"
+                    placeholderTextColor={theme.textMuted}
+                    style={[
+                      styles.modalTextArea,
+                      {
+                        color: theme.textPrimary,
+                        borderColor: theme.cardBorder,
+                        backgroundColor: theme.screenBackground,
+                      },
+                    ]}
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                    blurOnSubmit
+                  />
+                </ScrollView>
+
+                <View style={styles.modalButtonsRow}>
+                  <TouchableOpacity
+                    onPress={() => {
+                      blurImportInput();
+                      setIsImportModalVisible(false);
+                    }}
+                    style={[
+                      styles.modalButton,
+                      {
+                        backgroundColor: "transparent",
+                        borderColor: theme.cardBorder,
+                        borderWidth: 1,
+                      },
+                    ]}
+                    activeOpacity={0.85}
+                  >
+                    <Text
+                      style={[
+                        styles.modalButtonText,
+                        { color: theme.textPrimary },
+                      ]}
+                    >
+                      Cancel
+                    </Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    onPress={handleImportJobs}
+                    style={[
+                      styles.modalButton,
+                      { backgroundColor: "#EF4444" },
+                    ]}
+                    activeOpacity={0.9}
+                  >
+                    <Text
+                      style={[
+                        styles.modalButtonText,
+                        { color: "#FFFFFF" },
+                      ]}
+                    >
+                      Import
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            </KeyboardAvoidingView>
+          </Modal>
+        </View>
+      </TouchableWithoutFeedback>
     </KeyboardAvoidingView>
   );
 }
@@ -893,7 +1321,6 @@ const styles = StyleSheet.create({
   content: {
     flex: 1,
     paddingHorizontal: 16,
-    paddingBottom: 24,
   },
   sectionLabel: {
     fontSize: 14,
@@ -961,6 +1388,52 @@ const styles = StyleSheet.create({
   },
   themeOptionLabel: {
     fontSize: 14,
+  },
+
+  // Accent chips
+  accentOptionsRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 8,
+    paddingBottom: 8,
+    paddingTop: 2,
+  },
+  accentChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderWidth: 1,
+  },
+  accentDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 999,
+    marginRight: 6,
+  },
+  accentLabel: {
+    fontSize: 12,
+    fontWeight: "600",
+  },
+
+  // Job defaults inputs
+  defaultInput: {
+    width: 110,
+    borderRadius: 10,
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+    fontSize: 13,
+    borderWidth: 1,
+  },
+  defaultNotesInput: {
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    fontSize: 13,
+    borderWidth: 1,
+    minHeight: 70,
+    textAlignVertical: "top",
   },
 
   // Modals
