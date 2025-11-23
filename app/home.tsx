@@ -45,7 +45,7 @@ type Job = {
 const initialJobs: Job[] = [
   {
     id: "1",
-  title: "Panel Upgrade - 100A to 200A",
+    title: "Panel Upgrade - 100A to 200A",
     address: "123 Main St, Brooklyn, NY",
     description: "Replace existing 100A panel with 200A, label circuits.",
     createdAt: "2025-11-10T10:00:00Z",
@@ -177,6 +177,13 @@ const HomeScreen: FC = () => {
   });
   const addJobAnim = createScaleHandlers(addJobScale);
 
+  // Format money with commas
+  const formatJobTotal = (amount: number) =>
+    amount.toLocaleString("en-US", {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    });
+
   // -------- SORT + FILTER --------
 
   const handleSelectSort = (option: SortOption) => {
@@ -271,7 +278,7 @@ const HomeScreen: FC = () => {
     }, [])
   );
 
-  // -------- ASYNC STORAGE SAVE (mainly for initial seed + sort) --------
+  // -------- ASYNC STORAGE SAVE --------
 
   useEffect(() => {
     if (!isHydrated) return;
@@ -311,10 +318,8 @@ const HomeScreen: FC = () => {
         >
           {/* HEADER */}
           <View style={styles.headerRow}>
-            <Text
-              style={[styles.header, { color: theme.headerText }]}
-            >
-               THE TRAKTR APP
+            <Text style={[styles.header, { color: theme.headerText }]}>
+              THE TRAKTR APP
             </Text>
 
             <View style={styles.headerActionsRow}>
@@ -337,7 +342,7 @@ const HomeScreen: FC = () => {
                 />
               </TouchableOpacity>
 
-              {/* Trash icon pill with badge – now navigates to /trash */}
+              {/* Trash icon pill with badge – navigates to /trash */}
               <TouchableOpacity
                 style={[
                   styles.trashButton,
@@ -646,20 +651,32 @@ const HomeScreen: FC = () => {
                     item.isDone && {
                       borderWidth: 1,
                       borderColor: theme.tagDoneBorder,
+                      backgroundColor: "rgba(34,197,94,0.08)", // soft green tint for done jobs
                     },
                     { transform: [{ scale: pressed ? 0.97 : 1 }] },
                   ]}
                 >
                   <View style={styles.jobCardHeaderRow}>
-                    <Text
-                      style={[
-                        styles.jobTitle,
-                        { color: statusStyles.titleColor },
-                        item.isDone && styles.jobTitleDone,
-                      ]}
-                    >
-                      {item.title}
-                    </Text>
+                    <View style={styles.jobTitleRow}>
+                      {item.isDone && (
+                        <Ionicons
+                          name="checkmark-circle"
+                          size={16}
+                          color={statusStyles.tagText}
+                          style={{ marginRight: 6 }}
+                        />
+                      )}
+                      <Text
+                        style={[
+                          styles.jobTitle,
+                          { color: statusStyles.titleColor },
+                          item.isDone && styles.jobTitleDone,
+                        ]}
+                        numberOfLines={2}
+                      >
+                        {item.title}
+                      </Text>
+                    </View>
 
                     <View
                       style={[
@@ -686,7 +703,6 @@ const HomeScreen: FC = () => {
                       style={[
                         styles.jobClient,
                         { color: statusStyles.textColor },
-                        item.isDone && styles.jobTextDone,
                       ]}
                     >
                       Client: {item.clientName}
@@ -697,7 +713,6 @@ const HomeScreen: FC = () => {
                     style={[
                       styles.jobAddress,
                       { color: statusStyles.textColor },
-                      item.isDone && styles.jobTextDone,
                     ]}
                   >
                     {item.address}
@@ -708,7 +723,6 @@ const HomeScreen: FC = () => {
                       style={[
                         styles.jobPhotoCount,
                         { color: statusStyles.textColor },
-                        item.isDone && styles.jobTextDone,
                       ]}
                     >
                       📷 {item.photoUris!.length}{" "}
@@ -721,10 +735,9 @@ const HomeScreen: FC = () => {
                       style={[
                         styles.jobAmount,
                         { color: "#FCD34D" },
-                        item.isDone && styles.jobTextDone,
                       ]}
                     >
-                      💵 Total: ${jobTotal.toFixed(2)}
+                      💵 Total: ${formatJobTotal(jobTotal)}
                     </Text>
                   )}
 
@@ -732,7 +745,6 @@ const HomeScreen: FC = () => {
                     style={[
                       styles.jobDate,
                       { color: theme.textMuted },
-                      item.isDone && styles.jobTextDone,
                     ]}
                   >
                     {new Date(item.createdAt).toLocaleString()}
@@ -884,6 +896,11 @@ const styles = StyleSheet.create({
     alignItems: "center",
     marginBottom: 4,
   },
+  jobTitleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    flexShrink: 1,
+  },
   jobTitle: {
     fontSize: 15,
     fontWeight: "600",
@@ -909,9 +926,6 @@ const styles = StyleSheet.create({
   },
   jobDate: {
     fontSize: 11,
-  },
-  jobTextDone: {
-    textDecorationLine: "line-through",
   },
   statusTag: {
     paddingHorizontal: 8,

@@ -29,6 +29,9 @@ const themeLabels: Record<ThemeName, string> = {
 // Use the SAME key as Home/Add Job
 const JOBS_STORAGE_KEY = "EJT_JOBS";
 
+// Track last backup time
+const LAST_EXPORT_KEY = "EJT_LAST_EXPORT_AT";
+
 // Accent color types + presets
 type AccentName = "blue" | "amber" | "emerald" | "purple" | "rose";
 
@@ -90,6 +93,9 @@ export default function SettingsScreen() {
   const [exportJson, setExportJson] = useState("");
   const [importJson, setImportJson] = useState("");
 
+  // Track last export timestamp
+  const [lastExportAt, setLastExportAt] = useState<string | null>(null);
+
   // About modal
   const [isAboutModalVisible, setIsAboutModalVisible] = useState(false);
 
@@ -105,6 +111,24 @@ export default function SettingsScreen() {
 
   // Ref to force-blur the import TextInput
   const importInputRef = useRef<TextInput | null>(null);
+
+  // ---------- SCROLL + SECTION POSITIONS (same idea as add-job) ----------
+  const scrollViewRef = useRef<ScrollView | null>(null);
+  const sectionPositions = useRef<Record<string, number>>({});
+
+  const handleSectionLayout = (key: string, y: number) => {
+    sectionPositions.current[key] = y;
+  };
+
+  const scrollToSection = (key: string) => {
+    const y = sectionPositions.current[key] ?? 0;
+    const offset = Math.max(y - 80, 0); // small offset so it’s not glued to the top
+
+    scrollViewRef.current?.scrollTo({
+      y: offset,
+      animated: true,
+    });
+  };
 
   const blurImportInput = () => {
     if (importInputRef.current) {
@@ -160,11 +184,23 @@ export default function SettingsScreen() {
     }
   }, []);
 
+  const loadLastExport = useCallback(async () => {
+    try {
+      const stored = await AsyncStorage.getItem(LAST_EXPORT_KEY);
+      if (stored) {
+        setLastExportAt(stored);
+      }
+    } catch (err) {
+      console.warn("Failed to load last export time:", err);
+    }
+  }, []);
+
   useEffect(() => {
     loadTheme();
     loadAccent();
     loadDefaults();
-  }, [loadTheme, loadAccent, loadDefaults]);
+    loadLastExport();
+  }, [loadTheme, loadAccent, loadDefaults, loadLastExport]);
 
   const handleSelectTheme = async (value: ThemeName) => {
     try {
@@ -186,6 +222,28 @@ export default function SettingsScreen() {
     } finally {
       setIsAccentExpanded(false);
     }
+  };
+
+  // ---------- Helper: format "Last export" label ----------
+  const formatLastExportLabel = (iso: string | null): string => {
+    if (!iso) return "Last export: none yet";
+
+    const exportedAt = new Date(iso);
+    if (Number.isNaN(exportedAt.getTime())) {
+      return "Last export: unknown";
+    }
+
+    const now = new Date();
+    const diffMs = now.getTime() - exportedAt.getTime();
+    const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+
+    if (diffDays <= 0) {
+      return "Last export: Today";
+    }
+    if (diffDays === 1) {
+      return "Last export: Yesterday";
+    }
+    return `Last export: ${diffDays} days ago`;
   };
 
   // ---------- Job Defaults save handlers (called when editing ends) ----------
@@ -302,9 +360,19 @@ export default function SettingsScreen() {
 
     try {
       await Clipboard.setStringAsync(exportJson);
+
+      // Save "last export" time when user actually copies the backup
+      const iso = new Date().toISOString();
+      setLastExportAt(iso);
+      try {
+        await AsyncStorage.setItem(LAST_EXPORT_KEY, iso);
+      } catch (err) {
+        console.warn("Failed to persist last export time:", err);
+      }
+
       Alert.alert(
-        "Copied",
-        "Your backup JSON has been copied to the clipboard."
+        "Backup copied",
+        "Your backup JSON has been copied to the clipboard.\n\nTip: Paste it into Notes or email it to yourself so you can test it later and keep a second copy."
       );
     } catch (err) {
       console.warn("Failed to copy backup JSON:", err);
@@ -367,7 +435,7 @@ export default function SettingsScreen() {
               setIsImportModalVisible(false);
               Alert.alert(
                 "Import complete",
-                "Your jobs backup has been restored."
+                "Your jobs backup has been restored on this device."
               );
             } catch (err) {
               console.warn("Failed to import jobs:", err);
@@ -462,6 +530,7 @@ export default function SettingsScreen() {
 
           {/* Content as ScrollView so fields move above keyboard */}
           <ScrollView
+            ref={scrollViewRef}
             style={styles.content}
             contentContainerStyle={{ paddingBottom: 32 }}
             keyboardShouldPersistTaps="handled"
@@ -664,12 +733,16 @@ export default function SettingsScreen() {
                   borderColor: theme.cardBorder,
                 },
               ]}
+              onLayout={(e) =>
+                handleSectionLayout("jobDefaults", e.nativeEvent.layout.y)
+              }
             >
               {/* Default hourly rate */}
               <TouchableOpacity
                 style={styles.row}
                 activeOpacity={1}
                 onPress={() => {
+                  scrollToSection("jobDefaults");
                   hourlyRef.current?.focus();
                 }}
               >
@@ -708,7 +781,11 @@ export default function SettingsScreen() {
                   placeholderTextColor={theme.textMuted}
                   keyboardType="numeric"
                   returnKeyType="next"
-                  onSubmitEditing={() => clientRef.current?.focus()}
+                  onFocus={() => scrollToSection("jobDefaults")}
+                  onSubmitEditing={() => {
+                    scrollToSection("jobDefaults");
+                    clientRef.current?.focus();
+                  }}
                 />
               </TouchableOpacity>
 
@@ -719,6 +796,7 @@ export default function SettingsScreen() {
                 style={styles.row}
                 activeOpacity={1}
                 onPress={() => {
+                  scrollToSection("jobDefaults");
                   clientRef.current?.focus();
                 }}
               >
@@ -758,7 +836,11 @@ export default function SettingsScreen() {
                   placeholder="None"
                   placeholderTextColor={theme.textMuted}
                   returnKeyType="next"
-                  onSubmitEditing={() => notesRef.current?.focus()}
+                  onFocus={() => scrollToSection("jobDefaults")}
+                  onSubmitEditing={() => {
+                    scrollToSection("jobDefaults");
+                    notesRef.current?.focus();
+                  }}
                 />
               </TouchableOpacity>
 
@@ -768,6 +850,7 @@ export default function SettingsScreen() {
               <TouchableOpacity
                 activeOpacity={1}
                 onPress={() => {
+                  scrollToSection("jobDefaults");
                   notesRef.current?.focus();
                 }}
                 style={{ paddingVertical: 10 }}
@@ -807,6 +890,7 @@ export default function SettingsScreen() {
                   placeholderTextColor={theme.textMuted}
                   multiline
                   returnKeyType="done"
+                  onFocus={() => scrollToSection("jobDefaults")}
                 />
               </TouchableOpacity>
             </View>
@@ -830,6 +914,39 @@ export default function SettingsScreen() {
                 },
               ]}
             >
+                {/* Pill + last export status */}
+  <View style={styles.backupMetaRow}>
+    <View
+      style={[
+        styles.backupTag,
+        {
+          backgroundColor: "rgba(148,163,184,0.12)",
+          borderColor: "rgba(148,163,184,0.4)",
+        },
+      ]}
+    >
+      <Text
+        style={[
+          styles.backupTagText,
+          { color: theme.textSecondary },
+        ]}
+      >
+        Offline backup (no cloud)
+      </Text>
+    </View>
+
+    <Text
+      style={[
+        styles.backupStatusText,
+        { color: theme.textMuted },
+      ]}
+    >
+      {formatLastExportLabel(lastExportAt)}
+    </Text>
+  </View>
+
+  <View style={styles.rowDivider} />
+
               {/* Export */}
               <TouchableOpacity
                 style={styles.row}
@@ -851,7 +968,9 @@ export default function SettingsScreen() {
                       { color: theme.textMuted },
                     ]}
                   >
-                    Open a backup screen and copy all jobs as JSON text.
+                    Open a backup screen and copy all jobs as JSON text. Copy
+                    your jobs and paste them into Notes, email, or your laptop
+                    for safekeeping.
                   </Text>
                 </View>
                 <Text
@@ -1215,6 +1334,14 @@ export default function SettingsScreen() {
                   Paste a backup exported from Traktr.{"\n"}
                   Existing jobs on this device will be replaced.
                 </Text>
+                <Text
+                  style={[
+                    styles.modalWarningText,
+                    { color: "#F97373" },
+                  ]}
+                >
+                  This will overwrite all existing jobs on this device.
+                </Text>
 
                 <ScrollView
                   style={styles.modalTextAreaWrapper}
@@ -1436,6 +1563,28 @@ const styles = StyleSheet.create({
     textAlignVertical: "top",
   },
 
+  // Backup meta
+  backupMetaRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 6,
+    marginTop: 6,
+  },
+  backupTag: {
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderWidth: 1,
+  },
+  backupTagText: {
+    fontSize: 11,
+    fontWeight: "600",
+  },
+  backupStatusText: {
+    fontSize: 12,
+  },
+
   // Modals
   modalBackdrop: {
     flex: 1,
@@ -1457,6 +1606,11 @@ const styles = StyleSheet.create({
   modalBodyText: {
     fontSize: 13,
     marginBottom: 8,
+  },
+  modalWarningText: {
+    fontSize: 12,
+    marginBottom: 8,
+    fontWeight: "600",
   },
   modalTextAreaWrapper: {
     borderRadius: 12,

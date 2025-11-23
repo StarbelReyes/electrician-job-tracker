@@ -80,11 +80,7 @@ const AddJobScreen = () => {
     const loadTheme = async () => {
       try {
         const saved = await AsyncStorage.getItem(THEME_STORAGE_KEY);
-        if (
-          saved === "light" ||
-          saved === "dark" ||
-          saved === "midnight"
-        ) {
+        if (saved === "light" || saved === "dark" || saved === "midnight") {
           setThemeName(saved as ThemeName);
         }
       } catch (err) {
@@ -109,6 +105,25 @@ const AddJobScreen = () => {
   const [materialCost, setMaterialCost] = useState("");
 
   const [photoUris, setPhotoUris] = useState<string[]>([]);
+
+  // ---------- SCROLL + SECTION POSITIONS (same logic style as job-detail) ----------
+  const scrollViewRef = useRef<ScrollView | null>(null);
+  const sectionPositions = useRef<Record<string, number>>({});
+
+  const handleSectionLayout = (key: string, y: number) => {
+    sectionPositions.current[key] = y;
+  };
+
+  const scrollToSection = (key: string) => {
+    const y = sectionPositions.current[key] ?? 0;
+    // Offset a bit so the header isn't too close to the top
+    const offset = Math.max(y - 80, 0);
+
+    scrollViewRef.current?.scrollTo({
+      y: offset,
+      animated: true,
+    });
+  };
 
   // Load Job Defaults once when screen mounts
   useEffect(() => {
@@ -183,8 +198,7 @@ const AddJobScreen = () => {
 
   // ---------- PHOTOS ----------
   const handleAddPhotoFromGallery = async () => {
-    const { status } =
-      await ImagePicker.requestMediaLibraryPermissionsAsync();
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (status !== "granted") {
       Alert.alert(
         "Permission needed",
@@ -210,8 +224,7 @@ const AddJobScreen = () => {
   };
 
   const handleAddPhotoFromCamera = async () => {
-    const { status } =
-      await ImagePicker.requestCameraPermissionsAsync();
+    const { status } = await ImagePicker.requestCameraPermissionsAsync();
     if (status !== "granted") {
       Alert.alert(
         "Permission needed",
@@ -234,23 +247,17 @@ const AddJobScreen = () => {
   };
 
   const handleRemovePhoto = (uriToRemove: string) => {
-    Alert.alert(
-      "Remove photo",
-      "Are you sure you want to remove this photo?",
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Remove",
-          style: "destructive",
-          onPress: () => {
-            LayoutAnimation.configureNext(
-              LayoutAnimation.Presets.easeInEaseOut
-            );
-            setPhotoUris((prev) => prev.filter((u) => u !== uriToRemove));
-          },
+    Alert.alert("Remove photo", "Are you sure you want to remove this photo?", [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Remove",
+        style: "destructive",
+        onPress: () => {
+          LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+          setPhotoUris((prev) => prev.filter((u) => u !== uriToRemove));
         },
-      ]
-    );
+      },
+    ]);
   };
 
   // ---------- SAVE ----------
@@ -264,8 +271,7 @@ const AddJobScreen = () => {
       id: Date.now().toString(),
       title: title.trim(),
       address: address.trim() || "N/A",
-      description:
-        description.trim() || "No description / scope of work added.",
+      description: description.trim() || "No description / scope of work added.",
       createdAt: new Date().toISOString(),
       isDone: false,
       clientName: clientName.trim() || undefined,
@@ -284,10 +290,7 @@ const AddJobScreen = () => {
       const nextJobs = [...jobs, job];
 
       LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-      await AsyncStorage.setItem(
-        STORAGE_KEYS.JOBS,
-        JSON.stringify(nextJobs)
-      );
+      await AsyncStorage.setItem(STORAGE_KEYS.JOBS, JSON.stringify(nextJobs));
 
       Alert.alert("Job saved", "New job has been added.", [
         {
@@ -305,7 +308,7 @@ const AddJobScreen = () => {
     <KeyboardAvoidingView
       style={{ flex: 1, backgroundColor: theme.screenBackground }}
       behavior={Platform.OS === "ios" ? "padding" : "height"}
-      keyboardVerticalOffset={Platform.OS === "ios" ? 20 : 0}
+      keyboardVerticalOffset={Platform.OS === "ios" ? 10 : 0} // keep low so it doesn't over-push
     >
       <TouchableWithoutFeedback onPress={Keyboard.dismiss} accessible={false}>
         <Animated.View
@@ -330,20 +333,14 @@ const AddJobScreen = () => {
                 color={theme.headerMuted}
               />
               <Text
-                style={[
-                  styles.backText,
-                  { color: theme.headerMuted },
-                ]}
+                style={[styles.backText, { color: theme.headerMuted }]}
               >
                 Back
               </Text>
             </TouchableOpacity>
 
             <Text
-              style={[
-                styles.headerTitle,
-                { color: theme.headerText },
-              ]}
+              style={[styles.headerTitle, { color: theme.headerText }]}
             >
               Add New Job
             </Text>
@@ -353,6 +350,7 @@ const AddJobScreen = () => {
 
           {/* FORM */}
           <ScrollView
+            ref={scrollViewRef}
             contentContainerStyle={styles.scrollContent}
             keyboardShouldPersistTaps="always"
             showsVerticalScrollIndicator={false}
@@ -366,21 +364,18 @@ const AddJobScreen = () => {
                   borderColor: theme.cardBorder,
                 },
               ]}
+              onLayout={(e) =>
+                handleSectionLayout("jobInfo", e.nativeEvent.layout.y)
+              }
             >
               <Text
-                style={[
-                  styles.cardTitle,
-                  { color: theme.textPrimary },
-                ]}
+                style={[styles.cardTitle, { color: theme.textPrimary }]}
               >
                 Job Info
               </Text>
 
               <Text
-                style={[
-                  styles.label,
-                  { color: theme.textMuted },
-                ]}
+                style={[styles.label, { color: theme.textMuted }]}
               >
                 Title
               </Text>
@@ -397,13 +392,11 @@ const AddJobScreen = () => {
                 onChangeText={setTitle}
                 placeholder="Ex: Install Tesla Wall Charger"
                 placeholderTextColor={theme.textMuted}
+                onFocus={() => scrollToSection("jobInfo")}
               />
 
               <Text
-                style={[
-                  styles.label,
-                  { color: theme.textMuted },
-                ]}
+                style={[styles.label, { color: theme.textMuted }]}
               >
                 Address
               </Text>
@@ -420,13 +413,11 @@ const AddJobScreen = () => {
                 onChangeText={setAddress}
                 placeholder="Job address"
                 placeholderTextColor={theme.textMuted}
+                onFocus={() => scrollToSection("jobInfo")}
               />
 
               <Text
-                style={[
-                  styles.label,
-                  { color: theme.textMuted },
-                ]}
+                style={[styles.label, { color: theme.textMuted }]}
               >
                 Description / Scope
               </Text>
@@ -444,6 +435,7 @@ const AddJobScreen = () => {
                 placeholder="What are you doing on this job?"
                 placeholderTextColor={theme.textMuted}
                 multiline
+                onFocus={() => scrollToSection("jobInfo")}
               />
             </View>
 
@@ -456,21 +448,18 @@ const AddJobScreen = () => {
                   borderColor: theme.cardBorder,
                 },
               ]}
+              onLayout={(e) =>
+                handleSectionLayout("clientInfo", e.nativeEvent.layout.y)
+              }
             >
               <Text
-                style={[
-                  styles.cardTitle,
-                  { color: theme.textPrimary },
-                ]}
+                style={[styles.cardTitle, { color: theme.textPrimary }]}
               >
                 Client Info
               </Text>
 
               <Text
-                style={[
-                  styles.label,
-                  { color: theme.textMuted },
-                ]}
+                style={[styles.label, { color: theme.textMuted }]}
               >
                 Client Name
               </Text>
@@ -487,13 +476,11 @@ const AddJobScreen = () => {
                 onChangeText={setClientName}
                 placeholder="Client name"
                 placeholderTextColor={theme.textMuted}
+                onFocus={() => scrollToSection("clientInfo")}
               />
 
               <Text
-                style={[
-                  styles.label,
-                  { color: theme.textMuted },
-                ]}
+                style={[styles.label, { color: theme.textMuted }]}
               >
                 Client Phone
               </Text>
@@ -511,13 +498,11 @@ const AddJobScreen = () => {
                 placeholder="Phone number"
                 keyboardType="phone-pad"
                 placeholderTextColor={theme.textMuted}
+                onFocus={() => scrollToSection("clientInfo")}
               />
 
               <Text
-                style={[
-                  styles.label,
-                  { color: theme.textMuted },
-                ]}
+                style={[styles.label, { color: theme.textMuted }]}
               >
                 Notes (gate codes, timing, etc.)
               </Text>
@@ -535,6 +520,7 @@ const AddJobScreen = () => {
                 placeholder="Any special info..."
                 placeholderTextColor={theme.textMuted}
                 multiline
+                onFocus={() => scrollToSection("clientInfo")}
               />
             </View>
 
@@ -547,12 +533,12 @@ const AddJobScreen = () => {
                   borderColor: theme.cardBorder,
                 },
               ]}
+              onLayout={(e) =>
+                handleSectionLayout("pricing", e.nativeEvent.layout.y)
+              }
             >
               <Text
-                style={[
-                  styles.cardTitle,
-                  { color: theme.textPrimary },
-                ]}
+                style={[styles.cardTitle, { color: theme.textPrimary }]}
               >
                 Pricing
               </Text>
@@ -560,10 +546,7 @@ const AddJobScreen = () => {
               <View style={styles.pricingRow}>
                 <View style={styles.pricingColumn}>
                   <Text
-                    style={[
-                      styles.label,
-                      { color: theme.textMuted },
-                    ]}
+                    style={[styles.label, { color: theme.textMuted }]}
                   >
                     Labor hours
                   </Text>
@@ -582,15 +565,13 @@ const AddJobScreen = () => {
                     placeholder="4.5"
                     keyboardType="numeric"
                     placeholderTextColor={theme.textMuted}
+                    onFocus={() => scrollToSection("pricing")}
                   />
                 </View>
 
                 <View style={styles.pricingColumn}>
                   <Text
-                    style={[
-                      styles.label,
-                      { color: theme.textMuted },
-                    ]}
+                    style={[styles.label, { color: theme.textMuted }]}
                   >
                     Hourly rate
                   </Text>
@@ -609,15 +590,13 @@ const AddJobScreen = () => {
                     placeholder="120"
                     keyboardType="numeric"
                     placeholderTextColor={theme.textMuted}
+                    onFocus={() => scrollToSection("pricing")}
                   />
                 </View>
               </View>
 
               <Text
-                style={[
-                  styles.label,
-                  { color: theme.textMuted },
-                ]}
+                style={[styles.label, { color: theme.textMuted }]}
               >
                 Material cost
               </Text>
@@ -636,14 +615,12 @@ const AddJobScreen = () => {
                 placeholder="350"
                 keyboardType="numeric"
                 placeholderTextColor={theme.textMuted}
+                onFocus={() => scrollToSection("pricing")}
               />
 
               <View style={styles.totalRow}>
                 <Text
-                  style={[
-                    styles.totalLabel,
-                    { color: theme.textMuted },
-                  ]}
+                  style={[styles.totalLabel, { color: theme.textMuted }]}
                 >
                   Estimated total
                 </Text>
@@ -665,12 +642,12 @@ const AddJobScreen = () => {
                   borderColor: theme.cardBorder,
                 },
               ]}
+              onLayout={(e) =>
+                handleSectionLayout("photos", e.nativeEvent.layout.y)
+              }
             >
               <Text
-                style={[
-                  styles.cardTitle,
-                  { color: theme.textPrimary },
-                ]}
+                style={[styles.cardTitle, { color: theme.textPrimary }]}
               >
                 Photos
               </Text>
@@ -748,7 +725,7 @@ const AddJobScreen = () => {
               <TouchableOpacity
                 style={[
                   styles.saveButton,
-                { backgroundColor: theme.primaryButtonBackground },
+                  { backgroundColor: theme.primaryButtonBackground },
                 ]}
                 onPress={handleSaveJob}
                 activeOpacity={0.9}
@@ -772,10 +749,7 @@ const AddJobScreen = () => {
               activeOpacity={0.8}
             >
               <Text
-                style={[
-                  styles.cancelText,
-                  { color: theme.textMuted },
-                ]}
+                style={[styles.cancelText, { color: theme.textMuted }]}
               >
                 Cancel
               </Text>
