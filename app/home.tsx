@@ -606,6 +606,23 @@ const HomeScreen: FC = () => {
             </Text>
           </View>
 
+          {/* Ask Traktr AI CTA */}
+          <View style={styles.aiHelperRow}>
+            <TouchableOpacity
+              activeOpacity={0.9}
+              style={[
+                styles.aiHelperButton,
+                {
+                  backgroundColor: accentColor,
+                },
+              ]}
+              onPress={() => router.push("/ai-helper")}
+            >
+              <Ionicons name="sparkles-outline" size={16} color="#F9FAFB" />
+              <Text style={styles.aiHelperText}>Ask Traktr AI</Text>
+            </TouchableOpacity>
+          </View>
+
           {/* SUMMARY */}
           <View style={styles.summaryRow}>
             {/* OPEN */}
@@ -801,11 +818,35 @@ const styles = StyleSheet.create({
 
   // HEADER
   headerRow: {
-    marginBottom: 18,
+    marginBottom: 8,
   },
   header: {
     fontSize: 22,
     fontWeight: "700",
+  },
+
+  // Ask Traktr AI CTA
+  aiHelperRow: {
+    flexDirection: "row",
+    justifyContent: "flex-start",
+    marginBottom: 10,
+  },
+  aiHelperButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    gap: 6,
+    shadowColor: "#000",
+    shadowOpacity: 0.12,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 3 },
+  },
+  aiHelperText: {
+    fontSize: 12,
+    fontWeight: "600",
+    color: "#F9FAFB",
   },
 
   // SUMMARY
