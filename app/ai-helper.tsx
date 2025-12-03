@@ -37,6 +37,14 @@ type QAItem = {
   createdAt: number;
 };
 
+type Session = {
+  id: string;
+  title: string;
+  createdAt: number;
+  updatedAt: number;
+  items: QAItem[];
+};
+
 export default function AiHelperScreen() {
   const router = useRouter();
 
@@ -44,23 +52,22 @@ export default function AiHelperScreen() {
   const theme = themes[themeName] ?? themes.dark;
 
   const [question, setQuestion] = useState("");
-  const [history, setHistory] = useState<QAItem[]>([]);
+  const [sessions, setSessions] = useState<Session[]>([]);
   const [isLoading, setIsLoading] = useState(false);
 
-  // which QA is the “current chat” in the big card
-  const [activeLatestId, setActiveLatestId] = useState<string | null>(null);
+  // which session is the “current chat” in the big card
+  const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
 
-  // modal for past pills
-  const [selectedItem, setSelectedItem] = useState<QAItem | null>(null);
+  // modal for past pills (whole session)
+  const [selectedSession, setSelectedSession] = useState<Session | null>(null);
 
-  // 🔹 Only show a card when activeLatestId is set
-  const latestItem = activeLatestId
-    ? history.find((h) => h.id === activeLatestId) ?? null
+  const activeSession = activeSessionId
+    ? sessions.find((s) => s.id === activeSessionId) ?? null
     : null;
 
   const pillsScrollRef = useRef<ScrollView | null>(null);
 
-  // Load theme + saved history once
+  // Load theme + saved history once (support old format -> new format)
   useEffect(() => {
     const load = async () => {
       try {
@@ -78,10 +85,34 @@ export default function AiHelperScreen() {
         }
 
         if (savedHistory) {
-          const parsed: QAItem[] = JSON.parse(savedHistory);
-          setHistory(parsed);
-          if (parsed.length > 0) {
-            setActiveLatestId(parsed[parsed.length - 1].id);
+          const parsed = JSON.parse(savedHistory);
+
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            // New format: Session[]
+            if (parsed[0].items) {
+              const asSessions = parsed as Session[];
+              setSessions(asSessions);
+              setActiveSessionId(asSessions[asSessions.length - 1].id);
+            }
+            // Old format: QAItem[]
+            else if (parsed[0].question && parsed[0].answer) {
+              const oldItems = parsed as QAItem[];
+              const converted: Session[] = oldItems.map((qa) => {
+                const created =
+                  typeof qa.createdAt === "number" ? qa.createdAt : Date.now();
+                return {
+                  id: `session-${qa.id}`,
+                  title: qa.question,
+                  createdAt: created,
+                  updatedAt: created,
+                  items: [qa],
+                };
+              });
+              setSessions(converted);
+              if (converted.length > 0) {
+                setActiveSessionId(converted[converted.length - 1].id);
+              }
+            }
           }
         }
       } catch (err) {
@@ -91,21 +122,21 @@ export default function AiHelperScreen() {
     load();
   }, []);
 
-  // Save history whenever it changes
+  // Save sessions whenever they change
   useEffect(() => {
     const save = async () => {
       try {
-        if (history.length === 0) {
+        if (sessions.length === 0) {
           await AsyncStorage.removeItem(QA_HISTORY_KEY);
         } else {
-          await AsyncStorage.setItem(QA_HISTORY_KEY, JSON.stringify(history));
+          await AsyncStorage.setItem(QA_HISTORY_KEY, JSON.stringify(sessions));
         }
       } catch (err) {
-        console.warn("Failed to save Ask Traktr history:", err);
+        console.warn("Failed to save Ask Traktr sessions:", err);
       }
     };
     save();
-  }, [history]);
+  }, [sessions]);
 
   const handleAskAi = async () => {
     if (!IS_PRO_USER) {
@@ -169,22 +200,44 @@ export default function AiHelperScreen() {
         return;
       }
 
-      const item: QAItem = {
-        id: `qa-${Date.now()}`,
+      const now = Date.now();
+      const qaItem: QAItem = {
+        id: `qa-${now}`,
         question: trimmed,
         answer,
-        createdAt: Date.now(),
+        createdAt: now,
       };
 
-      setHistory((prev) => {
-        const next = [...prev, item];
-        return next;
+      setSessions((prev) => {
+        // If we already have an active session, append to that session
+        if (activeSessionId) {
+          return prev.map((session) => {
+            if (session.id !== activeSessionId) return session;
+            return {
+              ...session,
+              items: [...session.items, qaItem],
+              updatedAt: now,
+            };
+          });
+        }
+
+        // No active session -> create a brand new session
+        const newSessionId = `session-${now}`;
+        const newSession: Session = {
+          id: newSessionId,
+          title: trimmed,
+          createdAt: now,
+          updatedAt: now,
+          items: [qaItem],
+        };
+
+        setActiveSessionId(newSessionId);
+        return [...prev, newSession];
       });
-      setActiveLatestId(item.id); // this becomes the visible “current chat”
-      setQuestion(""); // clear like ChatGPT
+
+      setQuestion("");
       Keyboard.dismiss();
 
-      // auto-scroll pills to the end (newest)
       setTimeout(() => {
         if (pillsScrollRef.current) {
           pillsScrollRef.current.scrollToEnd({ animated: true });
@@ -214,57 +267,57 @@ export default function AiHelperScreen() {
     }
   };
 
-  // Delete a single QA item
-  const handleDeleteItem = (id: string) => {
-    setHistory((prev) => {
-      const next = prev.filter((item) => item.id !== id);
-      // if we just deleted the active chat, move active pointer to last item or none
-      if (activeLatestId === id) {
+  // Delete a whole session (chat)
+  const handleDeleteSession = (sessionId: string) => {
+    setSessions((prev) => {
+      const next = prev.filter((s) => s.id !== sessionId);
+      if (activeSessionId === sessionId) {
         if (next.length > 0) {
-          setActiveLatestId(next[next.length - 1].id);
+          setActiveSessionId(next[next.length - 1].id);
         } else {
-          setActiveLatestId(null);
+          setActiveSessionId(null);
         }
+      }
+      if (selectedSession && selectedSession.id === sessionId) {
+        setSelectedSession(null);
       }
       return next;
     });
-    if (selectedItem && selectedItem.id === id) {
-      setSelectedItem(null);
-    }
   };
 
-  // Clear all history
+  // Clear all sessions
   const handleClearAllHistory = () => {
-    if (history.length === 0) return;
+    if (sessions.length === 0) return;
 
     Alert.alert(
       "Clear all history?",
-      "This will remove all saved Ask Traktr AI questions and answers.",
+      "This will remove all saved Ask Traktr AI chats.",
       [
         { text: "Cancel", style: "cancel" },
         {
           text: "Clear all",
           style: "destructive",
           onPress: () => {
-            setHistory([]);
-            setActiveLatestId(null);
-            setSelectedItem(null);
+            setSessions([]);
+            setActiveSessionId(null);
+            setSelectedSession(null);
           },
         },
       ]
     );
   };
 
-  // “New chat” – keep history, just reset current chat area
+  // “New chat” – keep sessions, just reset current chat area
   const handleNewChat = () => {
-    setActiveLatestId(null); // no active chat card, shows empty state
+    setActiveSessionId(null);
+    setSelectedSession(null);
     setQuestion("");
   };
 
   const isAiDisabled = !IS_PRO_USER;
   const hasQuestion = question.trim().length > 0;
 
-  const pillsData = history.slice();
+  const pillsData = sessions.slice();
 
   return (
     <View style={{ flex: 1, backgroundColor: theme.screenBackground }}>
@@ -296,7 +349,8 @@ export default function AiHelperScreen() {
                   { color: theme.headerMuted },
                 ]}
               >
-                Private electrician Q&A · Not posted to Team Chat
+                {/* CHANGED: more general */}
+                Private AI workspace · Not posted to Team Chat
               </Text>
             </View>
 
@@ -315,7 +369,8 @@ export default function AiHelperScreen() {
             ]}
           >
             <Text style={[styles.tagText, { color: theme.textSecondary }]}>
-              Electrician assistant · Safety-first
+              {/* CHANGED: more general */}
+              AI assistant · For your jobs & ideas
             </Text>
           </View>
 
@@ -337,8 +392,8 @@ export default function AiHelperScreen() {
                 { color: theme.textMuted },
               ]}
             >
-              Example: “I have no power at a bedroom receptacle, breaker is on,
-              and tester shows 120V at the panel. What should I check next?”
+              {/* CHANGED: shorter + not strictly electrical */}
+              Example: “Help me break down this job, materials, and next steps.”
             </Text>
 
             {/* 🔹 Scrollable content above the input */}
@@ -348,8 +403,8 @@ export default function AiHelperScreen() {
               keyboardShouldPersistTaps="handled"
               showsVerticalScrollIndicator={false}
             >
-              {/* Current chat card OR empty state */}
-              {latestItem ? (
+              {/* Current session card OR empty state */}
+              {activeSession && activeSession.items.length > 0 ? (
                 <View
                   style={[
                     styles.qaCard,
@@ -360,122 +415,126 @@ export default function AiHelperScreen() {
                     },
                   ]}
                 >
-                  {/* You bubble */}
-                  <View style={styles.userBlock}>
-                    <Text
-                      style={[
-                        styles.qaLabel,
-                        { color: theme.textSecondary },
-                      ]}
-                    >
-                      You
-                    </Text>
-                    <View
-                      style={[
-                        styles.bubbleUser,
-                        styles.bubbleShadow,
-                      ]}
-                    >
-                      <Text
-                        style={[
-                          styles.qaQuestion,
-                          { color: theme.textPrimary },
-                        ]}
-                      >
-                        {latestItem.question}
-                      </Text>
-                    </View>
-                  </View>
-
-                  {/* AI bubble */}
-                  <View style={styles.aiBlock}>
-                    <Text
-                      style={[
-                        styles.qaLabel,
-                        { color: theme.textSecondary },
-                      ]}
-                    >
-                      Traktr AI
-                    </Text>
-                    <View
-                      style={[
-                        styles.bubbleAi,
-                        styles.bubbleShadow,
-                        { backgroundColor: theme.cardBackground },
-                      ]}
-                    >
-                      <ScrollView
-                        style={{ maxHeight: 220 }}
-                        contentContainerStyle={{ paddingBottom: 4 }}
-                        showsVerticalScrollIndicator={true}
-                      >
+                  {activeSession.items.map((item) => (
+                    <View key={item.id} style={{ marginBottom: 10 }}>
+                      {/* You bubble */}
+                      <View style={styles.userBlock}>
                         <Text
                           style={[
-                            styles.qaAnswer,
-                            { color: theme.textPrimary },
+                            styles.qaLabel,
+                            { color: theme.textSecondary },
                           ]}
                         >
-                          {latestItem.answer}
+                          You
                         </Text>
-                      </ScrollView>
-                    </View>
-                  </View>
+                        <View
+                          style={[
+                            styles.bubbleUser,
+                            styles.bubbleShadow,
+                          ]}
+                        >
+                          <Text
+                            style={[
+                              styles.qaQuestion,
+                              { color: theme.textPrimary },
+                            ]}
+                          >
+                            {item.question}
+                          </Text>
+                        </View>
+                      </View>
 
-                  {/* Footer row */}
-                  <View style={styles.qaFooterRow}>
-                    <Text
-                      style={[
-                        styles.qaTime,
-                        { color: theme.textMuted },
-                      ]}
-                    >
-                      {new Date(latestItem.createdAt).toLocaleTimeString([], {
-                        hour: "numeric",
-                        minute: "2-digit",
-                      })}
-                    </Text>
-
-                    <View style={styles.qaFooterButtons}>
-                      <TouchableOpacity
-                        style={[
-                          styles.deleteButton,
-                          {
-                            borderColor: theme.cardBorder,
-                            backgroundColor: theme.cardBackground,
-                          },
-                        ]}
-                        activeOpacity={0.8}
-                        onPress={() => handleDeleteItem(latestItem.id)}
-                      >
+                      {/* AI bubble */}
+                      <View style={styles.aiBlock}>
                         <Text
                           style={[
-                            styles.deleteButtonText,
+                            styles.qaLabel,
+                            { color: theme.textSecondary },
+                          ]}
+                        >
+                          Traktr AI
+                        </Text>
+                        <View
+                          style={[
+                            styles.bubbleAi,
+                            styles.bubbleShadow,
+                            { backgroundColor: theme.cardBackground },
+                          ]}
+                        >
+                          <Text
+                            style={[
+                              styles.qaAnswer,
+                              { color: theme.textPrimary },
+                            ]}
+                          >
+                            {item.answer}
+                          </Text>
+                        </View>
+                      </View>
+                    </View>
+                  ))}
+
+                  {/* Footer row uses last item for time + copy */}
+                  {(() => {
+                    const last =
+                      activeSession.items[activeSession.items.length - 1];
+                    return (
+                      <View style={styles.qaFooterRow}>
+                        <Text
+                          style={[
+                            styles.qaTime,
                             { color: theme.textMuted },
                           ]}
                         >
-                          Delete
+                          {new Date(last.createdAt).toLocaleTimeString([], {
+                            hour: "numeric",
+                            minute: "2-digit",
+                          })}
                         </Text>
-                      </TouchableOpacity>
 
-                      <TouchableOpacity
-                        style={[
-                          styles.copyButton,
-                          { backgroundColor: theme.primaryButtonBackground },
-                        ]}
-                        activeOpacity={0.8}
-                        onPress={() => handleCopyAnswer(latestItem.answer)}
-                      >
-                        <Text
-                          style={[
-                            styles.copyButtonText,
-                            { color: theme.primaryButtonText },
-                          ]}
-                        >
-                          Use in message
-                        </Text>
-                      </TouchableOpacity>
-                    </View>
-                  </View>
+                        <View style={styles.qaFooterButtons}>
+                          <TouchableOpacity
+                            style={[
+                              styles.deleteButton,
+                              {
+                                borderColor: theme.cardBorder,
+                                backgroundColor: theme.cardBackground,
+                              },
+                            ]}
+                            activeOpacity={0.8}
+                            onPress={() => handleDeleteSession(activeSession.id)}
+                          >
+                            <Text
+                              style={[
+                                styles.deleteButtonText,
+                                { color: theme.textMuted },
+                              ]}
+                            >
+                              Delete chat
+                            </Text>
+                          </TouchableOpacity>
+
+                          <TouchableOpacity
+                            style={[
+                              styles.copyButton,
+                              { backgroundColor: theme.primaryButtonBackground },
+                            ]}
+                            activeOpacity={0.8}
+                            onPress={() => handleCopyAnswer(last.answer)}
+                          >
+                            <Text
+                              style={[
+                                styles.copyButtonText,
+                                { color: theme.primaryButtonText },
+                              ]}
+                            >
+                              Use last answer
+                            </Text>
+                          </TouchableOpacity>
+                        </View>
+                      </View>
+                    );
+                  })()}
                 </View>
               ) : (
                 <View style={styles.emptyState}>
@@ -493,8 +552,8 @@ export default function AiHelperScreen() {
                       { color: theme.textMuted },
                     ]}
                   >
-                    Ask about wiring, troubleshooting “no power”, materials, or
-                    have Traktr AI draft a message for you.
+                    Ask about jobs, planning, troubleshooting, or have Traktr AI
+                    clean up a message for you.
                   </Text>
                 </View>
               )}
@@ -515,7 +574,7 @@ export default function AiHelperScreen() {
                     { color: theme.textSecondary },
                   ]}
                 >
-                  Past answers
+                  Past chats
                 </Text>
 
                 <View style={styles.historyActionsRow}>
@@ -541,7 +600,7 @@ export default function AiHelperScreen() {
                     </Text>
                   </TouchableOpacity>
 
-                  {history.length > 0 && (
+                  {sessions.length > 0 && (
                     <TouchableOpacity
                       onPress={handleClearAllHistory}
                       activeOpacity={0.8}
@@ -560,19 +619,19 @@ export default function AiHelperScreen() {
               </View>
 
               {/* History pills */}
-              {history.length > 0 ? (
+              {sessions.length > 0 ? (
                 <ScrollView
                   horizontal
                   showsHorizontalScrollIndicator={false}
                   contentContainerStyle={styles.pillsContainer}
                   ref={pillsScrollRef}
                 >
-                  {pillsData.map((item, index) => {
+                  {pillsData.map((session, index) => {
                     const labelIndex = index + 1;
-                    const isActive = item.id === activeLatestId;
+                    const isActive = session.id === activeSessionId;
                     return (
                       <TouchableOpacity
-                        key={item.id}
+                        key={session.id}
                         style={[
                           styles.historyPill,
                           styles.pillShadow,
@@ -586,8 +645,8 @@ export default function AiHelperScreen() {
                         ]}
                         activeOpacity={0.9}
                         onPress={() => {
-                          setSelectedItem(item);
-                          setActiveLatestId(item.id);
+                          setActiveSessionId(session.id);
+                          setSelectedSession(session);
                         }}
                       >
                         <Text
@@ -610,7 +669,7 @@ export default function AiHelperScreen() {
                           ]}
                           numberOfLines={1}
                         >
-                          {item.question}
+                          {session.title}
                         </Text>
                       </TouchableOpacity>
                     );
@@ -623,7 +682,7 @@ export default function AiHelperScreen() {
                     { color: theme.textMuted },
                   ]}
                 >
-                  No saved answers yet.
+                  No saved chats yet.
                 </Text>
               )}
             </ScrollView>
@@ -648,7 +707,8 @@ export default function AiHelperScreen() {
                 ]}
                 value={question}
                 onChangeText={setQuestion}
-                placeholder="Ask anything about wiring, troubleshooting, or drafting a message..."
+                // CHANGED: shorter, more modern placeholder
+                placeholder="Ask anything or paste a rough note..."
                 placeholderTextColor={theme.textMuted}
                 multiline
                 textAlignVertical="top"
@@ -703,43 +763,47 @@ export default function AiHelperScreen() {
         </View>
       </KeyboardAvoidingView>
 
-      {/* Modal for full Q&A from history pill */}
+      {/* Modal for full session from history pill */}
       <Modal
-        visible={!!selectedItem}
+        visible={!!selectedSession}
         transparent
         animationType="slide"
-        onRequestClose={() => setSelectedItem(null)}
+        onRequestClose={() => setSelectedSession(null)}
       >
         <View style={styles.modalOverlay}>
           <View style={styles.modalCardWrapper}>
             <View style={styles.modalHandle} />
             <View style={styles.modalCardInner}>
               <View style={styles.modalHeader}>
-                <Text style={styles.modalTitle}>Saved answer</Text>
+                <Text style={styles.modalTitle}>Saved chat</Text>
                 <TouchableOpacity
-                  onPress={() => setSelectedItem(null)}
+                  onPress={() => setSelectedSession(null)}
                   activeOpacity={0.8}
                 >
                   <Text style={styles.modalCloseText}>Close</Text>
                 </TouchableOpacity>
               </View>
 
-              {selectedItem && (
+              {selectedSession && (
                 <>
                   <ScrollView
                     style={styles.modalScroll}
                     contentContainerStyle={{ paddingBottom: 12 }}
                     showsVerticalScrollIndicator={true}
                   >
-                    <Text style={styles.modalLabel}>You</Text>
-                    <Text style={styles.modalQuestion}>
-                      {selectedItem.question}
-                    </Text>
+                    {selectedSession.items.map((item) => (
+                      <View key={item.id} style={{ marginBottom: 10 }}>
+                        <Text style={styles.modalLabel}>You</Text>
+                        <Text style={styles.modalQuestion}>
+                          {item.question}
+                        </Text>
 
-                    <Text style={styles.modalLabel}>Traktr AI</Text>
-                    <Text style={styles.modalAnswer}>
-                      {selectedItem.answer}
-                    </Text>
+                        <Text style={styles.modalLabel}>Traktr AI</Text>
+                        <Text style={styles.modalAnswer}>
+                          {item.answer}
+                        </Text>
+                      </View>
+                    ))}
                   </ScrollView>
 
                   <View style={styles.modalFooterRow}>
@@ -747,22 +811,24 @@ export default function AiHelperScreen() {
                       style={styles.modalDeleteButton}
                       activeOpacity={0.8}
                       onPress={() => {
-                        if (!selectedItem) return;
-                        handleDeleteItem(selectedItem.id);
+                        handleDeleteSession(selectedSession.id);
                       }}
                     >
-                      <Text style={styles.modalDeleteText}>Delete</Text>
+                      <Text style={styles.modalDeleteText}>Delete chat</Text>
                     </TouchableOpacity>
 
                     <TouchableOpacity
                       style={styles.modalCopyButton}
                       activeOpacity={0.8}
                       onPress={() => {
-                        if (!selectedItem) return;
-                        handleCopyAnswer(selectedItem.answer);
+                        const last =
+                          selectedSession.items[
+                            selectedSession.items.length - 1
+                          ];
+                        handleCopyAnswer(last.answer);
                       }}
                     >
-                      <Text style={styles.modalCopyText}>Use in message</Text>
+                      <Text style={styles.modalCopyText}>Use last answer</Text>
                     </TouchableOpacity>
                   </View>
                 </>
@@ -853,7 +919,6 @@ const styles = StyleSheet.create({
   },
 
   cardGlass: {
-    // gives a “glass” feel on top of dark cards
     borderWidth: 1,
   },
 
@@ -1090,8 +1155,14 @@ const styles = StyleSheet.create({
     color: "#e5e7eb",
   },
   modalCloseText: {
-    fontSize: 12,
-    color: "#9ca3af",
+    fontSize: 13,
+    fontWeight: "600",
+    color: "#f59e0b",
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: "#f59e0b",
   },
   modalScroll: {
     marginTop: 4,
