@@ -33,7 +33,7 @@ const jobRooms = {};
 const jobMessages = {};
 
 /* ------------------------------------------------------------------ */
-/* AI CLEAR CLARITY GATE: /ai-gate  (kept exactly the same)            */
+/* AI CLEAR CLARITY GATE: /ai-gate  (UNCHANGED)                        */
 /* ------------------------------------------------------------------ */
 
 function buildPrompt(message, jobTitle, jobId) {
@@ -62,8 +62,12 @@ app.post("/ai-gate", async (req, res) => {
       model: "gpt-4o-mini",
       temperature: 0.3,
       messages: [
-        { role: "system", content: "You are an assistant helping electricians write safe, clear updates for their boss Vic." },
-        { role: "user", content: prompt + `"${message}"` }
+        {
+          role: "system",
+          content:
+            "You are an assistant helping electricians write safe, clear updates for their boss Vic.",
+        },
+        { role: "user", content: prompt + `"${message}"` },
       ],
     });
 
@@ -73,7 +77,6 @@ app.post("/ai-gate", async (req, res) => {
     }
 
     return res.status(200).json({ ok: true, previewText: aiText });
-
   } catch (err) {
     console.error("AI gate error:", err);
     return res.status(500).json({ ok: false, error: err.message });
@@ -81,40 +84,59 @@ app.post("/ai-gate", async (req, res) => {
 });
 
 /* ------------------------------------------------------------------ */
-/* USER SIGNUP + LOGIN  (local version, untouched functionality)       */
+/* USER SIGNUP + LOGIN  (TWEAKED, AI NOT TOUCHED)                      */
 /* ------------------------------------------------------------------ */
 
 app.post("/signup", (req, res) => {
   const { email, password, name, role } = req.body || {};
 
   if (!email?.trim() || !password?.trim() || !name?.trim() || !role?.trim()) {
-    return res.status(200).json({ ok: false, error: "Missing required signup fields" });
+    return res
+      .status(200)
+      .json({ ok: false, error: "Missing required signup fields" });
+  }
+
+  const lowerEmail = email.toLowerCase();
+
+  // prevent duplicates
+  if (users[lowerEmail]) {
+    return res
+      .status(200)
+      .json({ ok: false, error: "User with this email already exists" });
   }
 
   const id = Math.random().toString(36).slice(2, 10);
-  const companyId = role === "owner" || role === "independent"
-    ? Math.random().toString(36).slice(2, 10)
-    : "";
+  const companyId =
+    role === "owner" || role === "independent"
+      ? Math.random().toString(36).slice(2, 10)
+      : "";
 
   // Store the user
-  users[email.toLowerCase()] = {
+  users[lowerEmail] = {
     id,
-    email,
+    email: lowerEmail,
     role,
     companyId,
     name,
     passwordHash: password, // bcrypt later
   };
 
+  console.log("Created user:", users[lowerEmail]);
+
   return res.status(200).json({
     ok: true,
-    user: { id, email, role, companyId, name }
+    user: { id, email: lowerEmail, role, companyId, name },
   });
 });
 
 app.post("/login", (req, res) => {
   const { email, password } = req.body || {};
-  const user = users[email?.toLowerCase()];
+
+  if (!email?.trim() || !password?.trim()) {
+    return res.status(200).json({ ok: false, error: "Missing credentials" });
+  }
+
+  const user = users[email.toLowerCase()];
 
   if (!user) {
     return res.status(200).json({ ok: false, error: "User not found" });
@@ -126,12 +148,18 @@ app.post("/login", (req, res) => {
 
   return res.status(200).json({
     ok: true,
-    user: { id: user.id, email: user.email, role: user.role, companyId: user.companyId, name: user.name }
+    user: {
+      id: user.id,
+      email: user.email,
+      role: user.role,
+      companyId: user.companyId,
+      name: user.name,
+    },
   });
 });
 
 /* ------------------------------------------------------------------ */
-/* JOB ASSIGNMENT + ROOM-BASED MESSAGE STORAGE                        */
+/* JOB ASSIGNMENT + ROOM-BASED MESSAGE STORAGE  (UNCHANGED)           */
 /* ------------------------------------------------------------------ */
 
 // Owner assigns employees to a job room
@@ -140,16 +168,18 @@ app.post("/jobs/:jobId/assign", (req, res) => {
   const { ownerId, employeeIds } = req.body || {};
 
   if (!ownerId || !Array.isArray(employeeIds)) {
-    return res.status(200).json({ ok: false, error: "Invalid assignment payload" });
+    return res
+      .status(200)
+      .json({ ok: false, error: "Invalid assignment payload" });
   }
 
   jobRooms[jobId] = {
     ownerId,
-    employees: employeeIds, // ✅ Correct — stores employee IDs
+    employees: employeeIds,
   };
 
   if (!jobMessages[jobId]) {
-    jobMessages[jobId] = []; // initialize message history
+    jobMessages[jobId] = [];
   }
 
   return res.status(200).json({ ok: true });
@@ -170,7 +200,9 @@ app.post("/jobs/:jobId/messages", (req, res) => {
   const { senderId, senderName, role, text } = req.body || {};
 
   if (!senderId || !text?.trim()) {
-    return res.status(200).json({ ok: false, error: "Missing sender or text" });
+    return res
+      .status(200)
+      .json({ ok: false, error: "Missing sender or text" });
   }
 
   if (!jobMessages[jobId]) {
@@ -195,17 +227,17 @@ app.get("/jobs", (req, res) => {
   return res.status(200).json({ ok: true, jobs: Object.keys(jobRooms) });
 });
 
-// ✅ FIXED: Employees fetch ONLY their assigned jobs using their user ID
+// Employees fetch ONLY their assigned jobs using their user ID
 app.get("/employee/:employeeId/assigned-jobs", (req, res) => {
   const { employeeId } = req.params;
-  const assignedJobs = Object.keys(jobRooms).filter(
-    (jobId) => jobRooms[jobId].employees?.includes(employeeId)
+  const assignedJobs = Object.keys(jobRooms).filter((jobId) =>
+    jobRooms[jobId].employees?.includes(employeeId)
   );
   return res.status(200).json({ ok: true, jobs: assignedJobs });
 });
 
 /* ------------------------------------------------------------------ */
-/* EXISTING: ASK TRAKTR AI Q&A  (kept exactly as is)                  */
+/* EXISTING: ASK TRAKTR AI Q&A  (UNCHANGED)                            */
 /* ------------------------------------------------------------------ */
 
 function buildAssistantSystemPrompt(electricianType, jobContext) {
@@ -230,7 +262,6 @@ Style:
 }
 
 app.post("/ai-assistant", async (req, res) => {
-  const startedAt = Date.now();
   try {
     const { question, electricianType, jobContext } = req.body || {};
 
@@ -242,7 +273,10 @@ app.post("/ai-assistant", async (req, res) => {
       model: "gpt-4o-mini",
       temperature: 0.4,
       messages: [
-        { role: "system", content: buildAssistantSystemPrompt(electricianType, jobContext) },
+        {
+          role: "system",
+          content: buildAssistantSystemPrompt(electricianType, jobContext),
+        },
         { role: "user", content: question.trim() },
       ],
     });
@@ -260,7 +294,7 @@ app.post("/ai-assistant", async (req, res) => {
 });
 
 /* ------------------------------------------------------------------ */
-/* START SERVER (kept unchanged)                                     */
+/* START SERVER                                                       */
 /* ------------------------------------------------------------------ */
 
 const PORT = 4001;
