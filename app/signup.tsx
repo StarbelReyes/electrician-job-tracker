@@ -3,34 +3,77 @@ import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useRouter } from "expo-router";
 import {
-    createUserWithEmailAndPassword,
-    sendEmailVerification,
+  createUserWithEmailAndPassword,
+  sendEmailVerification,
 } from "firebase/auth";
-import React, { useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
-    Alert,
-    Animated,
-    Keyboard,
-    KeyboardAvoidingView,
-    LayoutAnimation,
-    Platform,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    TouchableWithoutFeedback,
-    View,
+  Alert,
+  Animated,
+  Keyboard,
+  KeyboardAvoidingView,
+  LayoutAnimation,
+  Platform,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  TouchableWithoutFeedback,
+  View,
 } from "react-native";
-import { themes } from "../constants/appTheme";
+import {
+  ACCENT_STORAGE_KEY,
+  AccentName,
+  getAccentColor,
+  THEME_STORAGE_KEY,
+  ThemeName,
+  themes,
+} from "../constants/appTheme";
 import { firebaseAuth } from "../firebaseConfig";
 
 const USER_STORAGE_KEY = "EJT_USER_SESSION";
 
 export default function SignupScreen() {
   const router = useRouter();
-  const [themeName] = useState<"dark" | "light" | "midnight">("dark");
-  const theme = themes[themeName] ?? themes.dark;
 
+  // THEME + ACCENT
+  const [themeName, setThemeName] = useState<ThemeName>("dark");
+  const [accentName, setAccentName] = useState<AccentName>("jobsiteAmber");
+  const theme = themes[themeName] ?? themes.dark;
+  const accentColor = getAccentColor(accentName);
+
+  useEffect(() => {
+    const loadThemeAndAccent = async () => {
+      try {
+        const [savedTheme, savedAccent] = await Promise.all([
+          AsyncStorage.getItem(THEME_STORAGE_KEY),
+          AsyncStorage.getItem(ACCENT_STORAGE_KEY),
+        ]);
+
+        if (
+          savedTheme === "light" ||
+          savedTheme === "dark" ||
+          savedTheme === "midnight"
+        ) {
+          setThemeName(savedTheme as ThemeName);
+        }
+
+        if (
+          savedAccent === "jobsiteAmber" ||
+          savedAccent === "electricBlue" ||
+          savedAccent === "safetyGreen"
+        ) {
+          setAccentName(savedAccent as AccentName);
+        }
+      } catch (err) {
+        console.warn("Failed to load theme/accent for signup:", err);
+      }
+    };
+
+    loadThemeAndAccent();
+  }, []);
+
+  // FORM STATE
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [name, setName] = useState("");
@@ -39,9 +82,7 @@ export default function SignupScreen() {
   );
   const [loading, setLoading] = useState(false);
 
-  const accentColor = theme.tagOpenBorder;
   const buttonScale = useRef(new Animated.Value(1)).current;
-
   const animateScale = (val: number) => {
     Animated.spring(buttonScale, {
       toValue: val,
@@ -51,9 +92,6 @@ export default function SignupScreen() {
     }).start();
   };
 
-  /* -------------------------------------------------------- */
-  /* SIGNUP WITH FIREBASE AUTH + EMAIL VERIFICATION           */
-  /* -------------------------------------------------------- */
   const handleSignup = async () => {
     const trimmedEmail = email.trim();
     const trimmedPassword = password.trim();
@@ -82,7 +120,6 @@ export default function SignupScreen() {
 
       const user = cred.user;
 
-      // Try sending verification email
       try {
         await sendEmailVerification(user);
       } catch (err) {
@@ -126,125 +163,208 @@ export default function SignupScreen() {
     }
   };
 
+  const dismissKeyboard = () => {
+    Keyboard.dismiss();
+  };
+
   return (
     <KeyboardAvoidingView
-      style={[styles.container, { backgroundColor: theme.screenBackground }]}
+      style={{ flex: 1, backgroundColor: theme.screenBackground }}
       behavior={Platform.OS === "ios" ? "padding" : "height"}
       keyboardVerticalOffset={0}
     >
-      <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
-        <View style={styles.inner}>
-          <Text style={[styles.headerText, { color: theme.textPrimary }]}>
-            Create Account
-          </Text>
-
-          {/* Name */}
-          <View style={[styles.inputBlock, { borderColor: theme.inputBorder }]}>
-            <Ionicons name="person-outline" size={18} color={theme.textMuted} />
-            <TextInput
-              style={[styles.input, { color: theme.textPrimary }]}
-              placeholder="Full name..."
-              placeholderTextColor={theme.textMuted}
-              value={name}
-              onChangeText={setName}
-            />
+      <TouchableWithoutFeedback onPress={dismissKeyboard} accessible={false}>
+        <View
+          style={[
+            styles.screen,
+            { backgroundColor: theme.screenBackground },
+          ]}
+        >
+          {/* App header */}
+          <View style={styles.headerRow}>
+            <Text style={[styles.appTitle, { color: theme.headerText }]}>
+              THE TRAKTR APP
+            </Text>
           </View>
 
-          {/* Email */}
-          <View style={[styles.inputBlock, { borderColor: theme.inputBorder }]}>
-            <Ionicons name="mail-outline" size={18} color={theme.textMuted} />
-            <TextInput
-              style={[styles.input, { color: theme.textPrimary }]}
-              placeholder="Email..."
-              placeholderTextColor={theme.textMuted}
-              autoCapitalize="none"
-              keyboardType="email-address"
-              value={email}
-              onChangeText={setEmail}
-            />
-          </View>
+          {/* Auth card */}
+          <View
+            style={[
+              styles.card,
+              {
+                backgroundColor: theme.cardBackground + "F2",
+                borderColor: theme.cardBorder + "77",
+              },
+            ]}
+          >
+            <Text style={[styles.cardTitle, { color: theme.textPrimary }]}>
+              Create account
+            </Text>
+            <Text style={[styles.cardSubtitle, { color: theme.textMuted }]}>
+              Set up your Traktr account and choose how you work.
+            </Text>
 
-          {/* Password */}
-          <View style={[styles.inputBlock, { borderColor: theme.inputBorder }]}>
-            <Ionicons
-              name="lock-closed-outline"
-              size={18}
-              color={theme.textMuted}
-            />
-            <TextInput
-              style={[styles.input, { color: theme.textPrimary }]}
-              placeholder="Password..."
-              placeholderTextColor={theme.textMuted}
-              secureTextEntry
-              value={password}
-              onChangeText={setPassword}
-            />
-          </View>
+            {/* Name */}
+            <View
+              style={[
+                styles.inputShell,
+                {
+                  backgroundColor: theme.inputBackground + "F2",
+                  borderColor: theme.inputBorder,
+                },
+              ]}
+            >
+              <Ionicons
+                name="person-outline"
+                size={18}
+                color={theme.textMuted}
+                style={{ marginRight: 8 }}
+              />
+              <TextInput
+                style={[styles.input, { color: theme.inputText }]}
+                placeholder="Full name"
+                placeholderTextColor={theme.textMuted}
+                value={name}
+                onChangeText={setName}
+              />
+            </View>
 
-          {/* Roles */}
-          <Text style={[styles.label, { color: theme.textMuted }]}>
-            Select Role
-          </Text>
+            {/* Email */}
+            <View
+              style={[
+                styles.inputShell,
+                {
+                  backgroundColor: theme.inputBackground + "F2",
+                  borderColor: theme.inputBorder,
+                },
+              ]}
+            >
+              <Ionicons
+                name="mail-outline"
+                size={18}
+                color={theme.textMuted}
+                style={{ marginRight: 8 }}
+              />
+              <TextInput
+                style={[styles.input, { color: theme.inputText }]}
+                placeholder="Email"
+                placeholderTextColor={theme.textMuted}
+                value={email}
+                onChangeText={setEmail}
+                autoCapitalize="none"
+                keyboardType="email-address"
+              />
+            </View>
 
-          <View style={styles.roleRow}>
-            {(["owner", "employee", "independent"] as const).map((option) => (
+            {/* Password */}
+            <View
+              style={[
+                styles.inputShell,
+                {
+                  backgroundColor: theme.inputBackground + "F2",
+                  borderColor: theme.inputBorder,
+                },
+              ]}
+            >
+              <Ionicons
+                name="lock-closed-outline"
+                size={18}
+                color={theme.textMuted}
+                style={{ marginRight: 8 }}
+              />
+              <TextInput
+                style={[styles.input, { color: theme.inputText }]}
+                placeholder="Password (min 6 chars)"
+                placeholderTextColor={theme.textMuted}
+                secureTextEntry
+                value={password}
+                onChangeText={setPassword}
+              />
+            </View>
+
+            {/* Role selector */}
+            <Text style={[styles.label, { color: theme.textMuted }]}>
+              Select role
+            </Text>
+            <View style={styles.roleRow}>
+              {(["owner", "employee", "independent"] as const).map((option) => (
+                <TouchableOpacity
+                  key={option}
+                  onPress={() => setRole(option)}
+                  activeOpacity={0.9}
+                  style={[
+                    styles.rolePill,
+                    {
+                      borderColor:
+                        role === option ? accentColor : theme.cardBorder,
+                      backgroundColor:
+                        role === option
+                          ? accentColor + "1A"
+                          : theme.cardBackground + "F2",
+                    },
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.rolePillText,
+                      {
+                        color:
+                          role === option
+                            ? accentColor
+                            : theme.textPrimary,
+                      },
+                    ]}
+                  >
+                    {option === "owner"
+                      ? "Company owner"
+                      : option === "employee"
+                      ? "Employee"
+                      : "Independent"}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            {/* Submit button */}
+            <Animated.View style={{ transform: [{ scale: buttonScale }] }}>
               <TouchableOpacity
-                key={option}
-                onPress={() => setRole(option)}
-                activeOpacity={0.9}
                 style={[
-                  styles.rolePill,
-                  role === option && {
-                    borderColor: accentColor,
-                    borderWidth: 2,
+                  styles.primaryButton,
+                  {
+                    backgroundColor: accentColor,
+                    opacity: loading ? 0.7 : 1,
+                    shadowColor: accentColor,
                   },
                 ]}
+                onPress={handleSignup}
+                onPressIn={() => animateScale(0.96)}
+                onPressOut={() => animateScale(1)}
+                activeOpacity={0.9}
+                disabled={loading}
               >
                 <Text
-                  style={{
-                    color: theme.textPrimary,
-                    fontSize: 14,
-                    fontWeight: "700",
-                  }}
+                  style={[
+                    styles.primaryButtonText,
+                    { color: theme.primaryButtonText },
+                  ]}
                 >
-                  {option === "owner"
-                    ? "Company Owner"
-                    : option === "employee"
-                    ? "Employee"
-                    : "Independent"}
+                  {loading ? "Creating..." : "Create account"}
                 </Text>
               </TouchableOpacity>
-            ))}
-          </View>
+            </Animated.View>
 
-          {/* Submit button */}
-          <Animated.View style={{ transform: [{ scale: buttonScale }] }}>
-            <TouchableOpacity
-              style={[
-                styles.signupButton,
-                { backgroundColor: accentColor, opacity: loading ? 0.7 : 1 },
-              ]}
-              onPress={handleSignup}
-              onPressIn={() => animateScale(0.95)}
-              onPressOut={() => animateScale(1)}
-              disabled={loading}
-            >
+            {/* Back to login */}
+            <TouchableOpacity onPress={() => router.back()} activeOpacity={0.8}>
               <Text
                 style={[
-                  styles.signupButtonText,
-                  { color: theme.primaryButtonText },
+                  styles.footerLink,
+                  { color: theme.textMuted },
                 ]}
               >
-                {loading ? "Creating..." : "Create Now"}
+                Already have an account? Log in
               </Text>
             </TouchableOpacity>
-          </Animated.View>
-
-          <TouchableOpacity onPress={() => router.back()}>
-            <Text style={[styles.footerLink, { color: theme.textMuted }]}>
-              ← Back to Login
-            </Text>
-          </TouchableOpacity>
+          </View>
         </View>
       </TouchableWithoutFeedback>
     </KeyboardAvoidingView>
@@ -252,49 +372,97 @@ export default function SignupScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: {
+  screen: {
     flex: 1,
-    justifyContent: "center",
+    paddingTop: 48,
     paddingHorizontal: 18,
   },
-  inner: { width: "100%", gap: 12 },
-  headerText: {
-    fontSize: 26,
-    fontWeight: "900",
-    marginBottom: 6,
-    textAlign: "center",
+
+  headerRow: {
+    marginBottom: 12,
   },
-  inputBlock: {
+  appTitle: {
+    fontSize: 22,
+    fontWeight: "700",
+  },
+
+  card: {
+    borderRadius: 22,
+    borderWidth: 1,
+    paddingHorizontal: 16,
+    paddingVertical: 18,
+    shadowColor: "#000",
+    shadowOpacity: 0.18,
+    shadowRadius: 14,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 8,
+  },
+  cardTitle: {
+    fontSize: 20,
+    fontWeight: "800",
+    marginBottom: 4,
+  },
+  cardSubtitle: {
+    fontSize: 12,
+    marginBottom: 16,
+  },
+
+  inputShell: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "rgba(31,41,55,0.3)",
     borderRadius: 16,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    gap: 8,
     borderWidth: 1,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    marginBottom: 10,
   },
-  input: { flex: 1, fontSize: 15 },
-  label: { fontSize: 13, fontWeight: "700", textAlign: "center" },
-  roleRow: { flexDirection: "row", gap: 8, marginBottom: 10 },
+  input: {
+    flex: 1,
+    fontSize: 14,
+  },
+
+  label: {
+    fontSize: 12,
+    fontWeight: "700",
+    marginBottom: 6,
+  },
+  roleRow: {
+    flexDirection: "row",
+    gap: 8,
+    marginBottom: 12,
+  },
   rolePill: {
     flex: 1,
     borderRadius: 999,
     borderWidth: 1,
-    paddingVertical: 10,
+    paddingVertical: 9,
     alignItems: "center",
   },
-  signupButton: {
-    marginTop: 8,
-    paddingVertical: 14,
+  rolePillText: {
+    fontSize: 12,
+    fontWeight: "700",
+  },
+
+  primaryButton: {
+    marginTop: 4,
     borderRadius: 999,
+    paddingVertical: 14,
     alignItems: "center",
+    justifyContent: "center",
+    shadowOpacity: 0.28,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 3,
   },
-  signupButtonText: { fontSize: 16, fontWeight: "800" },
+  primaryButtonText: {
+    fontSize: 15,
+    fontWeight: "700",
+  },
+
   footerLink: {
     textAlign: "center",
-    marginTop: 6,
-    fontSize: 14,
-    fontWeight: "700",
+    marginTop: 10,
+    fontSize: 13,
+    fontWeight: "600",
   },
 });

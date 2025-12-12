@@ -5,26 +5,26 @@ import { useRouter } from "expo-router";
 import { sendPasswordResetEmail } from "firebase/auth";
 import React, { useEffect, useRef, useState } from "react";
 import {
-    ActivityIndicator,
-    Alert,
-    Animated,
-    Keyboard,
-    KeyboardAvoidingView,
-    Platform,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    TouchableWithoutFeedback,
-    View,
+  ActivityIndicator,
+  Alert,
+  Animated,
+  Keyboard,
+  KeyboardAvoidingView,
+  Platform,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  TouchableWithoutFeedback,
+  View,
 } from "react-native";
 import {
-    ACCENT_STORAGE_KEY,
-    AccentName,
-    THEME_STORAGE_KEY,
-    ThemeName,
-    accentSwatchColors,
-    themes,
+  ACCENT_STORAGE_KEY,
+  AccentName,
+  THEME_STORAGE_KEY,
+  ThemeName,
+  accentSwatchColors,
+  themes,
 } from "../constants/appTheme";
 import { firebaseAuth } from "../firebaseConfig";
 
@@ -46,7 +46,7 @@ export default function ForgotPasswordScreen() {
   const [email, setEmail] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // Screen zoom animation (match other screens vibe)
+  // Screen zoom animation
   const screenScale = useRef(new Animated.Value(1.04)).current;
 
   useEffect(() => {
@@ -105,7 +105,6 @@ export default function ForgotPasswordScreen() {
     setIsSubmitting(true);
 
     try {
-      // ✅ Use Firebase directly instead of Node server
       await sendPasswordResetEmail(firebaseAuth, trimmed);
 
       Alert.alert(
@@ -170,57 +169,61 @@ export default function ForgotPasswordScreen() {
       behavior={Platform.OS === "ios" ? "padding" : "height"}
       keyboardVerticalOffset={0}
     >
-      <TouchableWithoutFeedback onPress={dismissKeyboard}>
+      <TouchableWithoutFeedback onPress={dismissKeyboard} accessible={false}>
         <Animated.View
           style={[
             styles.screen,
             {
-              backgroundColor: theme.screenBackground + "F2",
+              backgroundColor: theme.screenBackground,
               transform: [{ scale: screenScale }],
             },
           ]}
         >
-          {/* Header */}
-          <View style={styles.headerShell}>
-            <View
-              style={[
-                styles.headerRow,
-                {
-                  backgroundColor: theme.cardBackground + "E6",
-                  borderColor: theme.cardBorder + "55",
-                },
-              ]}
-            >
-              <View style={styles.headerLeft}>
-                <View
-                  style={[
-                    styles.headerIconBadge,
-                    {
-                      borderColor: accentColor + "80",
-                      backgroundColor: accentColor + "1A",
-                    },
-                  ]}
-                >
-                  <Ionicons
-                    name="key-outline"
-                    size={18}
-                    color={accentColor}
-                  />
-                </View>
-                <Text
-                  style={[
-                    styles.headerTitle,
-                    { color: theme.headerText },
-                  ]}
-                >
-                  Reset password
-                </Text>
-              </View>
-            </View>
+          {/* App header (keep consistent with Home + Login/Signup) */}
+          <View style={styles.appHeaderRow}>
+            <Text style={[styles.appTitle, { color: theme.headerText }]}>
+              THE TRAKTR APP
+            </Text>
           </View>
 
-          {/* Body */}
-          <View style={styles.body}>
+          {/* Card */}
+          <View
+            style={[
+              styles.card,
+              {
+                backgroundColor: theme.cardBackground + "F2",
+                borderColor: theme.cardBorder + "77",
+              },
+            ]}
+          >
+            {/* Card header with key icon */}
+            <View style={styles.headerRow}>
+              <View
+                style={[
+                  styles.headerIconBadge,
+                  {
+                    borderColor: accentColor + "80",
+                    backgroundColor: accentColor + "1A",
+                  },
+                ]}
+              >
+                <Ionicons
+                  name="key-outline"
+                  size={18}
+                  color={accentColor}
+                />
+              </View>
+              <Text
+                style={[
+                  styles.headerTitle,
+                  { color: theme.headerText },
+                ]}
+              >
+                Reset password
+              </Text>
+            </View>
+
+            {/* Body text */}
             <Text
               style={[
                 styles.subtitle,
@@ -236,33 +239,31 @@ export default function ForgotPasswordScreen() {
               style={[
                 styles.inputShell,
                 {
-                  backgroundColor: theme.cardBackground + "F2",
+                  backgroundColor: theme.inputBackground + "F2",
                   borderColor: theme.cardBorder + "66",
                 },
               ]}
             >
-              <View style={styles.inputRow}>
-                <Ionicons
-                  name="mail-outline"
-                  size={18}
-                  color={theme.textMuted}
-                  style={{ marginRight: 8 }}
-                />
-                <TextInput
-                  style={[
-                    styles.textInput,
-                    { color: theme.inputText },
-                  ]}
-                  value={email}
-                  onChangeText={setEmail}
-                  placeholder="you@example.com"
-                  placeholderTextColor={theme.textMuted}
-                  autoCapitalize="none"
-                  keyboardType="email-address"
-                  returnKeyType="send"
-                  onSubmitEditing={canSubmit ? handleSubmit : undefined}
-                />
-              </View>
+              <Ionicons
+                name="mail-outline"
+                size={18}
+                color={theme.textMuted}
+                style={{ marginRight: 8 }}
+              />
+              <TextInput
+                style={[
+                  styles.textInput,
+                  { color: theme.inputText },
+                ]}
+                value={email}
+                onChangeText={setEmail}
+                placeholder="you@example.com"
+                placeholderTextColor={theme.textMuted}
+                autoCapitalize="none"
+                keyboardType="email-address"
+                returnKeyType="send"
+                onSubmitEditing={canSubmit ? handleSubmit : undefined}
+              />
             </View>
 
             {/* Send button */}
@@ -332,7 +333,7 @@ const styles = StyleSheet.create({
   screen: {
     flex: 1,
     paddingTop: 48,
-    paddingHorizontal: 16,
+    paddingHorizontal: 18,
   },
 
   loadingContainer: {
@@ -345,25 +346,30 @@ const styles = StyleSheet.create({
     fontSize: 14,
   },
 
-  headerShell: {
-    paddingBottom: 8,
+  appHeaderRow: {
+    marginBottom: 12,
   },
+  appTitle: {
+    fontSize: 22,
+    fontWeight: "700",
+  },
+
+  card: {
+    borderRadius: 22,
+    borderWidth: 1,
+    paddingHorizontal: 16,
+    paddingVertical: 18,
+    shadowColor: "#000",
+    shadowOpacity: 0.18,
+    shadowRadius: 14,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 8,
+  },
+
   headerRow: {
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "flex-start",
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    borderRadius: 16,
-    borderWidth: 1,
-    shadowColor: "#000",
-    shadowOpacity: 0.12,
-    shadowRadius: 14,
-    shadowOffset: { width: 0, height: 6 },
-  },
-  headerLeft: {
-    flexDirection: "row",
-    alignItems: "center",
+    marginBottom: 10,
   },
   headerIconBadge: {
     width: 30,
@@ -379,27 +385,18 @@ const styles = StyleSheet.create({
     fontWeight: "700",
   },
 
-  body: {
-    marginTop: 16,
-  },
   subtitle: {
     fontSize: 13,
     lineHeight: 18,
-    marginBottom: 16,
+    marginBottom: 14,
   },
 
   inputShell: {
-    borderRadius: 14,
+    borderRadius: 16,
     borderWidth: 1,
     paddingHorizontal: 12,
     paddingVertical: 10,
-    marginBottom: 14,
-    shadowColor: "#000",
-    shadowOpacity: 0.12,
-    shadowRadius: 10,
-    shadowOffset: { width: 0, height: 5 },
-  },
-  inputRow: {
+    marginBottom: 12,
     flexDirection: "row",
     alignItems: "center",
   },
@@ -409,7 +406,7 @@ const styles = StyleSheet.create({
   },
 
   primaryButton: {
-    marginTop: 8,
+    marginTop: 4,
     borderRadius: 999,
     paddingVertical: 11,
     alignItems: "center",
@@ -434,7 +431,7 @@ const styles = StyleSheet.create({
   backRow: {
     flexDirection: "row",
     alignItems: "center",
-    marginTop: 18,
+    marginTop: 16,
   },
   backText: {
     fontSize: 13,

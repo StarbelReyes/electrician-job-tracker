@@ -4,28 +4,25 @@ import * as Clipboard from "expo-clipboard";
 import { useRouter } from "expo-router";
 import React, { useEffect, useRef, useState } from "react";
 import {
-    ActivityIndicator,
-    Alert,
-    Keyboard,
-    KeyboardAvoidingView,
-    Modal,
-    Platform,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View,
+  ActivityIndicator,
+  Alert,
+  Keyboard,
+  KeyboardAvoidingView,
+  Modal,
+  Platform,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from "react-native";
+import { API_BASE_URL } from "../constants/api";
 import {
-    THEME_STORAGE_KEY,
-    ThemeName,
-    themes,
+  THEME_STORAGE_KEY,
+  ThemeName,
+  themes,
 } from "../constants/appTheme";
-
-// same tunnel base as Team Chat, different endpoint
-const AI_ASSISTANT_BASE_URL =
-  "https://milky-kaycee-overrestraint.ngrok-free.dev";
 
 const IS_PRO_USER = true;
 const QA_HISTORY_KEY = "EJT_AI_HISTORY";
@@ -156,7 +153,7 @@ export default function AiHelperScreen() {
     try {
       setIsLoading(true);
 
-      const url = `${AI_ASSISTANT_BASE_URL}/ai-assistant`;
+      const url = `${API_BASE_URL}/ai-assistant`;
       console.log("Ask Traktr AI URL:", url);
 
       const res = await fetch(url, {

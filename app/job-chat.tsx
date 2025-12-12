@@ -3,34 +3,35 @@ import * as ImagePicker from "expo-image-picker";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import React, { useEffect, useRef, useState } from "react";
 import {
-    Alert,
-    Animated,
-    Image,
-    Keyboard,
-    KeyboardAvoidingView,
-    Platform,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    TouchableWithoutFeedback,
-    View,
+  Alert,
+  Animated,
+  Image,
+  Keyboard,
+  KeyboardAvoidingView,
+  Platform,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  TouchableWithoutFeedback,
+  View,
 } from "react-native";
 import ImageViewing from "react-native-image-viewing";
+import { API_BASE_URL } from "../constants/api";
 import {
-    THEME_STORAGE_KEY,
-    ThemeName,
-    themes,
+  THEME_STORAGE_KEY,
+  ThemeName,
+  themes,
 } from "../constants/appTheme";
 import useJobChatStore, {
-    ChatIntent,
-    ChatMessage,
+  ChatIntent,
+  ChatMessage,
 } from "../hooks/useJobChatStore";
 
-// 👇 REAL AI SERVER URL – now using your ngrok HTTPS tunnel
+// 👇 REAL AI SERVER URL – now using your shared API_BASE_URL
 // ngrok forwards this to http://localhost:4001 on your Mac
-const AI_GATE_BASE_URL = "https://milky-kaycee-overrestraint.ngrok-free.dev";
+const AI_GATE_BASE_URL = API_BASE_URL;
 
 // helper for time display
 const formatTime = (ts: number) =>
