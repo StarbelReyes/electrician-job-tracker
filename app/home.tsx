@@ -12,9 +12,10 @@ import React, {
 } from "react";
 import {
   Animated,
-  FlatList,
   Keyboard,
   KeyboardAvoidingView,
+  NativeScrollEvent,
+  NativeSyntheticEvent,
   Platform,
   Pressable,
   Share,
@@ -23,12 +24,10 @@ import {
   TextInput,
   TouchableOpacity,
   TouchableWithoutFeedback,
-  View,
+  View
 } from "react-native";
-import { Swipeable } from "react-native-gesture-handler";
 import BottomNavBar from "../components/BottomNavBar";
 import {
-  // 🔽 added these three
   ACCENT_STORAGE_KEY,
   AccentName,
   getAccentColor,
@@ -101,6 +100,21 @@ const initialJobs: Job[] = [
     hourlyRate: 0,
     materialCost: 0,
   },
+  {
+    id: "4",
+    title: "Replace panel in basement",
+    address: "NYC",
+    description: "Full panel change, label all circuits.",
+    createdAt: "2025-11-16T15:09:50Z",
+    isDone: false,
+    clientName: "Basement Owner",
+    clientPhone: "555-000-1111",
+    clientNotes: "",
+    photoUris: [],
+    laborHours: 0,
+    hourlyRate: 0,
+    materialCost: 0,
+  },
 ];
 
 const sortOptions = ["Newest", "Oldest", "A-Z", "Z-A"] as const;
@@ -114,6 +128,11 @@ const STORAGE_KEYS = {
 
 // Keep in sync with BottomNavBar height-ish
 const NAV_HEIGHT = 72;
+
+// Focused carousel sizing
+const CARD_HEIGHT = 170;
+const CARD_SPACING = 18;
+const CARD_OUTER_HEIGHT = CARD_HEIGHT + CARD_SPACING;
 
 // ---------------- HELPERS ----------------
 
@@ -147,164 +166,148 @@ const getStatusStyles = (job: Job, theme: Theme): StatusStyles =>
         textColor: theme.textSecondary,
       };
 
-// ---------------- JOB ROW ----------------
+// ---------------- FOCUSED JOB CARD ----------------
 
-type JobRowProps = {
+type FocusJobCardProps = {
   job: Job;
   theme: Theme;
+  accentColor: string;
+  index: number;
+  animatedIndex: Animated.AnimatedDivision<number>;
   onOpen: (job: Job) => void;
-  onShare: (job: Job) => void;
-  onDelete: (id: string) => void;
 };
 
-const JobRow: FC<JobRowProps> = React.memo(
-  ({ job, theme, onOpen, onShare, onDelete }) => {
-    const jobTotal = getJobTotal(job);
-    const statusStyles = getStatusStyles(job, theme);
+const FocusJobCard: FC<FocusJobCardProps> = ({
+  job,
+  theme,
+  accentColor,
+  index,
+  animatedIndex,
+  onOpen,
+}) => {
+  const statusStyles = getStatusStyles(job, theme);
+  const jobTotal = getJobTotal(job);
+  const hasPhotos = !!(job.photoUris && job.photoUris.length > 0);
 
-    const totalString =
-      jobTotal > 0
-        ? jobTotal.toLocaleString("en-US", {
-            minimumFractionDigits: 2,
-            maximumFractionDigits: 2,
-          })
-        : null;
+  const scale = animatedIndex.interpolate({
+    inputRange: [index - 1, index, index + 1],
+    outputRange: [0.94, 1, 0.94],
+    extrapolate: "clamp",
+  });
 
-    const renderRightActions = () => (
-      <View style={styles.swipeActionsContainer}>
-        <TouchableOpacity
-          style={[styles.swipeActionButton, styles.swipeShareButton]}
-          onPress={() => onShare(job)}
-        >
-          <Ionicons name="share-outline" size={18} color="#E5E7EB" />
-          <Text style={styles.swipeActionText}>Share</Text>
-        </TouchableOpacity>
+  const translateY = animatedIndex.interpolate({
+    inputRange: [index - 1, index, index + 1],
+    outputRange: [12, 0, 12],
+    extrapolate: "clamp",
+  });
 
-        <TouchableOpacity
-          style={[styles.swipeActionButton, styles.swipeDeleteButton]}
-          onPress={() => onDelete(job.id)}
-        >
-          <Ionicons name="trash-outline" size={18} color="#FEE2E2" />
-          <Text style={styles.swipeActionText}>Delete</Text>
-        </TouchableOpacity>
-      </View>
-    );
+  const shadowOpacity = animatedIndex.interpolate({
+    inputRange: [index - 1, index, index + 1],
+    outputRange: [0.03, 0.08, 0.03],
+    extrapolate: "clamp",
+  });
 
-    return (
-      <Swipeable renderRightActions={renderRightActions}>
-        <Pressable
-          onPress={() => onOpen(job)}
-          style={({ pressed }) => [
-            styles.jobCard,
+  const totalString =
+    jobTotal > 0
+      ? jobTotal.toLocaleString("en-US", {
+          minimumFractionDigits: 2,
+          maximumFractionDigits: 2,
+        })
+      : null;
+
+  return (
+    <Animated.View
+      style={[
+        styles.focusCardOuter,
+        {
+          shadowOpacity,
+          transform: [{ scale }, { translateY }],
+        },
+      ]}
+    >
+      <Pressable
+        onPress={() => onOpen(job)}
+        style={({ pressed }) => [
+          styles.focusCardInner,
+          {
+            backgroundColor: theme.cardBackground,
+            borderColor: theme.cardBorder + "55",
+            transform: [{ scale: pressed ? 0.97 : 1 }],
+          },
+        ]}
+      >
+        <Text
+          style={[
+            styles.focusTitle,
             {
-              backgroundColor: theme.cardBackground + "F2", // soft glass layer
-              transform: [{ scale: pressed ? 0.97 : 1 }],
-              borderColor: theme.cardBorder + "55",
-            },
-            job.isDone && {
-              borderColor: theme.tagDoneBorder,
-              borderWidth: 1,
-              opacity: 0.9,
+              color: theme.textPrimary,
             },
           ]}
+          numberOfLines={2}
         >
-          {/* Header */}
-          <View style={styles.jobCardHeaderRow}>
-            <Text
-              style={[
-                styles.jobTitle,
-                { color: statusStyles.titleColor },
-              ]}
-            >
-              {job.title}
-            </Text>
+          {job.title}
+        </Text>
+        <Text
+          style={[
+            styles.focusAddress,
+            {
+              color: theme.textSecondary,
+            },
+          ]}
+          numberOfLines={1}
+        >
+          {job.address}
+        </Text>
 
-            <View
-              style={[
-                styles.statusTag,
-                {
-                  backgroundColor: statusStyles.tagBg,
-                  borderColor: statusStyles.tagBorder,
-                },
-              ]}
-            >
-              <Text
-                style={[
-                  styles.statusTagText,
-                  { color: statusStyles.tagText },
-                ]}
-              >
-                {job.isDone ? "Done" : "Open"}
-              </Text>
-            </View>
-          </View>
-
-          {/* Client */}
-          {job.clientName && (
-            <Text
-              style={[
-                styles.jobClient,
-                { color: statusStyles.textColor },
-                job.isDone && styles.jobTextDone,
-              ]}
-            >
-              Client: {job.clientName}
-            </Text>
-          )}
-
-          {/* Address */}
-          <Text
+        <View style={styles.focusMetaRow}>
+          {/* Status pill */}
+          <View
             style={[
-              styles.jobAddress,
-              { color: statusStyles.textColor },
-              job.isDone && styles.jobTextDone,
+              styles.focusStatusPill,
+              {
+                backgroundColor: statusStyles.tagBg,
+                borderColor: accentColor,
+              },
             ]}
           >
-            {job.address}
-          </Text>
-
-          {/* Photos */}
-          {!!(job.photoUris && job.photoUris.length > 0) && (
             <Text
               style={[
-                styles.jobPhotoCount,
-                { color: statusStyles.textColor },
-                job.isDone && styles.jobTextDone,
+                styles.focusStatusText,
+                { color: statusStyles.tagText },
               ]}
             >
-              📷 {job.photoUris.length}{" "}
-              {job.photoUris.length === 1 ? "photo" : "photos"}
+              {job.isDone ? "Done" : "Open"}
             </Text>
+          </View>
+
+          {/* Photos */}
+          {hasPhotos && (
+            <View style={styles.focusPhotoRow}>
+              <Text style={[styles.focusPhotoIcon, { color: theme.textSecondary }]}>
+                📷
+              </Text>
+              <Text
+                style={[
+                  styles.focusPhotoText,
+                  { color: theme.textSecondary },
+                ]}
+              >
+                {job.photoUris!.length}
+              </Text>
+            </View>
           )}
 
           {/* Total */}
           {totalString && (
-            <Text
-              style={[
-                styles.jobAmount,
-                { color: "#FCD34D" },
-                job.isDone && styles.jobTextDone,
-              ]}
-            >
-              💵 Total: ${totalString}
+            <Text style={[styles.focusAmount, { color: "#F59E0B" }]}>
+              ${totalString}
             </Text>
           )}
-
-          {/* Created At */}
-          <Text
-            style={[
-              styles.jobDate,
-              { color: theme.textMuted },
-              job.isDone && styles.jobTextDone,
-            ]}
-          >
-            {new Date(job.createdAt).toLocaleString()}
-          </Text>
-        </Pressable>
-      </Swipeable>
-    );
-  }
-);
+        </View>
+      </Pressable>
+    </Animated.View>
+  );
+};
 
 // ---------------- HOME SCREEN ----------------
 
@@ -339,17 +342,15 @@ const HomeScreen: FC = () => {
             setTheme(themes[savedTheme as ThemeName]);
           }
 
-        // ✅ Accept ANY valid AccentName ("jobsiteAmber", "electricBlue", "safetyGreen")
-if (
-  isActive &&
-  savedAccent &&
-  (savedAccent === "jobsiteAmber" ||
-    savedAccent === "electricBlue" ||
-    savedAccent === "safetyGreen")
-) {
-  setAccentName(savedAccent as AccentName);
-}
-
+          if (
+            isActive &&
+            savedAccent &&
+            (savedAccent === "jobsiteAmber" ||
+              savedAccent === "electricBlue" ||
+              savedAccent === "safetyGreen")
+          ) {
+            setAccentName(savedAccent as AccentName);
+          }
         } catch (err) {
           console.warn("Failed to load theme/accent in Home:", err);
         }
@@ -565,17 +566,34 @@ if (
     });
   }, []);
 
-  const renderJobItem = useCallback(
-    ({ item }: { item: Job }) => (
-      <JobRow
+  // ------------- FOCUSED LIST SCROLL LOGIC -------------
+
+  const scrollY = useRef(new Animated.Value(0)).current;
+  const [activeIndex, setActiveIndex] = useState(0);
+
+  const onMomentumEnd = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+    const offsetY = e.nativeEvent.contentOffset.y;
+    const rawIndex = offsetY / CARD_OUTER_HEIGHT;
+    let index = Math.round(rawIndex);
+    if (index < 0) index = 0;
+    if (index > visibleJobs.length - 1) index = visibleJobs.length - 1;
+    setActiveIndex(index);
+  };
+
+  const animatedIndex = Animated.divide(scrollY, new Animated.Value(CARD_OUTER_HEIGHT));
+
+  const renderFocusedItem = useCallback(
+    ({ item, index }: { item: Job; index: number }) => (
+      <FocusJobCard
         job={item}
         theme={theme}
+        accentColor={accentColor}
+        index={index}
+        animatedIndex={animatedIndex}
         onOpen={handleOpenJob}
-        onShare={handleShareJob}
-        onDelete={handleDeleteJob}
       />
     ),
-    [theme, handleOpenJob, handleShareJob, handleDeleteJob]
+    [theme, accentColor, animatedIndex, handleOpenJob]
   );
 
   const dismissKeyboardAndEditing = () => {
@@ -593,216 +611,243 @@ if (
         onPress={dismissKeyboardAndEditing}
         accessible={false}
       >
-        <Animated.View
-          style={[
-            styles.container,
-            {
-              transform: [{ scale: screenScale }],
-              backgroundColor: theme.screenBackground,
-            },
-          ]}
-        >
-          {/* HEADER */}
-          <View style={styles.headerRow}>
-            <Text style={[styles.header, { color: theme.headerText }]}>
-              THE TRAKTR APP
-            </Text>
-          </View>
-
-          {/* Ask Traktr AI CTA */}
-          <View style={styles.aiHelperRow}>
-            <TouchableOpacity
-              activeOpacity={0.9}
-              style={[
-                styles.aiHelperButton,
-                {
-                  backgroundColor: accentColor,
-                },
-              ]}
-              onPress={() => router.push("/ai-helper")}
-            >
-              <Ionicons name="sparkles-outline" size={16} color="#F9FAFB" />
-              <Text style={styles.aiHelperText}>Ask Traktr AI</Text>
-            </TouchableOpacity>
-          </View>
-
-          {/* SUMMARY */}
-          <View style={styles.summaryRow}>
-            {/* OPEN */}
-            <TouchableOpacity
-              style={[
-                styles.summaryCard,
-                {
-                  backgroundColor: theme.summaryCardBackground + "F2",
-                  borderColor: theme.summaryCardBorder,
-                },
-                statusFilter === "open" && styles.summaryCardActive,
-                statusFilter === "open" && { borderColor: accentColor },
-              ]}
-              onPress={() =>
-                setStatusFilter((prev) => (prev === "open" ? "all" : "open"))
-              }
-            >
-              <Text style={[styles.summaryLabel, { color: theme.textMuted }]}>
-                Open
+        <View style={{ flex: 1 }}>
+          <Animated.View
+            style={[
+              styles.container,
+              {
+                transform: [{ scale: screenScale }],
+                backgroundColor: theme.screenBackground,
+                paddingBottom: NAV_HEIGHT + 20,
+              },
+            ]}
+          >
+            {/* HEADER */}
+            <View style={styles.headerRow}>
+              <Text style={[styles.header, { color: theme.headerText }]}>
+                THE TRAKTR APP
               </Text>
-              <Text
-                style={[styles.summaryValue, { color: theme.textPrimary }]}
-              >
-                {openJobs}
-              </Text>
-            </TouchableOpacity>
-
-            {/* DONE */}
-            <TouchableOpacity
-              style={[
-                styles.summaryCard,
-                {
-                  backgroundColor: theme.summaryCardBackground + "F2",
-                  borderColor: theme.summaryCardBorder,
-                },
-                statusFilter === "done" && styles.summaryCardActive,
-                statusFilter === "done" && { borderColor: accentColor },
-              ]}
-              onPress={() =>
-                setStatusFilter((prev) => (prev === "done" ? "all" : "done"))
-              }
-            >
-              <Text style={[styles.summaryLabel, { color: theme.textMuted }]}>
-                Done
-              </Text>
-              <Text
-                style={[styles.summaryValue, { color: theme.textPrimary }]}
-              >
-                {doneJobs}
-              </Text>
-            </TouchableOpacity>
-
-            {/* TOTAL */}
-            <TouchableOpacity
-              style={[
-                styles.summaryCard,
-                {
-                  backgroundColor: theme.summaryCardBackground + "F2",
-                  borderColor: theme.summaryCardBorder,
-                },
-                statusFilter === "all" && styles.summaryCardActive,
-                statusFilter === "all" && { borderColor: accentColor },
-              ]}
-              onPress={() => setStatusFilter("all")}
-            >
-              <Text style={[styles.summaryLabel, { color: theme.textMuted }]}>
-                Total
-              </Text>
-              <Text
-                style={[styles.summaryValue, { color: theme.textPrimary }]}
-              >
-                {totalJobs}
-              </Text>
-            </TouchableOpacity>
-          </View>
-
-          {/* SEARCH + SORT */}
-          <View style={styles.controlsRow}>
-            {/* SEARCH */}
-            <View style={styles.searchContainer}>
-              <TextInput
-                style={[
-                  styles.searchInput,
-                  {
-                    backgroundColor: theme.inputBackground + "F2",
-                    color: theme.inputText,
-                    borderColor: theme.inputBorder,
-                  },
-                ]}
-                placeholder="Search jobs or clients..."
-                placeholderTextColor={theme.textMuted}
-                value={searchQuery}
-                onChangeText={setSearchQuery}
-                returnKeyType="done"
-                onFocus={() => setIsEditing(true)}
-                onBlur={() => setIsEditing(false)}
-              />
             </View>
 
-            {/* SORT */}
-            <View style={styles.sortContainer}>
+            {/* Ask Traktr AI CTA */}
+            <View style={styles.aiHelperRow}>
+              <TouchableOpacity
+                activeOpacity={0.9}
+                style={[
+                  styles.aiHelperButton,
+                  {
+                    backgroundColor: accentColor,
+                  },
+                ]}
+                onPress={() => router.push("/ai-helper")}
+              >
+                <Ionicons name="sparkles-outline" size={16} color="#F9FAFB" />
+                <Text style={styles.aiHelperText}>Ask Traktr AI</Text>
+              </TouchableOpacity>
+            </View>
+
+            {/* SUMMARY */}
+            <View style={styles.summaryRow}>
+              {/* OPEN */}
               <TouchableOpacity
                 style={[
-                  styles.sortButton,
+                  styles.summaryCard,
                   {
-                    backgroundColor: theme.cardBackground + "F2",
-                    borderColor: theme.cardBorder,
+                    backgroundColor: theme.summaryCardBackground + "F2",
+                    borderColor: theme.summaryCardBorder,
                   },
-                  isSortMenuVisible && { borderColor: accentColor },
+                  statusFilter === "open" && styles.summaryCardActive,
+                  statusFilter === "open" && { borderColor: accentColor },
                 ]}
                 onPress={() =>
-                  setIsSortMenuVisible((prev) => !prev)
+                  setStatusFilter((prev) => (prev === "open" ? "all" : "open"))
                 }
               >
-                <Text style={[styles.sortLabel, { color: theme.textMuted }]}>
-                  Sort
+                <Text style={[styles.summaryLabel, { color: theme.textMuted }]}>
+                  Open
                 </Text>
-                <Text style={[styles.sortValue, { color: theme.textPrimary }]}>
-                  {sortOption}
+                <Text
+                  style={[styles.summaryValue, { color: theme.textPrimary }]}
+                >
+                  {openJobs}
                 </Text>
               </TouchableOpacity>
 
-              {isSortMenuVisible && (
-                <View
+              {/* DONE */}
+              <TouchableOpacity
+                style={[
+                  styles.summaryCard,
+                  {
+                    backgroundColor: theme.summaryCardBackground + "F2",
+                    borderColor: theme.summaryCardBorder,
+                  },
+                  statusFilter === "done" && styles.summaryCardActive,
+                  statusFilter === "done" && { borderColor: accentColor },
+                ]}
+                onPress={() =>
+                  setStatusFilter((prev) => (prev === "done" ? "all" : "done"))
+                }
+              >
+                <Text style={[styles.summaryLabel, { color: theme.textMuted }]}>
+                  Done
+                </Text>
+                <Text
+                  style={[styles.summaryValue, { color: theme.textPrimary }]}
+                >
+                  {doneJobs}
+                </Text>
+              </TouchableOpacity>
+
+              {/* TOTAL */}
+              <TouchableOpacity
+                style={[
+                  styles.summaryCard,
+                  {
+                    backgroundColor: theme.summaryCardBackground + "F2",
+                    borderColor: theme.summaryCardBorder,
+                  },
+                  statusFilter === "all" && styles.summaryCardActive,
+                  statusFilter === "all" && { borderColor: accentColor },
+                ]}
+                onPress={() => setStatusFilter("all")}
+              >
+                <Text style={[styles.summaryLabel, { color: theme.textMuted }]}>
+                  Total
+                </Text>
+                <Text
+                  style={[styles.summaryValue, { color: theme.textPrimary }]}
+                >
+                  {totalJobs}
+                </Text>
+              </TouchableOpacity>
+            </View>
+
+            {/* SEARCH + SORT */}
+            <View style={styles.controlsRow}>
+              {/* SEARCH */}
+              <View style={styles.searchContainer}>
+                <TextInput
                   style={[
-                    styles.sortDropdown,
+                    styles.searchInput,
+                    {
+                      backgroundColor: theme.inputBackground + "F2",
+                      color: theme.inputText,
+                      borderColor: theme.inputBorder,
+                    },
+                  ]}
+                  placeholder="Search jobs or clients..."
+                  placeholderTextColor={theme.textMuted}
+                  value={searchQuery}
+                  onChangeText={setSearchQuery}
+                  returnKeyType="done"
+                  onFocus={() => setIsEditing(true)}
+                  onBlur={() => setIsEditing(false)}
+                />
+              </View>
+
+              {/* SORT */}
+              <View style={styles.sortContainer}>
+                <TouchableOpacity
+                  style={[
+                    styles.sortButton,
                     {
                       backgroundColor: theme.cardBackground + "F2",
                       borderColor: theme.cardBorder,
                     },
+                    isSortMenuVisible && { borderColor: accentColor },
                   ]}
+                  onPress={() => setIsSortMenuVisible((prev) => !prev)}
                 >
-                  {sortOptions.map((option) => (
-                    <TouchableOpacity
-                      key={option}
-                      style={styles.sortOption}
-                      onPress={() => handleSelectSort(option)}
-                    >
-                      <Text
-                        style={[
-                          styles.sortOptionText,
-                          { color: theme.textPrimary },
-                          option === sortOption && styles.sortOptionTextActive,
-                          option === sortOption && { color: accentColor },
-                        ]}
-                      >
-                        {option}
-                      </Text>
-                    </TouchableOpacity>
-                  ))}
-                </View>
-              )}
-            </View>
-          </View>
+                  <Text style={[styles.sortLabel, { color: theme.textMuted }]}>
+                    Sort
+                  </Text>
+                  <Text
+                    style={[styles.sortValue, { color: theme.textPrimary }]}
+                  >
+                    {sortOption}
+                  </Text>
+                </TouchableOpacity>
 
-          {/* JOB LIST */}
-          <FlatList
-            data={visibleJobs}
-            keyExtractor={(item) => item.id}
-            contentContainerStyle={[
-              styles.listContent,
-              {
-                paddingBottom: isEditing ? 8 : NAV_HEIGHT + 24,
-              },
-            ]}
-            renderItem={renderJobItem}
-            keyboardShouldPersistTaps="always"
-            ListEmptyComponent={
+                {isSortMenuVisible && (
+                  <View
+                    style={[
+                      styles.sortDropdown,
+                      {
+                        backgroundColor: theme.cardBackground + "F2",
+                        borderColor: theme.cardBorder,
+                      },
+                    ]}
+                  >
+                    {sortOptions.map((option) => (
+                      <TouchableOpacity
+                        key={option}
+                        style={styles.sortOption}
+                        onPress={() => handleSelectSort(option)}
+                      >
+                        <Text
+                          style={[
+                            styles.sortOptionText,
+                            { color: theme.textPrimary },
+                            option === sortOption &&
+                              styles.sortOptionTextActive,
+                            option === sortOption && { color: accentColor },
+                          ]}
+                        >
+                          {option}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                )}
+              </View>
+            </View>
+
+            {/* FOCUSED JOBS HEADER */}
+            <View style={styles.focusHeaderRow}>
+              <Text
+                style={[styles.focusHeaderTitle, { color: theme.textPrimary }]}
+              >
+                Focused jobs
+              </Text>
+              <Text
+                style={[styles.focusHeaderCount, { color: theme.textMuted }]}
+              >
+                {visibleJobs.length === 0
+                  ? "0 / 0"
+                  : `${activeIndex + 1} / ${visibleJobs.length}`}
+              </Text>
+            </View>
+
+            {/* FOCUSED JOBS CAROUSEL */}
+            {visibleJobs.length === 0 ? (
               <Text style={[styles.emptyText, { color: theme.textMuted }]}>
                 No jobs found.
               </Text>
-            }
-          />
+            ) : (
+              <Animated.FlatList
+                data={visibleJobs}
+                keyExtractor={(item) => item.id}
+                contentContainerStyle={styles.focusListContent}
+                renderItem={renderFocusedItem}
+                showsVerticalScrollIndicator={false}
+                snapToInterval={CARD_OUTER_HEIGHT}
+                decelerationRate="fast"
+                onScroll={Animated.event(
+                  [{ nativeEvent: { contentOffset: { y: scrollY } } }],
+                  { useNativeDriver: true }
+                )}
+                onMomentumScrollEnd={onMomentumEnd}
+              />
+            )}
+          </Animated.View>
 
-          {/* NAV – hide while typing like settings */}
-          {!isEditing && <BottomNavBar active="home" theme={theme} />}
-        </Animated.View>
+          {/* PINNED NAV */}
+          {!isEditing && (
+            <View style={styles.navWrapper}>
+              <BottomNavBar active="home" theme={theme} />
+            </View>
+          )}
+        </View>
       </TouchableWithoutFeedback>
     </KeyboardAvoidingView>
   );
@@ -934,98 +979,97 @@ const styles = StyleSheet.create({
     fontWeight: "700",
   },
 
-  // LIST
-  listContent: {
-    paddingBottom: 110,
-  },
-
-  // JOB CARD
-  jobCard: {
-    borderRadius: 18,
-    padding: 14,
-    marginBottom: 14,
-    borderWidth: 1,
-    shadowColor: "#000",
-    shadowOpacity: 0.07,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 4 },
-  },
-  jobCardHeaderRow: {
+  // FOCUSED HEADER
+  focusHeaderRow: {
     flexDirection: "row",
     justifyContent: "space-between",
-    marginBottom: 8,
+    alignItems: "center",
+    marginTop: 8,
+    marginBottom: 4,
   },
-  jobTitle: {
-    fontSize: 16,
+  focusHeaderTitle: {
+    fontSize: 18,
     fontWeight: "700",
   },
-  jobClient: {
+  focusHeaderCount: {
     fontSize: 13,
-    marginBottom: 2,
-  },
-  jobAddress: {
-    fontSize: 13,
-    marginBottom: 2,
-  },
-  jobPhotoCount: {
-    fontSize: 12,
-    marginBottom: 2,
-  },
-  jobAmount: {
-    fontSize: 12,
-    marginBottom: 2,
-  },
-  jobDate: {
-    fontSize: 11,
-    marginTop: 4,
-  },
-  jobTextDone: {
-    textDecorationLine: "line-through",
-    opacity: 0.6,
+    fontWeight: "500",
   },
 
-  statusTag: {
+  // FOCUSED LIST
+  focusListContent: {
+    paddingTop: 8,
+    paddingBottom: 16,
+  },
+  focusCardOuter: {
+    height: CARD_OUTER_HEIGHT,
+    justifyContent: "center",
+    shadowColor: "#000",
+    shadowRadius: 14,
+    shadowOffset: { width: 0, height: 8 },
+  },
+  focusCardInner: {
+    height: CARD_HEIGHT,
+    borderRadius: 22,
+    paddingHorizontal: 18,
+    paddingVertical: 16,
+    borderWidth: 1,
+  },
+  focusTitle: {
+    fontSize: 17,
+    fontWeight: "700",
+    marginBottom: 4,
+  },
+  focusAddress: {
+    fontSize: 13,
+    marginBottom: 10,
+  },
+  focusMetaRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginTop: "auto",
+    gap: 10,
+  },
+  focusStatusPill: {
+    paddingHorizontal: 12,
     paddingVertical: 4,
-    paddingHorizontal: 10,
     borderRadius: 999,
     borderWidth: 1,
   },
-  statusTagText: {
+  focusStatusText: {
     fontSize: 11,
     fontWeight: "600",
+  },
+  focusPhotoRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+  },
+  focusPhotoIcon: {
+    fontSize: 14,
+  },
+  focusPhotoText: {
+    fontSize: 12,
+  },
+  focusAmount: {
+    marginLeft: "auto",
+    fontSize: 13,
+    fontWeight: "700",
   },
 
   emptyText: {
     textAlign: "center",
     fontSize: 14,
-    marginTop: 24,
+    marginTop: 16,
   },
 
-  // SWIPE
-  swipeActionsContainer: {
-    flexDirection: "row",
-    marginBottom: 14,
-  },
-  swipeActionButton: {
-    width: 72,
-    justifyContent: "center",
-    alignItems: "center",
-    paddingVertical: 10,
-  },
-  swipeShareButton: {
-    backgroundColor: "#4B5563",
-    borderTopLeftRadius: 14,
-    borderBottomLeftRadius: 14,
-  },
-  swipeDeleteButton: {
-    backgroundColor: "#DC2626",
-    borderTopRightRadius: 14,
-    borderBottomRightRadius: 14,
-  },
-  swipeActionText: {
-    fontSize: 11,
-    marginTop: 4,
-    color: "#F9FAFB",
-    fontWeight: "600",
+  // PINNED NAV
+  navWrapper: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    bottom: 0,
+    height: NAV_HEIGHT,
   },
 });
+
