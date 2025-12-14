@@ -1,4 +1,5 @@
 // app/add-job.tsx
+
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as ImagePicker from "expo-image-picker";
 import { useRouter } from "expo-router";
@@ -21,7 +22,6 @@ import {
   View,
 } from "react-native";
 import ImageViewing from "react-native-image-viewing";
-import BottomNavBar from "../components/BottomNavBar";
 import {
   THEME_STORAGE_KEY,
   ThemeName,
@@ -61,9 +61,8 @@ const THUMB_SIZE =
   (screenWidth - GRID_HORIZONTAL_PADDING - GRID_GAP * (GRID_COLUMNS - 1)) /
   GRID_COLUMNS;
 
-// Keep this in sync with BottomNavBar height-ish
-const NAV_HEIGHT = 72;
-
+ 
+  
 /**
  * Reusable Photos section (same polish as job-detail)
  * Handles:
@@ -337,6 +336,8 @@ function JobPhotos({
 export default function AddJobScreen() {
   const router = useRouter();
 
+
+
   // THEME
   const [themeName, setThemeName] = useState<ThemeName>("dark");
   const theme = themes[themeName] ?? themes.dark;
@@ -529,7 +530,9 @@ export default function AddJobScreen() {
             contentContainerStyle={[
               styles.detailsScroll,
               {
-                paddingBottom: isEditing ? 8 : NAV_HEIGHT + 24,
+                paddingBottom: isEditing ? 8 : 24,
+
+
               },
             ]}
             keyboardShouldPersistTaps="always"
@@ -957,8 +960,7 @@ export default function AddJobScreen() {
           </ScrollView>
         </View>
 
-        {/* BOTTOM NAV BAR – hide while editing, same as settings */}
-        {!isEditing && <BottomNavBar active="add" theme={theme} />}
+
       </Animated.View>
     </KeyboardAvoidingView>
   );
@@ -1185,4 +1187,11 @@ const styles = StyleSheet.create({
     marginTop: 6,
     marginBottom: 4,
   },
+  navWrapper: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    bottom: 0,
+  },
+  
 });

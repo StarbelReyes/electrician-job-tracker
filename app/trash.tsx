@@ -13,13 +13,8 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
-import BottomNavBar from "../components/BottomNavBar";
-import {
-  THEME_STORAGE_KEY,
-  ThemeName,
-  themes,
-} from "../constants/appTheme";
 
+import { THEME_STORAGE_KEY, ThemeName, themes } from "../constants/appTheme";
 
 type Job = {
   id: string;
@@ -173,6 +168,7 @@ export default function TrashScreen() {
           {
             backgroundColor: theme.screenBackground,
             transform: [{ scale: screenScale }],
+            paddingBottom: 0,
           },
         ]}
       >
@@ -202,8 +198,11 @@ export default function TrashScreen() {
             <FlatList
               data={trashJobs}
               keyExtractor={(item) => item.id}
-              contentContainerStyle={styles.listContent}
               showsVerticalScrollIndicator={false}
+              contentContainerStyle={[
+                styles.listContent,
+                { paddingBottom: 16 }, // ✅ FIX: runtime value must be inline
+              ]}
               renderItem={({ item }) => (
                 <View
                   style={[
@@ -214,41 +213,25 @@ export default function TrashScreen() {
                     },
                   ]}
                 >
-                  <Text
-                    style={[
-                      styles.trashTitle,
-                      { color: theme.textPrimary },
-                    ]}
-                  >
+                  <Text style={[styles.trashTitle, { color: theme.textPrimary }]}>
                     {item.title}
                   </Text>
 
                   <Text
-                    style={[
-                      styles.trashAddress,
-                      { color: theme.textSecondary },
-                    ]}
+                    style={[styles.trashAddress, { color: theme.textSecondary }]}
                   >
                     {item.address}
                   </Text>
 
                   {item.clientName && (
                     <Text
-                      style={[
-                        styles.trashClient,
-                        { color: theme.textPrimary },
-                      ]}
+                      style={[styles.trashClient, { color: theme.textPrimary }]}
                     >
                       Client: {item.clientName}
                     </Text>
                   )}
 
-                  <Text
-                    style={[
-                      styles.trashDate,
-                      { color: theme.textMuted },
-                    ]}
-                  >
+                  <Text style={[styles.trashDate, { color: theme.textMuted }]}>
                     {new Date(item.createdAt).toLocaleString()}
                   </Text>
 
@@ -324,8 +307,8 @@ export default function TrashScreen() {
           )}
         </View>
 
-        {/* BOTTOM NAV BAR */}
-        <BottomNavBar active="trash" theme={theme} />
+        {/* PINNED NAV */}
+       
       </Animated.View>
     </KeyboardAvoidingView>
   );
@@ -366,7 +349,7 @@ const styles = StyleSheet.create({
     fontSize: 14,
   },
   listContent: {
-    paddingBottom: 90, // extra space so items aren't hidden under BottomNavBar
+    // ✅ keep static styles only; safe-area padding is applied inline
   },
   trashCard: {
     borderRadius: 16,
@@ -429,5 +412,11 @@ const styles = StyleSheet.create({
   trashDeleteText: {
     fontSize: 11,
     fontWeight: "600",
+  },
+  navWrapper: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    bottom: 0,
   },
 });

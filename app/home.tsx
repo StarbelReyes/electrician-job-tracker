@@ -28,7 +28,6 @@ import {
   TouchableWithoutFeedback,
   View,
 } from "react-native";
-import BottomNavBar from "../components/BottomNavBar";
 import {
   ACCENT_STORAGE_KEY,
   AccentName,
@@ -56,69 +55,6 @@ type Job = {
 
 type Theme = (typeof themes)["dark"];
 
-const initialJobs: Job[] = [
-  {
-    id: "1",
-    title: "Panel Upgrade - 100A to 200A",
-    address: "123 Main St, Brooklyn, NY",
-    description: "Replace existing 100A panel with 200A, label circuits.",
-    createdAt: "2025-11-10T10:00:00Z",
-    isDone: false,
-    clientName: "John Doe",
-    clientPhone: "555-123-4567",
-    clientNotes: "Owner works nights, schedule after 3 PM.",
-    photoUris: [],
-    laborHours: 0,
-    hourlyRate: 0,
-    materialCost: 0,
-  },
-  {
-    id: "2",
-    title: "Troubleshoot Lights Flickering",
-    address: "456 5th Ave, Manhattan, NY",
-    description: "Check loose neutrals, dimmers, shared circuits.",
-    createdAt: "2025-11-12T14:30:00Z",
-    isDone: false,
-    clientName: "Restaurant Manager",
-    clientPhone: "555-987-6543",
-    clientNotes: "Busy during lunch, go before 11 AM.",
-    photoUris: [],
-    laborHours: 0,
-    hourlyRate: 0,
-    materialCost: 0,
-  },
-  {
-    id: "3",
-    title: "Install Tesla Wall Charger",
-    address: "789 Ocean Pkwy, Brooklyn, NY",
-    description: "Run dedicated circuit, mount charger, test load.",
-    createdAt: "2025-11-13T09:15:00Z",
-    isDone: false,
-    clientName: "Maria Lopez",
-    clientPhone: "555-222-3333",
-    clientNotes: "Garage access via side gate.",
-    photoUris: [],
-    laborHours: 0,
-    hourlyRate: 0,
-    materialCost: 0,
-  },
-  {
-    id: "4",
-    title: "Replace panel in basement",
-    address: "NYC",
-    description: "Full panel change, label all circuits.",
-    createdAt: "2025-11-16T15:09:50Z",
-    isDone: false,
-    clientName: "Basement Owner",
-    clientPhone: "555-000-1111",
-    clientNotes: "",
-    photoUris: [],
-    laborHours: 0,
-    hourlyRate: 0,
-    materialCost: 0,
-  },
-];
-
 const sortOptions = ["Newest", "Oldest", "A-Z", "Z-A"] as const;
 type SortOption = (typeof sortOptions)[number];
 
@@ -127,9 +63,6 @@ const STORAGE_KEYS = {
   TRASH: "EJT_TRASH",
   SORT: "EJT_SORT_OPTION",
 };
-
-// Keep in sync with BottomNavBar height-ish
-const NAV_HEIGHT = 72;
 
 // Focused carousel sizing
 const CARD_HEIGHT = 180;
@@ -165,7 +98,6 @@ const getStatusStyles = (
         textColor: theme.textSecondary,
       }
     : {
-        // OPEN should follow ACCENT for consistency
         tagBg: accentColor + "1A",
         tagBorder: accentColor,
         tagText: accentColor,
@@ -189,30 +121,26 @@ const JobCardMediaHeader: FC<JobCardMediaHeaderProps> = ({
   const hasPhoto = !!(job.photoUris && job.photoUris.length > 0);
   const firstPhotoUri = job.photoUris?.[0];
 
-  // ✅ Consistent: open uses accent, done uses muted gray
   const statusColor = job.isDone ? "#9CA3AF" : accentColor;
 
   return (
     <View style={styles.mediaHeaderWrapper}>
       {hasPhoto && firstPhotoUri ? (
-        // PHOTO VARIANT – strong image, soft overlay
         <View style={styles.mediaHeader}>
           <Image
             source={{ uri: firstPhotoUri }}
             style={styles.mediaHeaderImage}
             resizeMode="cover"
           />
-          {/* subtle dark overlay so future text/icons will always read */}
           <View style={styles.mediaHeaderOverlay} />
         </View>
       ) : (
-        // NO-PHOTO VARIANT – glassy, accent-tinted strip
         <LinearGradient
           style={[
             styles.mediaHeader,
             {
               borderWidth: 1,
-              borderColor: accentColor + "40", // soft accent outline
+              borderColor: accentColor + "40",
               backgroundColor: "transparent",
             },
           ]}
@@ -222,15 +150,7 @@ const JobCardMediaHeader: FC<JobCardMediaHeaderProps> = ({
         />
       )}
 
-      {/* Status indicator bar */}
-      <View
-        style={[
-          styles.mediaStatusBar,
-          {
-            backgroundColor: statusColor,
-          },
-        ]}
-      />
+      <View style={[styles.mediaStatusBar, { backgroundColor: statusColor }]} />
     </View>
   );
 };
@@ -307,10 +227,8 @@ const FocusJobCard: FC<FocusJobCardProps> = ({
         ]}
       >
         <View style={styles.focusCardContent}>
-          {/* media header (photo or accent gradient) + status bar */}
           <JobCardMediaHeader job={job} theme={theme} accentColor={accentColor} />
 
-          {/* Title / client / address */}
           <Text
             style={[
               styles.focusTitle,
@@ -358,9 +276,7 @@ const FocusJobCard: FC<FocusJobCardProps> = ({
             </Text>
           )}
 
-          {/* Meta row */}
           <View style={styles.focusMetaRow}>
-            {/* Status pill */}
             <View
               style={[
                 styles.focusStatusPill,
@@ -370,27 +286,18 @@ const FocusJobCard: FC<FocusJobCardProps> = ({
                 },
               ]}
             >
-              <Text
-                style={[
-                  styles.focusStatusText,
-                  { color: statusStyles.tagText },
-                ]}
-              >
+              <Text style={[styles.focusStatusText, { color: statusStyles.tagText }]}>
                 {job.isDone ? "Done" : "Open"}
               </Text>
             </View>
 
-            {/* Photos chip */}
             {hasPhotos && (
               <View style={styles.focusPhotoChip}>
                 <Ionicons name="camera-outline" size={14} color="#9CA3AF" />
-                <Text style={styles.focusPhotoChipText}>
-                  {job.photoUris!.length}
-                </Text>
+                <Text style={styles.focusPhotoChipText}>{job.photoUris!.length}</Text>
               </View>
             )}
 
-            {/* Money */}
             {hasTotal && totalString && (
               <Text style={[styles.focusAmountClean, { color: accentColor }]}>
                 ${totalString}
@@ -410,11 +317,11 @@ const HomeScreen: FC = () => {
 
   const [theme, setTheme] = useState<Theme>(themes.dark);
 
-  // Accent shared with settings
+ 
+
   const [accentName, setAccentName] = useState<AccentName>("jobsiteAmber");
   const accentColor = getAccentColor(accentName);
 
-  // Track when we're editing (typing) so we can hide nav like settings
   const [isEditing, setIsEditing] = useState(false);
 
   useFocusEffect(
@@ -456,7 +363,8 @@ const HomeScreen: FC = () => {
     }, [])
   );
 
-  const [jobs, setJobs] = useState<Job[]>(initialJobs);
+  // ✅ FIX: start empty (no fake placeholder jobs that cause flash)
+  const [jobs, setJobs] = useState<Job[]>([]);
   const [trashJobs, setTrashJobs] = useState<Job[]>([]);
   const [isHydrated, setIsHydrated] = useState(false);
 
@@ -464,9 +372,7 @@ const HomeScreen: FC = () => {
   const [sortOption, setSortOption] = useState<SortOption>("Newest");
   const [isSortMenuVisible, setIsSortMenuVisible] = useState(false);
 
-  const [statusFilter, setStatusFilter] = useState<"all" | "open" | "done">(
-    "open"
-  );
+  const [statusFilter, setStatusFilter] = useState<"all" | "open" | "done">("open");
 
   useFocusEffect(
     useCallback(() => {
@@ -481,7 +387,7 @@ const HomeScreen: FC = () => {
       duration: 220,
       useNativeDriver: true,
     }).start();
-  }, []);
+  }, [screenScale]);
 
   const handleSelectSort = useCallback((option: SortOption) => {
     setSortOption(option);
@@ -513,21 +419,13 @@ const HomeScreen: FC = () => {
 
     data.sort((a, b) => {
       if (sortOption === "Newest") {
-        return (
-          new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-        );
+        return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
       }
       if (sortOption === "Oldest") {
-        return (
-          new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
-        );
+        return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
       }
-      if (sortOption === "A-Z") {
-        return a.title.localeCompare(b.title);
-      }
-      if (sortOption === "Z-A") {
-        return b.title.localeCompare(a.title);
-      }
+      if (sortOption === "A-Z") return a.title.localeCompare(b.title);
+      if (sortOption === "Z-A") return b.title.localeCompare(a.title);
       return 0;
     });
 
@@ -577,7 +475,75 @@ const HomeScreen: FC = () => {
               STORAGE_KEYS.SORT,
             ]);
 
-          if (jobsJson) setJobs(JSON.parse(jobsJson));
+          // ✅ if first run, seed with your demo jobs ONCE
+          if (!jobsJson) {
+            const seed: Job[] = [
+              {
+                id: "1",
+                title: "Panel Upgrade - 100A to 200A",
+                address: "123 Main St, Brooklyn, NY",
+                description: "Replace existing 100A panel with 200A, label circuits.",
+                createdAt: "2025-11-10T10:00:00Z",
+                isDone: false,
+                clientName: "John Doe",
+                clientPhone: "555-123-4567",
+                clientNotes: "Owner works nights, schedule after 3 PM.",
+                photoUris: [],
+                laborHours: 0,
+                hourlyRate: 0,
+                materialCost: 0,
+              },
+              {
+                id: "2",
+                title: "Troubleshoot Lights Flickering",
+                address: "456 5th Ave, Manhattan, NY",
+                description: "Check loose neutrals, dimmers, shared circuits.",
+                createdAt: "2025-11-12T14:30:00Z",
+                isDone: false,
+                clientName: "Restaurant Manager",
+                clientPhone: "555-987-6543",
+                clientNotes: "Busy during lunch, go before 11 AM.",
+                photoUris: [],
+                laborHours: 0,
+                hourlyRate: 0,
+                materialCost: 0,
+              },
+              {
+                id: "3",
+                title: "Install Tesla Wall Charger",
+                address: "789 Ocean Pkwy, Brooklyn, NY",
+                description: "Run dedicated circuit, mount charger, test load.",
+                createdAt: "2025-11-13T09:15:00Z",
+                isDone: false,
+                clientName: "Maria Lopez",
+                clientPhone: "555-222-3333",
+                clientNotes: "Garage access via side gate.",
+                photoUris: [],
+                laborHours: 0,
+                hourlyRate: 0,
+                materialCost: 0,
+              },
+              {
+                id: "4",
+                title: "Replace panel in basement",
+                address: "NYC",
+                description: "Full panel change, label all circuits.",
+                createdAt: "2025-11-16T15:09:50Z",
+                isDone: false,
+                clientName: "Basement Owner",
+                clientPhone: "555-000-1111",
+                clientNotes: "",
+                photoUris: [],
+                laborHours: 0,
+                hourlyRate: 0,
+                materialCost: 0,
+              },
+            ];
+            setJobs(seed);
+          } else {
+            setJobs(JSON.parse(jobsJson));
+          }
+
           if (trashJson) setTrashJobs(JSON.parse(trashJson));
           if (sortJson && sortOptions.includes(sortJson as SortOption)) {
             setSortOption(sortJson as SortOption);
@@ -630,9 +596,7 @@ const HomeScreen: FC = () => {
       job.description,
       "",
       `Total (estimate): ${totalString}`,
-      job.photoUris && job.photoUris.length > 0
-        ? `Photos: ${job.photoUris.length}`
-        : "",
+      job.photoUris && job.photoUris.length > 0 ? `Photos: ${job.photoUris.length}` : "",
     ]
       .filter(Boolean)
       .join("\n");
@@ -640,11 +604,8 @@ const HomeScreen: FC = () => {
     const firstPhoto = job.photoUris?.[0];
 
     try {
-      if (firstPhoto) {
-        await Share.share({ message, url: firstPhoto });
-      } else {
-        await Share.share({ message });
-      }
+      if (firstPhoto) await Share.share({ message, url: firstPhoto });
+      else await Share.share({ message });
     } catch (err) {
       console.warn("Failed to share job:", err);
     }
@@ -674,10 +635,7 @@ const HomeScreen: FC = () => {
     setActiveIndex(index);
   };
 
-  const animatedIndex = Animated.divide(
-    scrollY,
-    new Animated.Value(CARD_OUTER_HEIGHT)
-  );
+  const animatedIndex = Animated.divide(scrollY, new Animated.Value(CARD_OUTER_HEIGHT));
 
   const renderFocusedItem = useCallback(
     ({ item, index }: { item: Job; index: number }) => (
@@ -704,10 +662,7 @@ const HomeScreen: FC = () => {
       behavior={Platform.OS === "ios" ? "padding" : "height"}
       keyboardVerticalOffset={0}
     >
-      <TouchableWithoutFeedback
-        onPress={dismissKeyboardAndEditing}
-        accessible={false}
-      >
+      <TouchableWithoutFeedback onPress={dismissKeyboardAndEditing} accessible={false}>
         <View style={{ flex: 1 }}>
           <Animated.View
             style={[
@@ -715,27 +670,19 @@ const HomeScreen: FC = () => {
               {
                 transform: [{ scale: screenScale }],
                 backgroundColor: theme.screenBackground,
-                paddingBottom: NAV_HEIGHT + 20,
+                paddingBottom: 20,
+
               },
             ]}
           >
-            {/* HEADER */}
             <View style={styles.headerRow}>
-              <Text style={[styles.header, { color: theme.headerText }]}>
-                THE TRAKTR APP
-              </Text>
+              <Text style={[styles.header, { color: theme.headerText }]}>THE TRAKTR APP</Text>
             </View>
 
-            {/* Ask Traktr AI CTA */}
             <View style={styles.aiHelperRow}>
               <TouchableOpacity
                 activeOpacity={0.9}
-                style={[
-                  styles.aiHelperButton,
-                  {
-                    backgroundColor: accentColor,
-                  },
-                ]}
+                style={[styles.aiHelperButton, { backgroundColor: accentColor }]}
                 onPress={() => router.push("/ai-helper")}
               >
                 <Ionicons name="sparkles-outline" size={16} color="#F9FAFB" />
@@ -743,85 +690,48 @@ const HomeScreen: FC = () => {
               </TouchableOpacity>
             </View>
 
-            {/* SUMMARY */}
             <View style={styles.summaryRow}>
-              {/* OPEN */}
               <TouchableOpacity
                 style={[
                   styles.summaryCard,
-                  {
-                    backgroundColor: theme.summaryCardBackground + "F2",
-                    borderColor: theme.summaryCardBorder,
-                  },
+                  { backgroundColor: theme.summaryCardBackground + "F2", borderColor: theme.summaryCardBorder },
                   statusFilter === "open" && styles.summaryCardActive,
                   statusFilter === "open" && { borderColor: accentColor },
                 ]}
-                onPress={() =>
-                  setStatusFilter((prev) => (prev === "open" ? "all" : "open"))
-                }
+                onPress={() => setStatusFilter((prev) => (prev === "open" ? "all" : "open"))}
               >
-                <Text style={[styles.summaryLabel, { color: theme.textMuted }]}>
-                  Open
-                </Text>
-                <Text
-                  style={[styles.summaryValue, { color: theme.textPrimary }]}
-                >
-                  {openJobs}
-                </Text>
+                <Text style={[styles.summaryLabel, { color: theme.textMuted }]}>Open</Text>
+                <Text style={[styles.summaryValue, { color: theme.textPrimary }]}>{openJobs}</Text>
               </TouchableOpacity>
 
-              {/* DONE */}
               <TouchableOpacity
                 style={[
                   styles.summaryCard,
-                  {
-                    backgroundColor: theme.summaryCardBackground + "F2",
-                    borderColor: theme.summaryCardBorder,
-                  },
+                  { backgroundColor: theme.summaryCardBackground + "F2", borderColor: theme.summaryCardBorder },
                   statusFilter === "done" && styles.summaryCardActive,
                   statusFilter === "done" && { borderColor: accentColor },
                 ]}
-                onPress={() =>
-                  setStatusFilter((prev) => (prev === "done" ? "all" : "done"))
-                }
+                onPress={() => setStatusFilter((prev) => (prev === "done" ? "all" : "done"))}
               >
-                <Text style={[styles.summaryLabel, { color: theme.textMuted }]}>
-                  Done
-                </Text>
-                <Text
-                  style={[styles.summaryValue, { color: theme.textPrimary }]}
-                >
-                  {doneJobs}
-                </Text>
+                <Text style={[styles.summaryLabel, { color: theme.textMuted }]}>Done</Text>
+                <Text style={[styles.summaryValue, { color: theme.textPrimary }]}>{doneJobs}</Text>
               </TouchableOpacity>
 
-              {/* TOTAL */}
               <TouchableOpacity
                 style={[
                   styles.summaryCard,
-                  {
-                    backgroundColor: theme.summaryCardBackground + "F2",
-                    borderColor: theme.summaryCardBorder,
-                  },
+                  { backgroundColor: theme.summaryCardBackground + "F2", borderColor: theme.summaryCardBorder },
                   statusFilter === "all" && styles.summaryCardActive,
                   statusFilter === "all" && { borderColor: accentColor },
                 ]}
                 onPress={() => setStatusFilter("all")}
               >
-                <Text style={[styles.summaryLabel, { color: theme.textMuted }]}>
-                  Total
-                </Text>
-                <Text
-                  style={[styles.summaryValue, { color: theme.textPrimary }]}
-                >
-                  {totalJobs}
-                </Text>
+                <Text style={[styles.summaryLabel, { color: theme.textMuted }]}>Total</Text>
+                <Text style={[styles.summaryValue, { color: theme.textPrimary }]}>{totalJobs}</Text>
               </TouchableOpacity>
             </View>
 
-            {/* SEARCH + SORT */}
             <View style={styles.controlsRow}>
-              {/* SEARCH */}
               <View style={styles.searchContainer}>
                 <TextInput
                   style={[
@@ -842,51 +752,33 @@ const HomeScreen: FC = () => {
                 />
               </View>
 
-              {/* SORT */}
               <View style={styles.sortContainer}>
                 <TouchableOpacity
                   style={[
                     styles.sortButton,
-                    {
-                      backgroundColor: theme.cardBackground + "F2",
-                      borderColor: theme.cardBorder,
-                    },
+                    { backgroundColor: theme.cardBackground + "F2", borderColor: theme.cardBorder },
                     isSortMenuVisible && { borderColor: accentColor },
                   ]}
                   onPress={() => setIsSortMenuVisible((prev) => !prev)}
                 >
-                  <Text style={[styles.sortLabel, { color: theme.textMuted }]}>
-                    Sort
-                  </Text>
-                  <Text
-                    style={[styles.sortValue, { color: theme.textPrimary }]}
-                  >
-                    {sortOption}
-                  </Text>
+                  <Text style={[styles.sortLabel, { color: theme.textMuted }]}>Sort</Text>
+                  <Text style={[styles.sortValue, { color: theme.textPrimary }]}>{sortOption}</Text>
                 </TouchableOpacity>
 
                 {isSortMenuVisible && (
                   <View
                     style={[
                       styles.sortDropdown,
-                      {
-                        backgroundColor: theme.cardBackground + "F2",
-                        borderColor: theme.cardBorder,
-                      },
+                      { backgroundColor: theme.cardBackground + "F2", borderColor: theme.cardBorder },
                     ]}
                   >
                     {sortOptions.map((option) => (
-                      <TouchableOpacity
-                        key={option}
-                        style={styles.sortOption}
-                        onPress={() => handleSelectSort(option)}
-                      >
+                      <TouchableOpacity key={option} style={styles.sortOption} onPress={() => handleSelectSort(option)}>
                         <Text
                           style={[
                             styles.sortOptionText,
                             { color: theme.textPrimary },
-                            option === sortOption &&
-                              styles.sortOptionTextActive,
+                            option === sortOption && styles.sortOptionTextActive,
                             option === sortOption && { color: accentColor },
                           ]}
                         >
@@ -899,27 +791,18 @@ const HomeScreen: FC = () => {
               </View>
             </View>
 
-            {/* FOCUSED JOBS HEADER */}
             <View style={styles.focusHeaderRow}>
-              <Text
-                style={[styles.focusHeaderTitle, { color: theme.textPrimary }]}
-              >
-                Focused jobs
-              </Text>
-              <Text
-                style={[styles.focusHeaderCount, { color: theme.textMuted }]}
-              >
-                {visibleJobs.length === 0
-                  ? "0 / 0"
-                  : `${activeIndex + 1} / ${visibleJobs.length}`}
+              <Text style={[styles.focusHeaderTitle, { color: theme.textPrimary }]}>Focused jobs</Text>
+              <Text style={[styles.focusHeaderCount, { color: theme.textMuted }]}>
+                {visibleJobs.length === 0 ? "0 / 0" : `${Math.min(activeIndex + 1, visibleJobs.length)} / ${visibleJobs.length}`}
               </Text>
             </View>
 
-            {/* FOCUSED JOBS CAROUSEL */}
-            {visibleJobs.length === 0 ? (
-              <Text style={[styles.emptyText, { color: theme.textMuted }]}>
-                No jobs found.
-              </Text>
+            {/* ✅ FIX: don’t render cards until hydrated (kills the flash) */}
+            {!isHydrated ? (
+              <Text style={[styles.emptyText, { color: theme.textMuted }]}>Loading…</Text>
+            ) : visibleJobs.length === 0 ? (
+              <Text style={[styles.emptyText, { color: theme.textMuted }]}>No jobs found.</Text>
             ) : (
               <Animated.FlatList
                 data={visibleJobs}
@@ -929,21 +812,15 @@ const HomeScreen: FC = () => {
                 showsVerticalScrollIndicator={false}
                 snapToInterval={CARD_OUTER_HEIGHT}
                 decelerationRate="fast"
-                onScroll={Animated.event(
-                  [{ nativeEvent: { contentOffset: { y: scrollY } } }],
-                  { useNativeDriver: true }
-                )}
+                onScroll={Animated.event([{ nativeEvent: { contentOffset: { y: scrollY } } }], {
+                  useNativeDriver: true,
+                })}
                 onMomentumScrollEnd={onMomentumEnd}
               />
             )}
           </Animated.View>
 
-          {/* PINNED NAV */}
-          {!isEditing && (
-            <View style={styles.navWrapper}>
-              <BottomNavBar active="home" theme={theme} />
-            </View>
-          )}
+         
         </View>
       </TouchableWithoutFeedback>
     </KeyboardAvoidingView>
@@ -961,7 +838,6 @@ const styles = StyleSheet.create({
     paddingTop: 48,
   },
 
-  // HEADER
   headerRow: {
     marginBottom: 8,
   },
@@ -970,7 +846,6 @@ const styles = StyleSheet.create({
     fontWeight: "700",
   },
 
-  // Ask Traktr AI CTA
   aiHelperRow: {
     flexDirection: "row",
     justifyContent: "flex-start",
@@ -994,7 +869,6 @@ const styles = StyleSheet.create({
     color: "#F9FAFB",
   },
 
-  // SUMMARY
   summaryRow: {
     flexDirection: "row",
     gap: 10,
@@ -1012,7 +886,7 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 3 },
   },
   summaryCardActive: {
-    borderColor: "#2563EB", // overridden by accentColor
+    borderColor: "#2563EB",
   },
   summaryLabel: {
     fontSize: 12,
@@ -1023,7 +897,6 @@ const styles = StyleSheet.create({
     fontWeight: "700",
   },
 
-  // CONTROLS
   controlsRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -1076,7 +949,6 @@ const styles = StyleSheet.create({
     fontWeight: "700",
   },
 
-  // FOCUSED HEADER
   focusHeaderRow: {
     flexDirection: "row",
     justifyContent: "space-between",
@@ -1093,7 +965,6 @@ const styles = StyleSheet.create({
     fontWeight: "500",
   },
 
-  // FOCUSED LIST
   focusListContent: {
     paddingTop: 8,
     paddingBottom: 16,
@@ -1116,7 +987,6 @@ const styles = StyleSheet.create({
     flex: 1,
   },
 
-  // media header + status bar
   mediaHeaderWrapper: {
     marginBottom: 10,
   },
@@ -1186,7 +1056,6 @@ const styles = StyleSheet.create({
     fontWeight: "500",
   },
 
-  // ✅ no hard-coded amber anymore (color set inline with accentColor)
   focusAmountClean: {
     marginLeft: "auto",
     fontSize: 13,
@@ -1204,12 +1073,10 @@ const styles = StyleSheet.create({
     marginTop: 16,
   },
 
-  // PINNED NAV
   navWrapper: {
     position: "absolute",
     left: 0,
     right: 0,
     bottom: 0,
-    height: NAV_HEIGHT,
   },
 });

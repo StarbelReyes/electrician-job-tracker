@@ -19,7 +19,6 @@ import {
   TouchableWithoutFeedback,
   View,
 } from "react-native";
-import BottomNavBar from "../components/BottomNavBar";
 import {
   ACCENT_STORAGE_KEY,
   AccentName,
@@ -29,6 +28,7 @@ import {
   accentSwatchColors,
   themes,
 } from "../constants/appTheme";
+import { usePreferences } from "../context/PreferencesContext";
 
 const USER_STORAGE_KEY = "EJT_USER_SESSION";
 
@@ -51,11 +51,13 @@ const themeLabels: Record<ThemeName, string> = {
   midnight: "Midnight Blue",
 };
 
-// Keep this in sync with BottomNavBar height
-const NAV_HEIGHT = 72;
+
 
 export default function SettingsScreen() {
   const router = useRouter();
+
+  const { setThemeName: setThemeGlobal, setAccentName: setAccentGlobal } = usePreferences();
+
 
   // THEME
   const [themeName, setThemeName] = useState<ThemeName>("dark");
@@ -173,22 +175,16 @@ export default function SettingsScreen() {
 
   // Save helpers
   const saveTheme = async (name: ThemeName) => {
-    try {
-      await AsyncStorage.setItem(THEME_STORAGE_KEY, name);
-      setThemeName(name);
-    } catch (err) {
-      console.warn("Failed to save theme:", err);
-    }
+    setThemeName(name);
+    setThemeGlobal(name);
   };
+  ;
 
   const saveAccent = async (name: AccentName) => {
-    try {
-      await AsyncStorage.setItem(ACCENT_STORAGE_KEY, name);
-      setAccentName(name);
-    } catch (err) {
-      console.warn("Failed to save accent:", err);
-    }
+    setAccentName(name);
+    setAccentGlobal(name);
   };
+  
 
   const saveJobDefaults = async (
     hourly: string,
@@ -459,7 +455,9 @@ export default function SettingsScreen() {
             contentContainerStyle={[
               styles.scrollContent,
               {
-                paddingBottom: isEditing ? 8 : NAV_HEIGHT + 24,
+                paddingBottom: isEditing ? 8 : 24,
+
+
               },
             ]}
             showsVerticalScrollIndicator={false}
@@ -1357,8 +1355,6 @@ export default function SettingsScreen() {
           </ScrollView>
         </View>
 
-        {/* Bottom Nav – hidden while typing */}
-        {!isEditing && <BottomNavBar active="settings" theme={theme} />}
       </Animated.View>
     </KeyboardAvoidingView>
   );
@@ -1607,4 +1603,11 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: "700",
   },
+  navWrapper: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    bottom: 0,
+  },
+  
 });
