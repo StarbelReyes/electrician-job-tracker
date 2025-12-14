@@ -21,6 +21,7 @@ import {
   Text,
   TextInput,
   TouchableOpacity,
+  TouchableWithoutFeedback,
   View,
 } from "react-native";
 import ImageViewing from "react-native-image-viewing";
@@ -70,6 +71,8 @@ const THUMB_SIZE =
   (screenWidth - GRID_HORIZONTAL_PADDING - GRID_GAP * (GRID_COLUMNS - 1)) /
   GRID_COLUMNS;
 
+const STICKY_BAR_HEIGHT = 86;
+
 // 🔹 Small component just for Photos UI (header + button + grid)
 type JobPhotosSectionProps = {
   theme: any;
@@ -104,7 +107,9 @@ function JobPhotosSection({
           onPress={onPressAddPhoto}
           activeOpacity={0.9}
         >
-          <Text style={[styles.addPhotoButtonText, { color: theme.textPrimary }]}>
+          <Text
+            style={[styles.addPhotoButtonText, { color: theme.textPrimary }]}
+          >
             + Add Photo
           </Text>
         </TouchableOpacity>
@@ -119,7 +124,11 @@ function JobPhotosSection({
                 activeOpacity={0.9}
                 onPress={() => onPressThumb(index)}
               >
-                <Image source={{ uri }} style={styles.photoThumb} resizeMode="cover" />
+                <Image
+                  source={{ uri }}
+                  style={styles.photoThumb}
+                  resizeMode="cover"
+                />
               </TouchableOpacity>
 
               <TouchableOpacity
@@ -133,6 +142,68 @@ function JobPhotosSection({
         </View>
       )}
     </View>
+  );
+}
+
+// ---------- Pure layout helpers (no logic changes) ----------
+function SectionCard({
+  theme,
+  title,
+  children,
+  onLayout,
+}: {
+  theme: any;
+  title?: string;
+  children: React.ReactNode;
+  onLayout?: (y: number) => void;
+}) {
+  return (
+    <View
+      onLayout={(e) => onLayout?.(e.nativeEvent.layout.y)}
+      style={[
+        styles.card,
+        { backgroundColor: theme.cardBackground, borderColor: theme.cardBorder },
+      ]}
+    >
+      {!!title && (
+        <Text style={[styles.cardTitle, { color: theme.textSecondary }]}>
+          {title}
+        </Text>
+      )}
+      {children}
+    </View>
+  );
+}
+
+function ActionPill({
+  theme,
+  label,
+  onPress,
+  disabled,
+}: {
+  theme: any;
+  label: string;
+  onPress: () => void;
+  disabled?: boolean;
+}) {
+  return (
+    <TouchableOpacity
+      onPress={onPress}
+      disabled={!!disabled}
+      activeOpacity={0.9}
+      style={[
+        styles.actionPill,
+        {
+          backgroundColor: theme.cardBackground,
+          borderColor: theme.cardBorder,
+          opacity: disabled ? 0.45 : 1,
+        },
+      ]}
+    >
+      <Text style={[styles.actionPillText, { color: theme.textPrimary }]}>
+        {label}
+      </Text>
+    </TouchableOpacity>
   );
 }
 
@@ -166,7 +237,11 @@ export default function JobDetailScreen() {
           AsyncStorage.getItem(BRANDING_KEYS.COMPANY_LICENSE),
         ]);
 
-        if (savedTheme === "light" || savedTheme === "dark" || savedTheme === "midnight") {
+        if (
+          savedTheme === "light" ||
+          savedTheme === "dark" ||
+          savedTheme === "midnight"
+        ) {
           setThemeName(savedTheme as ThemeName);
         }
 
@@ -201,7 +276,7 @@ export default function JobDetailScreen() {
   const [photoUris, setPhotoUris] = useState<string[]>([]);
   const [photoBase64s, setPhotoBase64s] = useState<string[]>([]);
 
-  // 🔹 Track editing (used for keyboard dismiss behavior)
+  // 🔹 Track editing (used for keyboard + sticky behavior)
   const [isEditing, setIsEditing] = useState(false);
 
   // 🔹 Scroll + keyboard handling
@@ -215,17 +290,13 @@ export default function JobDetailScreen() {
   const scrollToSection = (key: string) => {
     const y = sectionPositions.current[key];
     if (scrollRef.current != null && y !== undefined) {
-      scrollRef.current.scrollTo({ y: Math.max(y - 80, 0), animated: true });
+      scrollRef.current.scrollTo({ y: Math.max(y - 90, 0), animated: true });
     }
   };
 
   const handleFocus = (sectionKey: string) => {
     setIsEditing(true);
     scrollToSection(sectionKey);
-  };
-
-  const handleBlur = () => {
-    setIsEditing(false);
   };
 
   const dismissKeyboard = () => {
@@ -237,6 +308,9 @@ export default function JobDetailScreen() {
   const [isImageOverlayVisible, setIsImageOverlayVisible] = useState(false);
   const [fullImageIndex, setFullImageIndex] = useState(0);
   const [isAddPhotoMenuVisible, setIsAddPhotoMenuVisible] = useState(false);
+
+  // ✅ Share menu (UI-only)
+  const [isShareMenuVisible, setIsShareMenuVisible] = useState(false);
 
   // Button animations
   const markDoneScale = useRef(new Animated.Value(1)).current;
@@ -301,9 +375,15 @@ export default function JobDetailScreen() {
           setEditClientNotes(found.clientNotes || "");
           setIsDone(found.isDone);
 
-          setLaborHours(found.laborHours !== undefined ? String(found.laborHours) : "");
-          setHourlyRate(found.hourlyRate !== undefined ? String(found.hourlyRate) : "");
-          setMaterialCost(found.materialCost !== undefined ? String(found.materialCost) : "");
+          setLaborHours(
+            found.laborHours !== undefined ? String(found.laborHours) : ""
+          );
+          setHourlyRate(
+            found.hourlyRate !== undefined ? String(found.hourlyRate) : ""
+          );
+          setMaterialCost(
+            found.materialCost !== undefined ? String(found.materialCost) : ""
+          );
 
           setPhotoUris(found.photoUris || []);
           setPhotoBase64s(found.photoBase64s || []);
@@ -325,7 +405,8 @@ export default function JobDetailScreen() {
   };
 
   const totalAmount =
-    parseNumber(laborHours) * parseNumber(hourlyRate) + parseNumber(materialCost);
+    parseNumber(laborHours) * parseNumber(hourlyRate) +
+    parseNumber(materialCost);
 
   const persistJobs = async (updatedJobs: Job[]) => {
     await AsyncStorage.setItem(STORAGE_KEYS.JOBS, JSON.stringify(updatedJobs));
@@ -334,7 +415,8 @@ export default function JobDetailScreen() {
   const safeHtml = (value: string) =>
     value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
-  const withLineBreaks = (value: string) => safeHtml(value).replace(/\n/g, "<br />");
+  const withLineBreaks = (value: string) =>
+    safeHtml(value).replace(/\n/g, "<br />");
 
   // ---------- Actions ----------
   const handleSaveJobEdits = async () => {
@@ -382,7 +464,9 @@ export default function JobDetailScreen() {
     try {
       const jobsJson = await AsyncStorage.getItem(STORAGE_KEYS.JOBS);
       const jobs: Job[] = jobsJson ? JSON.parse(jobsJson) : [];
-      const next = jobs.map((j) => (j.id === job.id ? { ...j, isDone: nextDone } : j));
+      const next = jobs.map((j) =>
+        j.id === job.id ? { ...j, isDone: nextDone } : j
+      );
 
       LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
       await persistJobs(next);
@@ -428,45 +512,60 @@ export default function JobDetailScreen() {
   const confirmMoveToTrash = () => {
     if (!job) return;
 
-    Alert.alert("Move to Trash", "Are you sure you want to move this job to Trash?", [
-      { text: "Cancel", style: "cancel" },
-      {
-        text: "Move",
-        style: "destructive",
-        onPress: async () => {
-          try {
-            const [jobsJson, trashJson] = await Promise.all([
-              AsyncStorage.getItem(STORAGE_KEYS.JOBS),
-              AsyncStorage.getItem(STORAGE_KEYS.TRASH),
-            ]);
+    Alert.alert(
+      "Move to Trash",
+      "Are you sure you want to move this job to Trash?",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Move",
+          style: "destructive",
+          onPress: async () => {
+            try {
+              const [jobsJson, trashJson] = await Promise.all([
+                AsyncStorage.getItem(STORAGE_KEYS.JOBS),
+                AsyncStorage.getItem(STORAGE_KEYS.TRASH),
+              ]);
 
-            const jobs: Job[] = jobsJson ? JSON.parse(jobsJson) : [];
-            const trash: Job[] = trashJson ? JSON.parse(trashJson) : [];
+              const jobs: Job[] = jobsJson ? JSON.parse(jobsJson) : [];
+              const trash: Job[] = trashJson ? JSON.parse(trashJson) : [];
 
-            const remaining = jobs.filter((j) => j.id !== job.id);
-            const newTrash = [...trash, job];
+              const remaining = jobs.filter((j) => j.id !== job.id);
+              const newTrash = [...trash, job];
 
-            LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-            await Promise.all([
-              AsyncStorage.setItem(STORAGE_KEYS.JOBS, JSON.stringify(remaining)),
-              AsyncStorage.setItem(STORAGE_KEYS.TRASH, JSON.stringify(newTrash)),
-            ]);
+              LayoutAnimation.configureNext(
+                LayoutAnimation.Presets.easeInEaseOut
+              );
+              await Promise.all([
+                AsyncStorage.setItem(
+                  STORAGE_KEYS.JOBS,
+                  JSON.stringify(remaining)
+                ),
+                AsyncStorage.setItem(
+                  STORAGE_KEYS.TRASH,
+                  JSON.stringify(newTrash)
+                ),
+              ]);
 
-            router.back();
-          } catch (e) {
-            console.warn("Failed to move to trash:", e);
-            Alert.alert("Error", "Could not move job to Trash.");
-          }
+              router.back();
+            } catch (e) {
+              console.warn("Failed to move to trash:", e);
+              Alert.alert("Error", "Could not move job to Trash.");
+            }
+          },
         },
-      },
-    ]);
+      ]
+    );
   };
 
   // ---------- Photos ----------
   const handleAddPhotoFromGallery = async () => {
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (status !== "granted") {
-      Alert.alert("Permission needed", "We need access to your photos to attach pictures to this job.");
+      Alert.alert(
+        "Permission needed",
+        "We need access to your photos to attach pictures to this job."
+      );
       return;
     }
 
@@ -498,7 +597,10 @@ export default function JobDetailScreen() {
   const handleAddPhotoFromCamera = async () => {
     const { status } = await ImagePicker.requestCameraPermissionsAsync();
     if (status !== "granted") {
-      Alert.alert("Permission needed", "We need access to your camera to take photos for this job.");
+      Alert.alert(
+        "Permission needed",
+        "We need access to your camera to take photos for this job."
+      );
       return;
     }
 
@@ -520,18 +622,24 @@ export default function JobDetailScreen() {
 
   const handleRemovePhoto = (uriToRemove: string) => {
     const index = photoUris.indexOf(uriToRemove);
-    Alert.alert("Remove photo", "Are you sure you want to remove this photo from the job?", [
-      { text: "Cancel", style: "cancel" },
-      {
-        text: "Remove",
-        style: "destructive",
-        onPress: () => {
-          LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-          setPhotoUris((prev) => prev.filter((u) => u !== uriToRemove));
-          setPhotoBase64s((prev) => (index >= 0 ? prev.filter((_, i) => i !== index) : prev));
+    Alert.alert(
+      "Remove photo",
+      "Are you sure you want to remove this photo from the job?",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Remove",
+          style: "destructive",
+          onPress: () => {
+            LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+            setPhotoUris((prev) => prev.filter((u) => u !== uriToRemove));
+            setPhotoBase64s((prev) =>
+              index >= 0 ? prev.filter((_, i) => i !== index) : prev
+            );
+          },
         },
-      },
-    ]);
+      ]
+    );
   };
 
   const handleOpenFullImage = (index: number) => {
@@ -559,16 +667,33 @@ export default function JobDetailScreen() {
       const hasBranding = brandName || brandPhone || brandEmail || brandLicense;
 
       const companyHeaderLines: string[] = [];
-      if (brandName) companyHeaderLines.push(`<div class="company-name">${safeHtml(brandName)}</div>`);
-      if (brandPhone) companyHeaderLines.push(`<div class="company-line">${safeHtml(brandPhone)}</div>`);
-      if (brandEmail) companyHeaderLines.push(`<div class="company-line">${safeHtml(brandEmail)}</div>`);
-      if (brandLicense) companyHeaderLines.push(`<div class="company-line">${safeHtml(brandLicense)}</div>`);
+      if (brandName) {
+        companyHeaderLines.push(
+          `<div class="company-name">${safeHtml(brandName)}</div>`
+        );
+      }
+      if (brandPhone) {
+        companyHeaderLines.push(
+          `<div class="company-line">${safeHtml(brandPhone)}</div>`
+        );
+      }
+      if (brandEmail) {
+        companyHeaderLines.push(
+          `<div class="company-line">${safeHtml(brandEmail)}</div>`
+        );
+      }
+      if (brandLicense) {
+        companyHeaderLines.push(
+          `<div class="company-line">${safeHtml(brandLicense)}</div>`
+        );
+      }
 
       const companyHeaderHtml = hasBranding
         ? `<div class="company-block">${companyHeaderLines.join("")}</div>`
         : "";
 
-      const bases: string[] = photoBase64s.length > 0 ? photoBase64s : job.photoBase64s || [];
+      const bases: string[] =
+        photoBase64s.length > 0 ? photoBase64s : job.photoBase64s || [];
 
       const photoBlocks: string[] = [];
       for (let i = 0; i < bases.length; i++) {
@@ -669,12 +794,20 @@ export default function JobDetailScreen() {
                 <h2>Client Info</h2>
                 <div class="label">Client Name</div>
                 <div class="value">
-                  ${editClientName.trim() ? safeHtml(editClientName.trim()) : "Not set"}
+                  ${
+                    editClientName.trim()
+                      ? safeHtml(editClientName.trim())
+                      : "Not set"
+                  }
                 </div>
 
                 <div class="label">Client Phone</div>
                 <div class="value">
-                  ${editClientPhone.trim() ? safeHtml(editClientPhone.trim()) : "Not set"}
+                  ${
+                    editClientPhone.trim()
+                      ? safeHtml(editClientPhone.trim())
+                      : "Not set"
+                  }
                 </div>
 
                 <div class="label">Client Notes</div>
@@ -712,7 +845,9 @@ export default function JobDetailScreen() {
                   <tfoot>
                     <tr>
                       <td colspan="2">Total</td>
-                      <td class="amount amount-total">$${totalAmount.toFixed(2)}</td>
+                      <td class="amount amount-total">$${totalAmount.toFixed(
+                        2
+                      )}</td>
                     </tr>
                   </tfoot>
                 </table>
@@ -757,10 +892,22 @@ export default function JobDetailScreen() {
       const hasBranding = brandName || brandPhone || brandEmail || brandLicense;
 
       const companyHeaderLines: string[] = [];
-      if (brandName) companyHeaderLines.push(`<div class="company-name">${safeHtml(brandName)}</div>`);
-      if (brandPhone) companyHeaderLines.push(`<div class="company-line">${safeHtml(brandPhone)}</div>`);
-      if (brandEmail) companyHeaderLines.push(`<div class="company-line">${safeHtml(brandEmail)}</div>`);
-      if (brandLicense) companyHeaderLines.push(`<div class="company-line">${safeHtml(brandLicense)}</div>`);
+      if (brandName)
+        companyHeaderLines.push(
+          `<div class="company-name">${safeHtml(brandName)}</div>`
+        );
+      if (brandPhone)
+        companyHeaderLines.push(
+          `<div class="company-line">${safeHtml(brandPhone)}</div>`
+        );
+      if (brandEmail)
+        companyHeaderLines.push(
+          `<div class="company-line">${safeHtml(brandEmail)}</div>`
+        );
+      if (brandLicense)
+        companyHeaderLines.push(
+          `<div class="company-line">${safeHtml(brandLicense)}</div>`
+        );
 
       const companyHeaderHtml = hasBranding
         ? `<div class="company-block">${companyHeaderLines.join("")}</div>`
@@ -781,7 +928,9 @@ export default function JobDetailScreen() {
               .title-block .subtitle { margin-top: 4px; font-size: 11px; color: #6b7280; }
               .status-pill { border-radius: 999px; padding: 4px 10px; font-size: 11px; border: 1px solid ${
                 isDone ? "#16a34a" : "#2563EB"
-              }; color: ${isDone ? "#15803d" : "#1D4ED8"}; background: ${isDone ? "#dcfce7" : "#dbeafe"}; }
+              }; color: ${isDone ? "#15803d" : "#1D4ED8"}; background: ${
+        isDone ? "#dcfce7" : "#dbeafe"
+      }; }
               .right-header { text-align: right; }
               .company-block { font-size: 11px; color: #4b5563; margin-bottom: 6px; }
               .company-name { font-weight: 600; font-size: 13px; color: #111827; }
@@ -818,16 +967,26 @@ export default function JobDetailScreen() {
                 <div class="value">${safeHtml(editAddress || job.address)}</div>
 
                 <div class="label">Description / Scope</div>
-                <div class="value">${withLineBreaks(editDescription || job.description)}</div>
+                <div class="value">${withLineBreaks(
+                  editDescription || job.description
+                )}</div>
               </div>
 
               <div class="section">
                 <h2>Client Info</h2>
                 <div class="label">Client Name</div>
-                <div class="value">${editClientName.trim() ? safeHtml(editClientName.trim()) : "Not set"}</div>
+                <div class="value">${
+                  editClientName.trim()
+                    ? safeHtml(editClientName.trim())
+                    : "Not set"
+                }</div>
 
                 <div class="label">Client Phone</div>
-                <div class="value">${editClientPhone.trim() ? safeHtml(editClientPhone.trim()) : "Not set"}</div>
+                <div class="value">${
+                  editClientPhone.trim()
+                    ? safeHtml(editClientPhone.trim())
+                    : "Not set"
+                }</div>
               </div>
 
               <div class="section">
@@ -855,7 +1014,9 @@ export default function JobDetailScreen() {
                   <tfoot>
                     <tr>
                       <td colspan="2">Total</td>
-                      <td class="amount amount-total">$${totalAmount.toFixed(2)}</td>
+                      <td class="amount amount-total">$${totalAmount.toFixed(
+                        2
+                      )}</td>
                     </tr>
                   </tfoot>
                 </table>
@@ -883,25 +1044,51 @@ export default function JobDetailScreen() {
   // ---------- Render states ----------
   if (isLoading) {
     return (
-      <View style={[styles.loadingScreen, { backgroundColor: theme.screenBackground }]}>
-        <Text style={[styles.loadingText, { color: theme.textPrimary }]}>Loading job…</Text>
+      <View
+        style={[
+          styles.loadingScreen,
+          { backgroundColor: theme.screenBackground },
+        ]}
+      >
+        <Text style={[styles.loadingText, { color: theme.textPrimary }]}>
+          Loading job…
+        </Text>
       </View>
     );
   }
 
   if (!job) {
     return (
-      <View style={[styles.loadingScreen, { backgroundColor: theme.screenBackground }]}>
-        <Text style={[styles.loadingText, { color: theme.textPrimary }]}>Job not found.</Text>
+      <View
+        style={[
+          styles.loadingScreen,
+          { backgroundColor: theme.screenBackground },
+        ]}
+      >
+        <Text style={[styles.loadingText, { color: theme.textPrimary }]}>
+          Job not found.
+        </Text>
         <TouchableOpacity
-          style={[styles.simpleButton, { backgroundColor: theme.primaryButtonBackground }]}
+          style={[
+            styles.simpleButton,
+            { backgroundColor: theme.primaryButtonBackground },
+          ]}
           onPress={() => router.back()}
         >
-          <Text style={[styles.simpleButtonText, { color: theme.primaryButtonText }]}>Back</Text>
+          <Text
+            style={[
+              styles.simpleButtonText,
+              { color: theme.primaryButtonText },
+            ]}
+          >
+            Back
+          </Text>
         </TouchableOpacity>
       </View>
     );
   }
+
+  const heroPhotoUri = photoUris.length ? photoUris[0] : null;
 
   return (
     <KeyboardAvoidingView
@@ -918,325 +1105,489 @@ export default function JobDetailScreen() {
           },
         ]}
       >
-        {/* Header */}
+        {/* TOP NAV */}
         <View style={styles.headerRow}>
-          <TouchableOpacity onPress={() => router.back()} style={styles.backButton} activeOpacity={0.8}>
-            <Text style={[styles.backText, { color: theme.headerMuted }]}>← Back</Text>
+          <TouchableOpacity
+            onPress={() => router.back()}
+            style={styles.backButton}
+            activeOpacity={0.8}
+          >
+            <Text style={[styles.backText, { color: theme.headerMuted }]}>
+              ← Back
+            </Text>
           </TouchableOpacity>
 
-          <Text style={[styles.headerTitle, { color: theme.headerText }]}>Job Detail</Text>
+          <Text style={[styles.headerTitle, { color: theme.headerText }]}>
+            Job Detail
+          </Text>
 
+          {/* ✅ Header Share (single entry point) */}
           <TouchableOpacity
-            style={[styles.chatHeaderButton, { backgroundColor: theme.primaryButtonBackground }]}
+            style={[
+              styles.chatHeaderButton,
+              { backgroundColor: theme.primaryButtonBackground },
+            ]}
             activeOpacity={0.9}
-            onPress={() =>
-              router.push({
-                pathname: "/job-chat",
-                params: { id: job.id, title: editTitle || job.title },
-              })
-            }
+            onPress={() => setIsShareMenuVisible(true)}
           >
-            <Text style={[styles.chatHeaderButtonText, { color: theme.primaryButtonText }]}>
-              Team Chat
+            <Text
+              style={[
+                styles.chatHeaderButtonText,
+                { color: theme.primaryButtonText },
+              ]}
+            >
+              Share
             </Text>
           </TouchableOpacity>
         </View>
 
         <ScrollView
           ref={scrollRef}
-          contentContainerStyle={styles.detailsScroll}
+          contentContainerStyle={[
+            styles.detailsScroll,
+            { paddingBottom: isEditing ? 18 : STICKY_BAR_HEIGHT + 26 },
+          ]}
           showsVerticalScrollIndicator={false}
-          // ✅ KEY FIXES:
-          keyboardShouldPersistTaps="handled"
+          keyboardShouldPersistTaps="always"
           keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
           onScrollBeginDrag={dismissKeyboard}
-          onTouchStart={() => {
-            // tap anywhere (including “blank red areas”) dismisses keyboard,
-            // without blocking scroll gestures like the old TouchableWithoutFeedback did
-            if (isEditing) dismissKeyboard();
-          }}
         >
-          <View>
-            {/* Job ID */}
-            <View onLayout={(e) => registerSection("jobId", e.nativeEvent.layout.y)}>
-              <Text style={[styles.sectionTitle, { color: theme.textSecondary }]}>Job ID</Text>
-              <Text style={[styles.infoText, { color: theme.textPrimary }]}>{job.id}</Text>
-            </View>
+          {/* ✅ Tap anywhere on empty space to dismiss keyboard */}
+          <TouchableWithoutFeedback onPress={dismissKeyboard} accessible={false}>
+            <View>
+              {/* HERO HEADER (layout-only) */}
+              <View style={styles.heroWrap}>
+                <View
+                  style={[
+                    styles.heroBg,
+                    {
+                      borderColor: theme.cardBorder,
+                      backgroundColor: theme.cardBackground,
+                    },
+                  ]}
+                >
+                  {!!heroPhotoUri ? (
+                    <>
+                      <Image
+                        source={{ uri: heroPhotoUri }}
+                        style={StyleSheet.absoluteFillObject}
+                        resizeMode="cover"
+                        blurRadius={18}
+                      />
+                      <View style={styles.heroOverlay} />
+                    </>
+                  ) : (
+                    <View
+                      style={[
+                        StyleSheet.absoluteFillObject,
+                        {
+                          backgroundColor: theme.primaryButtonBackground,
+                          opacity: 0.18,
+                        },
+                      ]}
+                    />
+                  )}
 
-            {/* Title */}
-            <View onLayout={(e) => registerSection("title", e.nativeEvent.layout.y)}>
-              <Text style={[styles.modalLabel, { color: theme.textSecondary }]}>Title</Text>
-              <TextInput
-                style={[
-                  styles.modalInput,
-                  {
-                    backgroundColor: theme.inputBackground,
-                    color: theme.inputText,
-                    borderColor: theme.inputBorder,
-                    borderWidth: 1,
-                  },
-                ]}
-                value={editTitle}
-                onChangeText={setEditTitle}
-                placeholderTextColor={theme.textMuted}
-                onFocus={() => handleFocus("title")}
-                onBlur={handleBlur}
-              />
-            </View>
+                  <View style={styles.heroContent}>
+                    <Text
+                      numberOfLines={1}
+                      style={[styles.heroTitle, { color: theme.headerText }]}
+                    >
+                      {editTitle || job.title}
+                    </Text>
 
-            {/* Address */}
-            <View onLayout={(e) => registerSection("address", e.nativeEvent.layout.y)}>
-              <Text style={[styles.modalLabel, { color: theme.textSecondary }]}>Address</Text>
-              <TextInput
-                style={[
-                  styles.modalInput,
-                  {
-                    backgroundColor: theme.inputBackground,
-                    color: theme.inputText,
-                    borderColor: theme.inputBorder,
-                    borderWidth: 1,
-                  },
-                ]}
-                value={editAddress}
-                onChangeText={setEditAddress}
-                placeholderTextColor={theme.textMuted}
-                onFocus={() => handleFocus("address")}
-                onBlur={handleBlur}
-              />
-            </View>
+                    <Text
+                      numberOfLines={2}
+                      style={[
+                        styles.heroSubtitle,
+                        { color: theme.textSecondary },
+                      ]}
+                    >
+                      {editAddress || job.address}
+                    </Text>
 
-            {/* Description */}
-            <View onLayout={(e) => registerSection("description", e.nativeEvent.layout.y)}>
-              <Text style={[styles.modalLabel, { color: theme.textSecondary }]}>Description / Scope</Text>
-              <TextInput
-                style={[
-                  styles.modalInputMultiline,
-                  {
-                    backgroundColor: theme.inputBackground,
-                    color: theme.inputText,
-                    borderColor: theme.inputBorder,
-                    borderWidth: 1,
-                  },
-                ]}
-                value={editDescription}
-                onChangeText={setEditDescription}
-                multiline
-                placeholderTextColor={theme.textMuted}
-                onFocus={() => handleFocus("description")}
-                onBlur={handleBlur}
-              />
-            </View>
+                    <View
+                      style={[
+                        styles.statusPill,
+                        {
+                          borderColor: isDone ? "#16a34a" : theme.cardBorder,
+                          backgroundColor: isDone
+                            ? "rgba(22,163,74,0.10)"
+                            : "rgba(37,99,235,0.10)",
+                        },
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.statusPillText,
+                          { color: isDone ? "#22c55e" : theme.textPrimary },
+                        ]}
+                      >
+                        {isDone ? "Done" : "Open"}
+                      </Text>
+                    </View>
+                  </View>
+                </View>
 
-            {/* Status */}
-            <View onLayout={(e) => registerSection("status", e.nativeEvent.layout.y)}>
-              <Text style={[styles.sectionTitle, { color: theme.textSecondary }]}>Status</Text>
-              <Text style={[styles.infoText, { color: theme.textPrimary }]}>{isDone ? "Done" : "Open"}</Text>
-
-              <View style={styles.quickActionsRow}>
-                {!!editClientPhone.trim() && (
-                  <TouchableOpacity
-                    style={[
-                      styles.quickActionButton,
-                      { backgroundColor: theme.cardBackground, borderColor: theme.cardBorder },
-                    ]}
+                {/* QUICK ACTIONS (Call / Maps / Team Chat) */}
+                <View style={styles.heroActionsRow}>
+                  <ActionPill
+                    theme={theme}
+                    label="📞 Call"
                     onPress={handleCallClient}
-                    activeOpacity={0.9}
-                  >
-                    <Text style={[styles.quickActionText, { color: theme.textPrimary }]}>📞 Call Client</Text>
-                  </TouchableOpacity>
-                )}
-
-                {!!editAddress.trim() && (
-                  <TouchableOpacity
-                    style={[
-                      styles.quickActionButton,
-                      { backgroundColor: theme.cardBackground, borderColor: theme.cardBorder },
-                    ]}
+                    disabled={!editClientPhone.trim()}
+                  />
+                  <ActionPill
+                    theme={theme}
+                    label="📍 Maps"
                     onPress={handleOpenInMaps}
-                    activeOpacity={0.9}
-                  >
-                    <Text style={[styles.quickActionText, { color: theme.textPrimary }]}>📍 Open in Maps</Text>
-                  </TouchableOpacity>
-                )}
-              </View>
-            </View>
-
-            {/* Client Info */}
-            <View onLayout={(e) => registerSection("client", e.nativeEvent.layout.y)}>
-              <Text style={[styles.sectionTitle, { color: theme.textSecondary }]}>Client Info</Text>
-
-              <Text style={[styles.modalLabel, { color: theme.textSecondary }]}>Client Name</Text>
-              <TextInput
-                style={[
-                  styles.modalInput,
-                  {
-                    backgroundColor: theme.inputBackground,
-                    color: theme.inputText,
-                    borderColor: theme.inputBorder,
-                    borderWidth: 1,
-                  },
-                ]}
-                value={editClientName}
-                onChangeText={setEditClientName}
-                placeholder="Client name..."
-                placeholderTextColor={theme.textMuted}
-                onFocus={() => handleFocus("client")}
-                onBlur={handleBlur}
-              />
-
-              <Text style={[styles.modalLabel, { color: theme.textSecondary }]}>Client Phone</Text>
-              <TextInput
-                style={[
-                  styles.modalInput,
-                  {
-                    backgroundColor: theme.inputBackground,
-                    color: theme.inputText,
-                    borderColor: theme.inputBorder,
-                    borderWidth: 1,
-                  },
-                ]}
-                value={editClientPhone}
-                onChangeText={setEditClientPhone}
-                placeholder="Phone number..."
-                placeholderTextColor={theme.textMuted}
-                keyboardType="phone-pad"
-                onFocus={() => handleFocus("client")}
-                onBlur={handleBlur}
-              />
-
-              <Text style={[styles.modalLabel, { color: theme.textSecondary }]}>Client Notes</Text>
-              <TextInput
-                style={[
-                  styles.modalInputMultiline,
-                  {
-                    backgroundColor: theme.inputBackground,
-                    color: theme.inputText,
-                    borderColor: theme.inputBorder,
-                    borderWidth: 1,
-                  },
-                ]}
-                value={editClientNotes}
-                onChangeText={setEditClientNotes}
-                placeholder="Gate codes, timing, special info..."
-                placeholderTextColor={theme.textMuted}
-                multiline
-                onFocus={() => handleFocus("client")}
-                onBlur={handleBlur}
-              />
-            </View>
-
-            {/* Pricing */}
-            <View onLayout={(e) => registerSection("pricing", e.nativeEvent.layout.y)}>
-              <Text style={[styles.sectionTitle, { color: theme.textSecondary }]}>Pricing</Text>
-
-              <View
-                style={[
-                  styles.pricingCard,
-                  { backgroundColor: theme.cardSecondaryBackground, borderColor: theme.cardBorder },
-                ]}
-              >
-                <View style={styles.pricingTotalHeader}>
-                  <Text style={[styles.pricingTotalHeaderLabel, { color: theme.textMuted }]}>Total</Text>
-                  <Text style={styles.pricingTotalHeaderValue}>
-                    $
-                    {totalAmount.toLocaleString("en-US", { minimumFractionDigits: 2 })}
-                  </Text>
-                </View>
-
-                <View style={styles.pricingInputsRow}>
-                  <View style={styles.pricingColumn}>
-                    <Text style={[styles.modalLabel, { color: theme.textSecondary }]}>Labor hours</Text>
-                    <TextInput
-                      style={[
-                        styles.modalInput,
-                        styles.pricingInput,
-                        {
-                          backgroundColor: theme.inputBackground,
-                          color: theme.inputText,
-                          borderColor: theme.inputBorder,
-                          borderWidth: 1,
-                        },
-                      ]}
-                      value={laborHours}
-                      onChangeText={setLaborHours}
-                      keyboardType="numeric"
-                      placeholder="e.g. 4"
-                      placeholderTextColor={theme.textMuted}
-                      onFocus={() => handleFocus("pricing")}
-                      onBlur={handleBlur}
-                    />
-                  </View>
-
-                  <View style={styles.pricingColumn}>
-                    <Text style={[styles.modalLabel, { color: theme.textSecondary }]}>Hourly rate</Text>
-                    <TextInput
-                      style={[
-                        styles.modalInput,
-                        styles.pricingInput,
-                        {
-                          backgroundColor: theme.inputBackground,
-                          color: theme.inputText,
-                          borderColor: theme.inputBorder,
-                          borderWidth: 1,
-                        },
-                      ]}
-                      value={hourlyRate}
-                      onChangeText={setHourlyRate}
-                      keyboardType="numeric"
-                      placeholder="e.g. 125"
-                      placeholderTextColor={theme.textMuted}
-                      onFocus={() => handleFocus("pricing")}
-                      onBlur={handleBlur}
-                    />
-                  </View>
-                </View>
-
-                <View style={styles.pricingSingleRow}>
-                  <Text style={[styles.modalLabel, { color: theme.textSecondary }]}>Material cost</Text>
-                  <TextInput
-                    style={[
-                      styles.modalInput,
-                      styles.pricingInput,
-                      {
-                        backgroundColor: theme.inputBackground,
-                        color: theme.inputText,
-                        borderColor: theme.inputBorder,
-                        borderWidth: 1,
-                      },
-                    ]}
-                    value={materialCost}
-                    onChangeText={setMaterialCost}
-                    keyboardType="numeric"
-                    placeholder="e.g. 300"
-                    placeholderTextColor={theme.textMuted}
-                    onFocus={() => handleFocus("pricing")}
-                    onBlur={handleBlur}
+                    disabled={!editAddress.trim()}
+                  />
+                  <ActionPill
+                    theme={theme}
+                    label="💬 Team Chat"
+                    onPress={() =>
+                      router.push({
+                        pathname: "/job-chat",
+                        params: { id: job.id, title: editTitle || job.title },
+                      })
+                    }
                   />
                 </View>
               </View>
-            </View>
 
-            {/* Photos */}
-            <View onLayout={(e) => registerSection("photos", e.nativeEvent.layout.y)}>
-              <JobPhotosSection
+              {/* JOB INFO CARD */}
+              <SectionCard
                 theme={theme}
-                photoUris={photoUris}
-                onPressAddPhoto={() => setIsAddPhotoMenuVisible(true)}
-                onPressThumb={handleOpenFullImage}
-                onRemovePhoto={handleRemovePhoto}
-              />
-            </View>
+                title="Job Info"
+                onLayout={(y) => registerSection("jobInfo", y)}
+              >
+                <View style={styles.row}>
+                  <Text style={[styles.metaLabel, { color: theme.textMuted }]}>
+                    Job ID
+                  </Text>
+                  <Text style={[styles.metaValue, { color: theme.textPrimary }]}>
+                    {job.id}
+                  </Text>
+                </View>
 
-            <Text style={[styles.modalMeta, { color: theme.textMuted }]}>
-              Created: {new Date(job.createdAt).toLocaleString()}
-            </Text>
+                <Text style={[styles.modalLabel, { color: theme.textSecondary }]}>
+                  Title
+                </Text>
+                <TextInput
+                  style={[
+                    styles.modalInput,
+                    {
+                      backgroundColor: theme.inputBackground,
+                      color: theme.inputText,
+                      borderColor: theme.inputBorder,
+                      borderWidth: 1,
+                    },
+                  ]}
+                  value={editTitle}
+                  onChangeText={setEditTitle}
+                  placeholderTextColor={theme.textMuted}
+                  onFocus={() => handleFocus("jobInfo")}
+                  onBlur={() => setIsEditing(false)}
+                />
 
-            {/* Buttons */}
-            <View style={styles.modalButtonRow}>
-              <Animated.View style={{ flex: 1, transform: [{ scale: markDoneScale }] }}>
+                <Text style={[styles.modalLabel, { color: theme.textSecondary }]}>
+                  Address
+                </Text>
+                <TextInput
+                  style={[
+                    styles.modalInput,
+                    {
+                      backgroundColor: theme.inputBackground,
+                      color: theme.inputText,
+                      borderColor: theme.inputBorder,
+                      borderWidth: 1,
+                    },
+                  ]}
+                  value={editAddress}
+                  onChangeText={setEditAddress}
+                  placeholderTextColor={theme.textMuted}
+                  onFocus={() => handleFocus("jobInfo")}
+                  onBlur={() => setIsEditing(false)}
+                />
+
+                <Text style={[styles.modalLabel, { color: theme.textSecondary }]}>
+                  Description / Scope
+                </Text>
+                <TextInput
+                  style={[
+                    styles.modalInputMultiline,
+                    {
+                      backgroundColor: theme.inputBackground,
+                      color: theme.inputText,
+                      borderColor: theme.inputBorder,
+                      borderWidth: 1,
+                    },
+                  ]}
+                  value={editDescription}
+                  onChangeText={setEditDescription}
+                  multiline
+                  placeholderTextColor={theme.textMuted}
+                  onFocus={() => handleFocus("jobInfo")}
+                  onBlur={() => setIsEditing(false)}
+                />
+              </SectionCard>
+
+              {/* CLIENT CARD */}
+              <SectionCard
+                theme={theme}
+                title="Client"
+                onLayout={(y) => registerSection("client", y)}
+              >
+                <Text style={[styles.modalLabel, { color: theme.textSecondary }]}>
+                  Client Name
+                </Text>
+                <TextInput
+                  style={[
+                    styles.modalInput,
+                    {
+                      backgroundColor: theme.inputBackground,
+                      color: theme.inputText,
+                      borderColor: theme.inputBorder,
+                      borderWidth: 1,
+                    },
+                  ]}
+                  value={editClientName}
+                  onChangeText={setEditClientName}
+                  placeholder="Client name..."
+                  placeholderTextColor={theme.textMuted}
+                  onFocus={() => handleFocus("client")}
+                  onBlur={() => setIsEditing(false)}
+                />
+
+                <Text style={[styles.modalLabel, { color: theme.textSecondary }]}>
+                  Client Phone
+                </Text>
+                <TextInput
+                  style={[
+                    styles.modalInput,
+                    {
+                      backgroundColor: theme.inputBackground,
+                      color: theme.inputText,
+                      borderColor: theme.inputBorder,
+                      borderWidth: 1,
+                    },
+                  ]}
+                  value={editClientPhone}
+                  onChangeText={setEditClientPhone}
+                  placeholder="Phone number..."
+                  placeholderTextColor={theme.textMuted}
+                  keyboardType="phone-pad"
+                  onFocus={() => handleFocus("client")}
+                  onBlur={() => setIsEditing(false)}
+                />
+
+                <Text style={[styles.modalLabel, { color: theme.textSecondary }]}>
+                  Client Notes
+                </Text>
+                <TextInput
+                  style={[
+                    styles.modalInputMultiline,
+                    {
+                      backgroundColor: theme.inputBackground,
+                      color: theme.inputText,
+                      borderColor: theme.inputBorder,
+                      borderWidth: 1,
+                    },
+                  ]}
+                  value={editClientNotes}
+                  onChangeText={setEditClientNotes}
+                  placeholder="Gate codes, timing, special info..."
+                  placeholderTextColor={theme.textMuted}
+                  multiline
+                  onFocus={() => handleFocus("client")}
+                  onBlur={() => setIsEditing(false)}
+                />
+              </SectionCard>
+
+              {/* PRICING CARD */}
+              <SectionCard
+                theme={theme}
+                title="Pricing"
+                onLayout={(y) => registerSection("pricing", y)}
+              >
+                <View
+                  style={[
+                    styles.pricingCard,
+                    {
+                      backgroundColor: theme.cardSecondaryBackground,
+                      borderColor: theme.cardBorder,
+                    },
+                  ]}
+                >
+                  <View style={styles.pricingTotalHeader}>
+                    <Text
+                      style={[
+                        styles.pricingTotalHeaderLabel,
+                        { color: theme.textMuted },
+                      ]}
+                    >
+                      Total
+                    </Text>
+                    <Text style={styles.pricingTotalHeaderValue}>
+                      $
+                      {totalAmount.toLocaleString("en-US", {
+                        minimumFractionDigits: 2,
+                      })}
+                    </Text>
+                  </View>
+
+                  <View style={styles.pricingInputsRow}>
+                    <View style={styles.pricingColumn}>
+                      <Text
+                        style={[
+                          styles.modalLabel,
+                          { color: theme.textSecondary },
+                        ]}
+                      >
+                        Labor hours
+                      </Text>
+                      <TextInput
+                        style={[
+                          styles.modalInput,
+                          styles.pricingInput,
+                          {
+                            backgroundColor: theme.inputBackground,
+                            color: theme.inputText,
+                            borderColor: theme.inputBorder,
+                            borderWidth: 1,
+                          },
+                        ]}
+                        value={laborHours}
+                        onChangeText={setLaborHours}
+                        keyboardType="numeric"
+                        placeholder="e.g. 4"
+                        placeholderTextColor={theme.textMuted}
+                        onFocus={() => handleFocus("pricing")}
+                        onBlur={() => setIsEditing(false)}
+                      />
+                    </View>
+
+                    <View style={styles.pricingColumn}>
+                      <Text
+                        style={[
+                          styles.modalLabel,
+                          { color: theme.textSecondary },
+                        ]}
+                      >
+                        Hourly rate
+                      </Text>
+                      <TextInput
+                        style={[
+                          styles.modalInput,
+                          styles.pricingInput,
+                          {
+                            backgroundColor: theme.inputBackground,
+                            color: theme.inputText,
+                            borderColor: theme.inputBorder,
+                            borderWidth: 1,
+                          },
+                        ]}
+                        value={hourlyRate}
+                        onChangeText={setHourlyRate}
+                        keyboardType="numeric"
+                        placeholder="e.g. 125"
+                        placeholderTextColor={theme.textMuted}
+                        onFocus={() => handleFocus("pricing")}
+                        onBlur={() => setIsEditing(false)}
+                      />
+                    </View>
+                  </View>
+
+                  <View style={styles.pricingSingleRow}>
+                    <Text
+                      style={[
+                        styles.modalLabel,
+                        { color: theme.textSecondary },
+                      ]}
+                    >
+                      Material cost
+                    </Text>
+                    <TextInput
+                      style={[
+                        styles.modalInput,
+                        styles.pricingInput,
+                        {
+                          backgroundColor: theme.inputBackground,
+                          color: theme.inputText,
+                          borderColor: theme.inputBorder,
+                          borderWidth: 1,
+                        },
+                      ]}
+                      value={materialCost}
+                      onChangeText={setMaterialCost}
+                      keyboardType="numeric"
+                      placeholder="e.g. 300"
+                      placeholderTextColor={theme.textMuted}
+                      onFocus={() => handleFocus("pricing")}
+                      onBlur={() => setIsEditing(false)}
+                    />
+                  </View>
+                </View>
+              </SectionCard>
+
+              {/* PHOTOS CARD */}
+              <SectionCard
+                theme={theme}
+                title="Attachments"
+                onLayout={(y) => registerSection("photos", y)}
+              >
+                <JobPhotosSection
+                  theme={theme}
+                  photoUris={photoUris}
+                  onPressAddPhoto={() => setIsAddPhotoMenuVisible(true)}
+                  onPressThumb={handleOpenFullImage}
+                  onRemovePhoto={handleRemovePhoto}
+                />
+              </SectionCard>
+
+              {/* TRASH CARD (reports moved into header share sheet) */}
+              <SectionCard theme={theme} title="Trash">
                 <TouchableOpacity
                   style={[
-                    styles.modalButton,
+                    styles.modalDeleteButton,
+                    { borderColor: theme.dangerBorder },
+                  ]}
+                  onPress={confirmMoveToTrash}
+                >
+                  <Text
+                    style={[styles.modalDeleteText, { color: theme.dangerText }]}
+                  >
+                    Move to Trash
+                  </Text>
+                </TouchableOpacity>
+
+                <Text style={[styles.modalMeta, { color: theme.textMuted }]}>
+                  Created: {new Date(job.createdAt).toLocaleString()}
+                </Text>
+              </SectionCard>
+            </View>
+          </TouchableWithoutFeedback>
+        </ScrollView>
+
+        {/* ✅ STICKY ACTION BAR — HIDE WHILE EDITING */}
+        {!isEditing && (
+          <View
+            style={[
+              styles.stickyBar,
+              {
+                backgroundColor: theme.screenBackground,
+                borderTopColor: theme.cardBorder,
+              },
+            ]}
+          >
+            <View style={styles.stickyButtonsRow}>
+              <Animated.View
+                style={{ flex: 1, transform: [{ scale: markDoneScale }] }}
+              >
+                <TouchableOpacity
+                  style={[
+                    styles.stickyButton,
                     {
                       backgroundColor: isDone
                         ? theme.secondaryButtonBackground
@@ -1250,65 +1601,134 @@ export default function JobDetailScreen() {
                 >
                   <Text
                     style={[
-                      styles.modalButtonText,
+                      styles.stickyButtonText,
                       {
-                        color: isDone ? theme.secondaryButtonText : theme.primaryButtonText,
+                        color: isDone
+                          ? theme.secondaryButtonText
+                          : theme.primaryButtonText,
                       },
                     ]}
                   >
-                    {isDone ? "Mark as Not Done" : "Mark as Done"}
+                    {isDone ? "Mark Not Done" : "Mark Done"}
                   </Text>
                 </TouchableOpacity>
               </Animated.View>
 
-              <Animated.View style={{ flex: 1, transform: [{ scale: saveChangesScale }] }}>
+              <Animated.View
+                style={{ flex: 1, transform: [{ scale: saveChangesScale }] }}
+              >
                 <TouchableOpacity
-                  style={[styles.modalButton, { backgroundColor: theme.primaryButtonBackground }]}
+                  style={[
+                    styles.stickyButton,
+                    { backgroundColor: theme.primaryButtonBackground },
+                  ]}
                   onPress={handleSaveJobEdits}
                   activeOpacity={0.9}
                   onPressIn={saveChangesAnim.onPressIn}
                   onPressOut={saveChangesAnim.onPressOut}
                 >
-                  <Text style={[styles.modalButtonText, { color: theme.primaryButtonText }]}>
+                  <Text
+                    style={[
+                      styles.stickyButtonText,
+                      { color: theme.primaryButtonText },
+                    ]}
+                  >
                     Save Changes
                   </Text>
                 </TouchableOpacity>
               </Animated.View>
             </View>
-
-            {/* Share buttons + Trash */}
-            <TouchableOpacity
-              style={[styles.modalDeleteButton, { borderColor: theme.cardBorder }]}
-              onPress={handleShareFullReport}
-            >
-              <Text style={[styles.modalDeleteText, { color: theme.textPrimary }]}>
-                Share full report (PDF)
-              </Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={[styles.modalDeleteButton, { borderColor: theme.cardBorder }]}
-              onPress={handleShareClientReport}
-            >
-              <Text style={[styles.modalDeleteText, { color: theme.textPrimary }]}>
-                Share client report (PDF)
-              </Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={[styles.modalDeleteButton, { borderColor: theme.dangerBorder }]}
-              onPress={confirmMoveToTrash}
-            >
-              <Text style={[styles.modalDeleteText, { color: theme.dangerText }]}>
-                Move to Trash
-              </Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity style={styles.modalCloseButton} onPress={() => router.back()}>
-              <Text style={[styles.modalCloseText, { color: theme.textMuted }]}>Close</Text>
-            </TouchableOpacity>
           </View>
-        </ScrollView>
+        )}
+
+        {/* ✅ Share bottom sheet (Full vs Client) */}
+        {isShareMenuVisible && (
+          <View style={styles.addPhotoMenuOverlay}>
+            <TouchableOpacity
+              activeOpacity={1}
+              onPress={() => setIsShareMenuVisible(false)}
+              style={styles.addPhotoMenuBackdrop}
+            />
+            <View
+              style={[
+                styles.addPhotoMenuSheet,
+                { backgroundColor: theme.cardBackground },
+              ]}
+            >
+              <Text
+                style={[
+                  styles.addPhotoMenuTitle,
+                  { color: theme.textPrimary },
+                ]}
+              >
+                Share
+              </Text>
+
+              <TouchableOpacity
+                style={[
+                  styles.addPhotoMenuOption,
+                  {
+                    backgroundColor: theme.cardBackground,
+                    borderColor: theme.cardBorder,
+                  },
+                ]}
+                onPress={() => {
+                  setIsShareMenuVisible(false);
+                  handleShareFullReport();
+                }}
+                activeOpacity={0.9}
+              >
+                <Text
+                  style={[
+                    styles.addPhotoMenuOptionText,
+                    { color: theme.textPrimary },
+                  ]}
+                >
+                  📄 Share Full Report
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[
+                  styles.addPhotoMenuOption,
+                  {
+                    backgroundColor: theme.cardBackground,
+                    borderColor: theme.cardBorder,
+                  },
+                ]}
+                onPress={() => {
+                  setIsShareMenuVisible(false);
+                  handleShareClientReport();
+                }}
+                activeOpacity={0.9}
+              >
+                <Text
+                  style={[
+                    styles.addPhotoMenuOptionText,
+                    { color: theme.textPrimary },
+                  ]}
+                >
+                  🧾 Share Client Report
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.addPhotoMenuCancel}
+                onPress={() => setIsShareMenuVisible(false)}
+                activeOpacity={0.8}
+              >
+                <Text
+                  style={[
+                    styles.addPhotoMenuCancelText,
+                    { color: theme.textMuted },
+                  ]}
+                >
+                  Cancel
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        )}
 
         {/* Add Photo bottom sheet */}
         {isAddPhotoMenuVisible && (
@@ -1318,13 +1738,28 @@ export default function JobDetailScreen() {
               onPress={() => setIsAddPhotoMenuVisible(false)}
               style={styles.addPhotoMenuBackdrop}
             />
-            <View style={[styles.addPhotoMenuSheet, { backgroundColor: theme.cardBackground }]}>
-              <Text style={[styles.addPhotoMenuTitle, { color: theme.textPrimary }]}>Add Photo</Text>
+            <View
+              style={[
+                styles.addPhotoMenuSheet,
+                { backgroundColor: theme.cardBackground },
+              ]}
+            >
+              <Text
+                style={[
+                  styles.addPhotoMenuTitle,
+                  { color: theme.textPrimary },
+                ]}
+              >
+                Add Photo
+              </Text>
 
               <TouchableOpacity
                 style={[
                   styles.addPhotoMenuOption,
-                  { backgroundColor: theme.cardBackground, borderColor: theme.cardBorder },
+                  {
+                    backgroundColor: theme.cardBackground,
+                    borderColor: theme.cardBorder,
+                  },
                 ]}
                 onPress={() => {
                   setIsAddPhotoMenuVisible(false);
@@ -1332,7 +1767,12 @@ export default function JobDetailScreen() {
                 }}
                 activeOpacity={0.9}
               >
-                <Text style={[styles.addPhotoMenuOptionText, { color: theme.textPrimary }]}>
+                <Text
+                  style={[
+                    styles.addPhotoMenuOptionText,
+                    { color: theme.textPrimary },
+                  ]}
+                >
                   📸 Take Photo
                 </Text>
               </TouchableOpacity>
@@ -1340,7 +1780,10 @@ export default function JobDetailScreen() {
               <TouchableOpacity
                 style={[
                   styles.addPhotoMenuOption,
-                  { backgroundColor: theme.cardBackground, borderColor: theme.cardBorder },
+                  {
+                    backgroundColor: theme.cardBackground,
+                    borderColor: theme.cardBorder,
+                  },
                 ]}
                 onPress={() => {
                   setIsAddPhotoMenuVisible(false);
@@ -1348,7 +1791,12 @@ export default function JobDetailScreen() {
                 }}
                 activeOpacity={0.9}
               >
-                <Text style={[styles.addPhotoMenuOptionText, { color: theme.textPrimary }]}>
+                <Text
+                  style={[
+                    styles.addPhotoMenuOptionText,
+                    { color: theme.textPrimary },
+                  ]}
+                >
                   🖼️ Choose from Gallery
                 </Text>
               </TouchableOpacity>
@@ -1358,7 +1806,14 @@ export default function JobDetailScreen() {
                 onPress={() => setIsAddPhotoMenuVisible(false)}
                 activeOpacity={0.8}
               >
-                <Text style={[styles.addPhotoMenuCancelText, { color: theme.textMuted }]}>Cancel</Text>
+                <Text
+                  style={[
+                    styles.addPhotoMenuCancelText,
+                    { color: theme.textMuted },
+                  ]}
+                >
+                  Cancel
+                </Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -1384,7 +1839,12 @@ export default function JobDetailScreen() {
 const styles = StyleSheet.create({
   loadingScreen: { flex: 1, alignItems: "center", justifyContent: "center" },
   loadingText: { fontSize: 16 },
-  simpleButton: { marginTop: 16, paddingHorizontal: 18, paddingVertical: 11, borderRadius: 999 },
+  simpleButton: {
+    marginTop: 16,
+    paddingHorizontal: 18,
+    paddingVertical: 11,
+    borderRadius: 999,
+  },
   simpleButtonText: { fontWeight: "600", fontSize: 14 },
 
   detailsScreen: { flex: 1, paddingTop: 48 },
@@ -1394,20 +1854,99 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "space-between",
     paddingHorizontal: 18,
-    marginBottom: 12,
+    marginBottom: 10,
   },
   backButton: { paddingVertical: 4, paddingHorizontal: 4 },
   backText: { fontSize: 14 },
   headerTitle: { fontSize: 22, fontWeight: "700" },
-  chatHeaderButton: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 999 },
+  chatHeaderButton: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 999,
+  },
   chatHeaderButtonText: { fontSize: 12, fontWeight: "600" },
 
-  detailsScroll: { flexGrow: 1, paddingHorizontal: 18, paddingBottom: 32 },
+  detailsScroll: { flexGrow: 1, paddingHorizontal: 18 },
 
-  sectionTitle: { fontSize: 14, fontWeight: "700", marginTop: 16, marginBottom: 6 },
-  infoText: { fontSize: 13, marginBottom: 8 },
+  // HERO
+  heroWrap: { marginBottom: 14 },
+  heroBg: {
+    height: 132,
+    borderRadius: 22,
+    overflow: "hidden",
+    borderWidth: 1,
+  },
+  heroOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "rgba(2,6,23,0.55)",
+  },
+  heroContent: {
+    flex: 1,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    justifyContent: "space-between",
+  },
+  heroTitle: { fontSize: 18, fontWeight: "800" },
+  heroSubtitle: {
+    marginTop: 4,
+    fontSize: 12,
+    lineHeight: 16,
+    fontWeight: "600",
+  },
+  statusPill: {
+    alignSelf: "flex-start",
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderWidth: 1,
+  },
+  statusPillText: { fontSize: 11, fontWeight: "800" },
+
+  heroActionsRow: {
+    flexDirection: "row",
+    gap: 8,
+    marginTop: 10,
+  },
+  actionPill: {
+    flex: 1,
+    borderRadius: 999,
+    paddingVertical: 9,
+    borderWidth: 1,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  actionPillText: { fontSize: 12, fontWeight: "700" },
+
+  // CARDS
+  card: {
+    borderRadius: 18,
+    borderWidth: 1,
+    padding: 14,
+    marginBottom: 12,
+  },
+  cardTitle: {
+    fontSize: 13,
+    fontWeight: "800",
+    marginBottom: 10,
+  },
+  row: { marginBottom: 10 },
+  metaLabel: { fontSize: 11, fontWeight: "700" },
+  metaValue: { fontSize: 13, fontWeight: "700", marginTop: 4 },
+
+  sectionTitle: {
+    fontSize: 14,
+    fontWeight: "700",
+    marginTop: 10,
+    marginBottom: 6,
+  },
   modalLabel: { fontSize: 12, marginBottom: 4 },
-  modalInput: { borderRadius: 14, paddingHorizontal: 12, paddingVertical: 9, fontSize: 14, marginBottom: 10 },
+  modalInput: {
+    borderRadius: 14,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+    fontSize: 14,
+    marginBottom: 10,
+  },
   modalInputMultiline: {
     borderRadius: 14,
     paddingHorizontal: 12,
@@ -1417,33 +1956,35 @@ const styles = StyleSheet.create({
     minHeight: 96,
     textAlignVertical: "top",
   },
-  modalMeta: { fontSize: 11, marginTop: 4, marginBottom: 10 },
+  modalMeta: { fontSize: 11, marginTop: 8 },
 
-  modalButtonRow: {
+  // Photos
+  photosRow: {
     flexDirection: "row",
-    justifyContent: "space-between",
-    marginTop: 18,
-    marginBottom: 8,
-    gap: 10,
+    alignItems: "center",
+    marginTop: 4,
+    marginBottom: 10,
   },
-  modalButton: { flex: 1, borderRadius: 999, paddingVertical: 12, alignItems: "center" },
-  modalButtonText: { fontSize: 15, fontWeight: "600" },
-  modalDeleteButton: {
-    marginTop: 10,
+  addPhotoButton: {
+    paddingHorizontal: 14,
+    paddingVertical: 8,
     borderRadius: 999,
     borderWidth: 1,
-    paddingVertical: 10,
-    alignItems: "center",
   },
-  modalDeleteText: { fontSize: 13, fontWeight: "600" },
-  modalCloseButton: { marginTop: 10, paddingVertical: 8, alignItems: "center" },
-  modalCloseText: { fontSize: 13 },
-
-  photosRow: { flexDirection: "row", alignItems: "center", marginTop: 4, marginBottom: 10 },
-  addPhotoButton: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 999, borderWidth: 1 },
   addPhotoButtonText: { fontSize: 13, fontWeight: "600" },
-  photoGrid: { flexDirection: "row", flexWrap: "wrap", gap: GRID_GAP, marginBottom: 12 },
-  photoWrapper: { position: "relative", width: THUMB_SIZE, height: THUMB_SIZE, borderRadius: 14, overflow: "hidden" },
+  photoGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: GRID_GAP,
+    marginBottom: 12,
+  },
+  photoWrapper: {
+    position: "relative",
+    width: THUMB_SIZE,
+    height: THUMB_SIZE,
+    borderRadius: 14,
+    overflow: "hidden",
+  },
   photoThumb: { width: "100%", height: "100%" },
   photoRemoveButton: {
     position: "absolute",
@@ -1456,19 +1997,11 @@ const styles = StyleSheet.create({
   },
   photoRemoveText: { color: "#FCA5A5", fontSize: 10, fontWeight: "700" },
 
-  addPhotoMenuOverlay: { position: "absolute", left: 0, right: 0, bottom: 0, top: 0, justifyContent: "flex-end" },
-  addPhotoMenuBackdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: "rgba(0,0,0,0.4)" },
-  addPhotoMenuSheet: { paddingHorizontal: 18, paddingTop: 14, paddingBottom: 26, borderTopLeftRadius: 22, borderTopRightRadius: 22 },
-  addPhotoMenuTitle: { fontSize: 15, fontWeight: "600", marginBottom: 10, textAlign: "center" },
-  addPhotoMenuOption: { borderRadius: 14, paddingVertical: 10, paddingHorizontal: 12, marginBottom: 8, borderWidth: 1 },
-  addPhotoMenuOptionText: { fontSize: 14, textAlign: "center" },
-  addPhotoMenuCancel: { marginTop: 6, paddingVertical: 8 },
-  addPhotoMenuCancelText: { fontSize: 13, textAlign: "center" },
-
+  // Pricing
   pricingCard: {
     borderRadius: 18,
     padding: 14,
-    marginBottom: 16,
+    marginBottom: 2,
     borderWidth: 1,
     shadowColor: "#000",
     shadowOpacity: 0.07,
@@ -1485,27 +2018,80 @@ const styles = StyleSheet.create({
     borderBottomColor: "rgba(148,163,184,0.25)",
   },
   pricingTotalHeaderLabel: { fontSize: 13, fontWeight: "600" },
-  pricingTotalHeaderValue: { fontSize: 20, color: "#FCD34D", fontWeight: "800" },
+  pricingTotalHeaderValue: {
+    fontSize: 20,
+    color: "#FCD34D",
+    fontWeight: "800",
+  },
   pricingInputsRow: { flexDirection: "row", gap: 10, marginTop: 4 },
   pricingColumn: { flex: 1 },
   pricingInput: { marginBottom: 8 },
   pricingSingleRow: { marginTop: 6, marginBottom: 4 },
 
-  quickActionsRow: { flexDirection: "row", gap: 8, marginTop: 6, marginBottom: 8 },
-  quickActionButton: {
+  // Reports buttons (kept)
+  modalDeleteButton: {
+    marginTop: 10,
+    borderRadius: 999,
+    borderWidth: 1,
+    paddingVertical: 10,
+    alignItems: "center",
+  },
+  modalDeleteText: { fontSize: 13, fontWeight: "700" },
+
+  // Sticky bar
+  stickyBar: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    bottom: 0,
+    paddingHorizontal: 18,
+    paddingTop: 10,
+    paddingBottom: Platform.OS === "ios" ? 22 : 12,
+    borderTopWidth: 1,
+  },
+  stickyButtonsRow: { flexDirection: "row", gap: 10 },
+  stickyButton: {
     flex: 1,
     borderRadius: 999,
-    paddingVertical: 8,
-    paddingHorizontal: 10,
-    borderWidth: 1,
+    paddingVertical: 12,
     alignItems: "center",
-    justifyContent: "center",
   },
-  quickActionText: { fontSize: 12, fontWeight: "600" },
+  stickyButtonText: { fontSize: 14, fontWeight: "800" },
 
-  chatEntryCard: { borderRadius: 18, borderWidth: 1, paddingHorizontal: 14, paddingVertical: 14, marginTop: 8, marginBottom: 4 },
-  chatEntryTitle: { fontSize: 15, fontWeight: "700", marginBottom: 4 },
-  chatEntrySubtitle: { fontSize: 12, lineHeight: 16, marginBottom: 10 },
-  chatEntryButton: { alignSelf: "flex-start", borderRadius: 999, paddingHorizontal: 18, paddingVertical: 9 },
-  chatEntryButtonText: { fontSize: 14, fontWeight: "600" },
+  // Add Photo bottom sheet (reused for Share sheet)
+  addPhotoMenuOverlay: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    bottom: 0,
+    top: 0,
+    justifyContent: "flex-end",
+  },
+  addPhotoMenuBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "rgba(0,0,0,0.4)",
+  },
+  addPhotoMenuSheet: {
+    paddingHorizontal: 18,
+    paddingTop: 14,
+    paddingBottom: 26,
+    borderTopLeftRadius: 22,
+    borderTopRightRadius: 22,
+  },
+  addPhotoMenuTitle: {
+    fontSize: 15,
+    fontWeight: "600",
+    marginBottom: 10,
+    textAlign: "center",
+  },
+  addPhotoMenuOption: {
+    borderRadius: 14,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    marginBottom: 8,
+    borderWidth: 1,
+  },
+  addPhotoMenuOptionText: { fontSize: 14, textAlign: "center" },
+  addPhotoMenuCancel: { marginTop: 6, paddingVertical: 8 },
+  addPhotoMenuCancelText: { fontSize: 13, textAlign: "center" },
 });
