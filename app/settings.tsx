@@ -20,13 +20,10 @@ import {
   View,
 } from "react-native";
 import {
-  ACCENT_STORAGE_KEY,
   AccentName,
-  THEME_STORAGE_KEY,
   ThemeName,
   accentLabels,
   accentSwatchColors,
-  themes,
 } from "../constants/appTheme";
 import { usePreferences } from "../context/PreferencesContext";
 
@@ -51,24 +48,22 @@ const themeLabels: Record<ThemeName, string> = {
   midnight: "Midnight Blue",
 };
 
-
-
 export default function SettingsScreen() {
   const router = useRouter();
 
-  const { setThemeName: setThemeGlobal, setAccentName: setAccentGlobal } = usePreferences();
+  // ✅ Use GLOBAL theme/accent to prevent “swap flash”
+  const {
+    theme,
+    themeName,
+    accentName,
+    accentColor,
+    setThemeName: setThemeGlobal,
+    setAccentName: setAccentGlobal,
+  } = usePreferences();
 
-
-  // THEME
-  const [themeName, setThemeName] = useState<ThemeName>("dark");
+  // UI expand/collapse only
   const [isThemeExpanded, setIsThemeExpanded] = useState(false);
-  const theme = themes[themeName];
-
-  // ACCENT
-  const [accentName, setAccentName] = useState<AccentName>("jobsiteAmber");
   const [isAccentExpanded, setIsAccentExpanded] = useState(false);
-  const accentColor =
-    accentSwatchColors[accentName] || theme.primaryButtonBackground;
 
   // JOB DEFAULTS
   const [defaultHourlyRate, setDefaultHourlyRate] = useState("");
@@ -115,12 +110,10 @@ export default function SettingsScreen() {
     }
   };
 
-  // Load everything on mount
+  // ✅ Load only non-theme settings here (theme/accent are owned by PreferencesProvider)
   const loadSettings = useCallback(async () => {
     try {
       const [
-        themeSaved,
-        accentSaved,
         hourlySaved,
         clientSaved,
         notesSaved,
@@ -130,8 +123,6 @@ export default function SettingsScreen() {
         companyEmailSaved,
         companyLicenseSaved,
       ] = await Promise.all([
-        AsyncStorage.getItem(THEME_STORAGE_KEY),
-        AsyncStorage.getItem(ACCENT_STORAGE_KEY),
         AsyncStorage.getItem(STORAGE_KEYS.DEFAULT_HOURLY_RATE),
         AsyncStorage.getItem(STORAGE_KEYS.DEFAULT_CLIENT_NAME),
         AsyncStorage.getItem(STORAGE_KEYS.DEFAULT_NOTES_TEMPLATE),
@@ -141,19 +132,6 @@ export default function SettingsScreen() {
         AsyncStorage.getItem(STORAGE_KEYS.COMPANY_EMAIL),
         AsyncStorage.getItem(STORAGE_KEYS.COMPANY_LICENSE),
       ]);
-
-      if (
-        themeSaved === "light" ||
-        themeSaved === "dark" ||
-        themeSaved === "midnight"
-      ) {
-        setThemeName(themeSaved as ThemeName);
-      }
-
-      // 🔧 FIX: accept any valid AccentName (including "safetyGreen")
-      if (accentSaved && accentLabels[accentSaved as AccentName]) {
-        setAccentName(accentSaved as AccentName);
-      }
 
       if (hourlySaved) setDefaultHourlyRate(hourlySaved);
       if (clientSaved) setDefaultClientName(clientSaved);
@@ -173,24 +151,15 @@ export default function SettingsScreen() {
     loadSettings();
   }, [loadSettings]);
 
-  // Save helpers
-  const saveTheme = async (name: ThemeName) => {
-    setThemeName(name);
+  const saveTheme = (name: ThemeName) => {
     setThemeGlobal(name);
   };
-  ;
 
-  const saveAccent = async (name: AccentName) => {
-    setAccentName(name);
+  const saveAccent = (name: AccentName) => {
     setAccentGlobal(name);
   };
-  
 
-  const saveJobDefaults = async (
-    hourly: string,
-    client: string,
-    notes: string
-  ) => {
+  const saveJobDefaults = async (hourly: string, client: string, notes: string) => {
     try {
       await AsyncStorage.multiSet([
         [STORAGE_KEYS.DEFAULT_HOURLY_RATE, hourly],
@@ -202,12 +171,7 @@ export default function SettingsScreen() {
     }
   };
 
-  const saveBranding = async (
-    name: string,
-    phone: string,
-    email: string,
-    license: string
-  ) => {
+  const saveBranding = async (name: string, phone: string, email: string, license: string) => {
     try {
       await AsyncStorage.multiSet([
         [STORAGE_KEYS.COMPANY_NAME, name],
@@ -300,10 +264,7 @@ export default function SettingsScreen() {
             onPress: async () => {
               try {
                 await AsyncStorage.setItem("EJT_JOBS", JSON.stringify(parsed));
-                Alert.alert(
-                  "Restored ✅",
-                  "Your jobs were restored successfully from backup."
-                );
+                Alert.alert("Restored ✅", "Your jobs were restored successfully from backup.");
               } catch (err) {
                 console.warn("Failed to import jobs:", err);
                 Alert.alert("Error", "Restore failed. Try again.");
@@ -314,10 +275,7 @@ export default function SettingsScreen() {
       );
     } catch (err) {
       console.warn("Failed to prepare import:", err);
-      Alert.alert(
-        "Error",
-        "Could not read backup from clipboard. Try again."
-      );
+      Alert.alert("Error", "Could not read backup from clipboard. Try again.");
     }
   };
 
@@ -349,38 +307,30 @@ export default function SettingsScreen() {
     const email = "support@example.com"; // set your real email here
     const subject = encodeURIComponent("Traktr feedback");
     const body = encodeURIComponent("");
-    Linking.openURL(`mailto:${email}?subject=${subject}&body=${body}`).catch(
-      () => {
-        Alert.alert("Error", "Could not open email app.");
-      }
-    );
+    Linking.openURL(`mailto:${email}?subject=${subject}&body=${body}`).catch(() => {
+      Alert.alert("Error", "Could not open email app.");
+    });
   };
 
-  // LOGOUT HANDLER (new)
   const handleLogout = () => {
-    Alert.alert(
-      "Log out",
-      "This will sign you out of Traktr on this device.",
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Log out",
-          style: "destructive",
-          onPress: async () => {
-            try {
-              await AsyncStorage.removeItem(USER_STORAGE_KEY);
-              router.replace("/login");
-            } catch (err) {
-              console.warn("Failed to log out:", err);
-              Alert.alert("Error", "Could not log out. Try again.");
-            }
-          },
+    Alert.alert("Log out", "This will sign you out of Traktr on this device.", [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Log out",
+        style: "destructive",
+        onPress: async () => {
+          try {
+            await AsyncStorage.removeItem(USER_STORAGE_KEY);
+            router.replace("/login");
+          } catch (err) {
+            console.warn("Failed to log out:", err);
+            Alert.alert("Error", "Could not log out. Try again.");
+          }
         },
-      ]
-    );
+      },
+    ]);
   };
 
-  // Small helper so we don't repeat onFocus logic everywhere
   const handleFocus = (sectionKey: string) => {
     setIsEditing(true);
     scrollToSection(sectionKey);
@@ -394,6 +344,9 @@ export default function SettingsScreen() {
     Keyboard.dismiss();
     setIsEditing(false);
   };
+
+  // Accent preview for this screen (based on current global accent)
+  const accentPreview = accentSwatchColors[accentName] || accentColor;
 
   return (
     <KeyboardAvoidingView
@@ -425,25 +378,14 @@ export default function SettingsScreen() {
                 style={[
                   styles.headerIconBadge,
                   {
-                    borderColor: accentColor + "80",
-                    backgroundColor: accentColor + "1A",
+                    borderColor: accentPreview + "80",
+                    backgroundColor: accentPreview + "1A",
                   },
                 ]}
               >
-                <Ionicons
-                  name="settings-outline"
-                  size={18}
-                  color={accentColor}
-                />
+                <Ionicons name="settings-outline" size={18} color={accentPreview} />
               </View>
-              <Text
-                style={[
-                  styles.headerTitle,
-                  { color: theme.headerText },
-                ]}
-              >
-                Settings
-              </Text>
+              <Text style={[styles.headerTitle, { color: theme.headerText }]}>Settings</Text>
             </View>
             <View style={{ width: 24 }} />
           </View>
@@ -452,23 +394,17 @@ export default function SettingsScreen() {
         <View style={{ flex: 1 }}>
           <ScrollView
             ref={scrollRef}
+            // ✅ Force background to stop 1-frame white flash on mount
+            style={{ flex: 1, backgroundColor: theme.screenBackground }}
             contentContainerStyle={[
               styles.scrollContent,
-              {
-                paddingBottom: isEditing ? 8 : 24,
-
-
-              },
+              { paddingBottom: isEditing ? 8 : 24 },
             ]}
             showsVerticalScrollIndicator={false}
             keyboardShouldPersistTaps="always"
             onScrollBeginDrag={dismissKeyboardAndEditing}
           >
-            {/* Whole screen tappable background */}
-            <TouchableWithoutFeedback
-              onPress={dismissKeyboardAndEditing}
-              accessible={false}
-            >
+            <TouchableWithoutFeedback onPress={dismissKeyboardAndEditing} accessible={false}>
               <View>
                 {/* APPEARANCE */}
                 <View
@@ -477,38 +413,25 @@ export default function SettingsScreen() {
                     {
                       backgroundColor: theme.cardBackground + "F2",
                       borderColor: theme.cardBorder + "55",
-                      borderTopColor: accentColor + "AA",
+                      borderTopColor: accentPreview + "AA",
                       borderTopWidth: 2,
                     },
                   ]}
-                  onLayout={(e) =>
-                    registerSection("appearance", e.nativeEvent.layout.y)
-                  }
+                  onLayout={(e) => registerSection("appearance", e.nativeEvent.layout.y)}
                 >
                   <View style={styles.sectionHeaderRow}>
                     <View
                       style={[
                         styles.sectionIconBadge,
                         {
-                          borderColor: accentColor + "80",
-                          backgroundColor: accentColor + "1A",
+                          borderColor: accentPreview + "80",
+                          backgroundColor: accentPreview + "1A",
                         },
                       ]}
                     >
-                      <Ionicons
-                        name="color-palette-outline"
-                        size={16}
-                        color={accentColor}
-                      />
+                      <Ionicons name="color-palette-outline" size={16} color={accentPreview} />
                     </View>
-                    <Text
-                      style={[
-                        styles.sectionTitle,
-                        { color: accentColor },
-                      ]}
-                    >
-                      Appearance
-                    </Text>
+                    <Text style={[styles.sectionTitle, { color: accentPreview }]}>Appearance</Text>
                   </View>
 
                   {/* Theme row */}
@@ -518,70 +441,45 @@ export default function SettingsScreen() {
                     style={styles.row}
                   >
                     <View style={{ flex: 1 }}>
-                      <Text
-                        style={[
-                          styles.rowTitle,
-                          { color: theme.textPrimary },
-                        ]}
-                      >
-                        Theme
-                      </Text>
-                      <Text
-                        style={[
-                          styles.rowSubtitle,
-                          { color: theme.textMuted },
-                        ]}
-                      >
+                      <Text style={[styles.rowTitle, { color: theme.textPrimary }]}>Theme</Text>
+                      <Text style={[styles.rowSubtitle, { color: theme.textMuted }]}>
                         Choose between Light, Dark, and Midnight Blue.
                       </Text>
                     </View>
-                    <Text
-                      style={[
-                        styles.rowValue,
-                        { color: accentColor },
-                      ]}
-                    >
+                    <Text style={[styles.rowValue, { color: accentPreview }]}>
                       {themeLabels[themeName]}
                     </Text>
                   </TouchableOpacity>
 
                   {isThemeExpanded && (
                     <View style={styles.optionList}>
-                      {(Object.keys(themeLabels) as ThemeName[]).map(
-                        (name) => {
-                          const isActive = name === themeName;
-                          return (
-                            <TouchableOpacity
-                              key={name}
-                              style={[
-                                styles.optionButton,
-                                {
-                                  borderColor: isActive
-                                    ? accentColor
-                                    : theme.cardBorder,
-                                  backgroundColor: isActive
-                                    ? accentColor + "22"
-                                    : "transparent",
-                                },
-                              ]}
-                              onPress={() => saveTheme(name)}
-                              activeOpacity={0.9}
+                      {(Object.keys(themeLabels) as ThemeName[]).map((name) => {
+                        const isActive = name === themeName;
+                        return (
+                          <TouchableOpacity
+                            key={name}
+                            style={[
+                              styles.optionButton,
+                              {
+                                borderColor: isActive ? accentPreview : theme.cardBorder,
+                                backgroundColor: isActive ? accentPreview + "22" : "transparent",
+                              },
+                            ]}
+                            onPress={() => saveTheme(name)}
+                            activeOpacity={0.9}
+                          >
+                            <Text
+                              style={{
+                                color: isActive ? accentPreview : theme.textPrimary,
+                                fontSize: 13,
+                                fontWeight: isActive ? "700" : "500",
+                              }}
                             >
-                              <Text
-                                style={{
-                                  color: isActive
-                                    ? accentColor
-                                    : theme.textPrimary,
-                                  fontSize: 13,
-                                  fontWeight: isActive ? "700" : "500",
-                                }}
-                              >
-                                {themeLabels[name]}
-                              </Text>
-                            </TouchableOpacity>
-                          );
-                        }
-                      )}
+                              {themeLabels[name]}
+                            </Text>
+                          </TouchableOpacity>
+                        );
+                      })}
                     </View>
                   )}
 
@@ -592,46 +490,25 @@ export default function SettingsScreen() {
                     style={[styles.row, { marginTop: 10 }]}
                   >
                     <View style={{ flex: 1 }}>
-                      <Text
-                        style={[
-                          styles.rowTitle,
-                          { color: theme.textPrimary },
-                        ]}
-                      >
+                      <Text style={[styles.rowTitle, { color: theme.textPrimary }]}>
                         Accent color
                       </Text>
-                      <Text
-                        style={[
-                          styles.rowSubtitle,
-                          { color: theme.textMuted },
-                        ]}
-                      >
+                      <Text style={[styles.rowSubtitle, { color: theme.textMuted }]}>
                         Highlight color for buttons and tags.
                       </Text>
                     </View>
 
-                    {/* Accent pill preview */}
                     <View
                       style={[
                         styles.accentValuePill,
                         {
-                          borderColor: accentColor,
-                          backgroundColor: accentColor + "1A",
+                          borderColor: accentPreview,
+                          backgroundColor: accentPreview + "1A",
                         },
                       ]}
                     >
-                      <View
-                        style={[
-                          styles.accentDotSmall,
-                          { backgroundColor: accentColor },
-                        ]}
-                      />
-                      <Text
-                        style={[
-                          styles.accentValueText,
-                          { color: accentColor },
-                        ]}
-                      >
+                      <View style={[styles.accentDotSmall, { backgroundColor: accentPreview }]} />
+                      <Text style={[styles.accentValueText, { color: accentPreview }]}>
                         {accentLabels[accentName]}
                       </Text>
                     </View>
@@ -639,60 +516,44 @@ export default function SettingsScreen() {
 
                   {isAccentExpanded && (
                     <View style={styles.optionList}>
-                      {(Object.keys(accentLabels) as AccentName[]).map(
-                        (name) => {
-                          const isActive = name === accentName;
-                          const color = accentSwatchColors[name];
-                          return (
-                            <TouchableOpacity
-                              key={name}
-                              style={[
-                                styles.accentOptionButton,
-                                {
-                                  borderColor: isActive
-                                    ? color
-                                    : theme.cardBorder,
-                                  backgroundColor: isActive
-                                    ? `${color}22`
-                                    : "transparent",
-                                },
-                              ]}
-                              onPress={() => saveAccent(name)}
-                              activeOpacity={0.9}
-                            >
-                              <View style={styles.accentOptionContent}>
-                                <View
-                                  style={[
-                                    styles.accentDot,
-                                    { backgroundColor: color },
-                                  ]}
-                                />
-                                <Text
-                                  style={[
-                                    styles.accentLabel,
-                                    {
-                                      color: theme.textPrimary,
-                                      fontWeight: isActive ? "700" : "500",
-                                    },
-                                  ]}
-                                >
-                                  {accentLabels[name]}
+                      {(Object.keys(accentLabels) as AccentName[]).map((name) => {
+                        const isActive = name === accentName;
+                        const color = accentSwatchColors[name];
+                        return (
+                          <TouchableOpacity
+                            key={name}
+                            style={[
+                              styles.accentOptionButton,
+                              {
+                                borderColor: isActive ? color : theme.cardBorder,
+                                backgroundColor: isActive ? `${color}22` : "transparent",
+                              },
+                            ]}
+                            onPress={() => saveAccent(name)}
+                            activeOpacity={0.9}
+                          >
+                            <View style={styles.accentOptionContent}>
+                              <View style={[styles.accentDot, { backgroundColor: color }]} />
+                              <Text
+                                style={[
+                                  styles.accentLabel,
+                                  {
+                                    color: theme.textPrimary,
+                                    fontWeight: isActive ? "700" : "500",
+                                  },
+                                ]}
+                              >
+                                {accentLabels[name]}
+                              </Text>
+                              {isActive && (
+                                <Text style={[styles.accentSelectedTag, { color, borderColor: color }]}>
+                                  Selected
                                 </Text>
-                                {isActive && (
-                                  <Text
-                                    style={[
-                                      styles.accentSelectedTag,
-                                      { color, borderColor: color },
-                                    ]}
-                                  >
-                                    Selected
-                                  </Text>
-                                )}
-                              </View>
-                            </TouchableOpacity>
-                          );
-                        }
-                      )}
+                              )}
+                            </View>
+                          </TouchableOpacity>
+                        );
+                      })}
                     </View>
                   )}
                 </View>
@@ -704,63 +565,35 @@ export default function SettingsScreen() {
                     {
                       backgroundColor: theme.cardBackground + "F2",
                       borderColor: theme.cardBorder + "55",
-                      borderTopColor: accentColor + "AA",
+                      borderTopColor: accentPreview + "AA",
                       borderTopWidth: 2,
                     },
                   ]}
-                  onLayout={(e) =>
-                    registerSection("jobDefaults", e.nativeEvent.layout.y)
-                  }
+                  onLayout={(e) => registerSection("jobDefaults", e.nativeEvent.layout.y)}
                 >
                   <View style={styles.sectionHeaderRow}>
                     <View
                       style={[
                         styles.sectionIconBadge,
                         {
-                          borderColor: accentColor + "80",
-                          backgroundColor: accentColor + "1A",
+                          borderColor: accentPreview + "80",
+                          backgroundColor: accentPreview + "1A",
                         },
                       ]}
                     >
-                      <Ionicons
-                        name="clipboard-outline"
-                        size={16}
-                        color={accentColor}
-                      />
+                      <Ionicons name="clipboard-outline" size={16} color={accentPreview} />
                     </View>
-                    <Text
-                      style={[
-                        styles.sectionTitle,
-                        { color: accentColor },
-                      ]}
-                    >
-                      Job Defaults
-                    </Text>
+                    <Text style={[styles.sectionTitle, { color: accentPreview }]}>Job Defaults</Text>
                   </View>
-                  <Text
-                    style={[
-                      styles.sectionSubtitle,
-                      { color: theme.textMuted },
-                    ]}
-                  >
+                  <Text style={[styles.sectionSubtitle, { color: theme.textMuted }]}>
                     Pre-fill new jobs with your common values.
                   </Text>
 
                   <View style={styles.fieldBlock}>
-                    <Text
-                      style={[
-                        styles.fieldLabel,
-                        { color: theme.textSecondary },
-                      ]}
-                    >
+                    <Text style={[styles.fieldLabel, { color: theme.textSecondary }]}>
                       Default hourly rate
                     </Text>
-                    <Text
-                      style={[
-                        styles.fieldHelp,
-                        { color: theme.textMuted },
-                      ]}
-                    >
+                    <Text style={[styles.fieldHelp, { color: theme.textMuted }]}>
                       Used as the starting hourly rate for new jobs.
                     </Text>
                     <TextInput
@@ -783,20 +616,10 @@ export default function SettingsScreen() {
                   </View>
 
                   <View style={styles.fieldBlock}>
-                    <Text
-                      style={[
-                        styles.fieldLabel,
-                        { color: theme.textSecondary },
-                      ]}
-                    >
+                    <Text style={[styles.fieldLabel, { color: theme.textSecondary }]}>
                       Default client name
                     </Text>
-                    <Text
-                      style={[
-                        styles.fieldHelp,
-                        { color: theme.textMuted },
-                      ]}
-                    >
+                    <Text style={[styles.fieldHelp, { color: theme.textMuted }]}>
                       Helpful for repeat clients or your company name.
                     </Text>
                     <TextInput
@@ -818,20 +641,10 @@ export default function SettingsScreen() {
                   </View>
 
                   <View style={styles.fieldBlock}>
-                    <Text
-                      style={[
-                        styles.fieldLabel,
-                        { color: theme.textSecondary },
-                      ]}
-                    >
+                    <Text style={[styles.fieldLabel, { color: theme.textSecondary }]}>
                       Default notes template
                     </Text>
-                    <Text
-                      style={[
-                        styles.fieldHelp,
-                        { color: theme.textMuted },
-                      ]}
-                    >
+                    <Text style={[styles.fieldHelp, { color: theme.textMuted }]}>
                       Pre-fills the Description / Scope on new jobs.
                     </Text>
                     <TextInput
@@ -861,55 +674,34 @@ export default function SettingsScreen() {
                     {
                       backgroundColor: theme.cardBackground + "F2",
                       borderColor: theme.cardBorder + "55",
-                      borderTopColor: accentColor + "AA",
+                      borderTopColor: accentPreview + "AA",
                       borderTopWidth: 2,
                     },
                   ]}
-                  onLayout={(e) =>
-                    registerSection("branding", e.nativeEvent.layout.y)
-                  }
+                  onLayout={(e) => registerSection("branding", e.nativeEvent.layout.y)}
                 >
                   <View style={styles.sectionHeaderRow}>
                     <View
                       style={[
                         styles.sectionIconBadge,
                         {
-                          borderColor: accentColor + "80",
-                          backgroundColor: accentColor + "1A",
+                          borderColor: accentPreview + "80",
+                          backgroundColor: accentPreview + "1A",
                         },
                       ]}
                     >
-                      <Ionicons
-                        name="briefcase-outline"
-                        size={16}
-                        color={accentColor}
-                      />
+                      <Ionicons name="briefcase-outline" size={16} color={accentPreview} />
                     </View>
-                    <Text
-                      style={[
-                        styles.sectionTitle,
-                        { color: accentColor },
-                      ]}
-                    >
+                    <Text style={[styles.sectionTitle, { color: accentPreview }]}>
                       Company / Branding
                     </Text>
                   </View>
-                  <Text
-                    style={[
-                      styles.sectionSubtitle,
-                      { color: theme.textMuted },
-                    ]}
-                  >
+                  <Text style={[styles.sectionSubtitle, { color: theme.textMuted }]}>
                     Shown on PDF reports for clients and your boss.
                   </Text>
 
                   <View style={styles.fieldBlock}>
-                    <Text
-                      style={[
-                        styles.fieldLabel,
-                        { color: theme.textSecondary },
-                      ]}
-                    >
+                    <Text style={[styles.fieldLabel, { color: theme.textSecondary }]}>
                       Company name
                     </Text>
                     <TextInput
@@ -931,12 +723,7 @@ export default function SettingsScreen() {
                   </View>
 
                   <View style={styles.fieldBlock}>
-                    <Text
-                      style={[
-                        styles.fieldLabel,
-                        { color: theme.textSecondary },
-                      ]}
-                    >
+                    <Text style={[styles.fieldLabel, { color: theme.textSecondary }]}>
                       Company phone
                     </Text>
                     <TextInput
@@ -959,12 +746,7 @@ export default function SettingsScreen() {
                   </View>
 
                   <View style={styles.fieldBlock}>
-                    <Text
-                      style={[
-                        styles.fieldLabel,
-                        { color: theme.textSecondary },
-                      ]}
-                    >
+                    <Text style={[styles.fieldLabel, { color: theme.textSecondary }]}>
                       Company email
                     </Text>
                     <TextInput
@@ -988,12 +770,7 @@ export default function SettingsScreen() {
                   </View>
 
                   <View style={styles.fieldBlock}>
-                    <Text
-                      style={[
-                        styles.fieldLabel,
-                        { color: theme.textSecondary },
-                      ]}
-                    >
+                    <Text style={[styles.fieldLabel, { color: theme.textSecondary }]}>
                       License / ID / tagline
                     </Text>
                     <TextInput
@@ -1022,13 +799,11 @@ export default function SettingsScreen() {
                     {
                       backgroundColor: theme.cardBackground + "F2",
                       borderColor: theme.cardBorder + "55",
-                      borderTopColor: accentColor + "AA",
+                      borderTopColor: accentPreview + "AA",
                       borderTopWidth: 2,
                     },
                   ]}
-                  onLayout={(e) =>
-                    registerSection("backup", e.nativeEvent.layout.y)
-                  }
+                  onLayout={(e) => registerSection("backup", e.nativeEvent.layout.y)}
                 >
                   <View style={styles.dataHeaderRow}>
                     <View style={{ flex: 1, paddingRight: 8 }}>
@@ -1037,65 +812,37 @@ export default function SettingsScreen() {
                           style={[
                             styles.sectionIconBadge,
                             {
-                              borderColor: accentColor + "80",
-                              backgroundColor: accentColor + "1A",
+                              borderColor: accentPreview + "80",
+                              backgroundColor: accentPreview + "1A",
                             },
                           ]}
                         >
-                          <Ionicons
-                            name="shield-checkmark-outline"
-                            size={16}
-                            color={accentColor}
-                          />
+                          <Ionicons name="shield-checkmark-outline" size={16} color={accentPreview} />
                         </View>
-                        <Text
-                          style={[
-                            styles.sectionTitle,
-                            { color: accentColor },
-                          ]}
-                        >
+                        <Text style={[styles.sectionTitle, { color: accentPreview }]}>
                           Data & Backup
                         </Text>
                       </View>
-                      <Text
-                        style={[
-                          styles.sectionSubtitle,
-                          { color: theme.textMuted },
-                        ]}
-                      >
+                      <Text style={[styles.sectionSubtitle, { color: theme.textMuted }]}>
                         Manual offline backup for your jobs
                       </Text>
                     </View>
                     <Text
-                      style={[
-                        styles.lastExportText,
-                        { color: theme.textMuted },
-                      ]}
+                      style={[styles.lastExportText, { color: theme.textMuted }]}
                       numberOfLines={3}
                     >
                       Last backup: {formatLastExport()}
                     </Text>
                   </View>
 
-                  {/* EXPORT */}
                   <View style={styles.dataRow}>
                     <View style={{ flex: 1 }}>
-                      <Text
-                        style={[
-                          styles.fieldLabel,
-                          { color: theme.textSecondary },
-                        ]}
-                      >
+                      <Text style={[styles.fieldLabel, { color: theme.textSecondary }]}>
                         Create a backup (copy all jobs)
                       </Text>
-                      <Text
-                        style={[
-                          styles.fieldHelp,
-                          { color: theme.textMuted, lineHeight: 15 },
-                        ]}
-                      >
-                        Copies all your jobs into the clipboard so you can paste
-                        them into Notes, email, or Files and keep them safe.
+                      <Text style={[styles.fieldHelp, { color: theme.textMuted, lineHeight: 15 }]}>
+                        Copies all your jobs into the clipboard so you can paste them into Notes,
+                        email, or Files and keep them safe.
                       </Text>
                     </View>
 
@@ -1103,44 +850,27 @@ export default function SettingsScreen() {
                       style={[
                         styles.linkButton,
                         {
-                          backgroundColor: accentColor + "22",
-                          borderColor: accentColor + "AA",
+                          backgroundColor: accentPreview + "22",
+                          borderColor: accentPreview + "AA",
                         },
                       ]}
                       onPress={handleExportJobs}
                       activeOpacity={0.85}
                     >
-                      <Text
-                        style={[
-                          styles.linkButtonText,
-                          { color: accentColor },
-                        ]}
-                      >
+                      <Text style={[styles.linkButtonText, { color: accentPreview }]}>
                         Copy backup
                       </Text>
                     </TouchableOpacity>
                   </View>
 
-                  {/* IMPORT / RESTORE */}
                   <View style={[styles.dataRow, { marginTop: 18 }]}>
                     <View style={{ flex: 1 }}>
-                      <Text
-                        style={[
-                          styles.fieldLabel,
-                          { color: theme.textSecondary },
-                        ]}
-                      >
+                      <Text style={[styles.fieldLabel, { color: theme.textSecondary }]}>
                         Restore using copied backup
                       </Text>
-                      <Text
-                        style={[
-                          styles.fieldHelp,
-                          { color: theme.textMuted, lineHeight: 15 },
-                        ]}
-                      >
-                        Open your saved backup in Notes or email, select all the
-                        text and tap Copy, then return here and restore your
-                        jobs.
+                      <Text style={[styles.fieldHelp, { color: theme.textMuted, lineHeight: 15 }]}>
+                        Open your saved backup in Notes or email, select all the text and tap Copy,
+                        then return here and restore your jobs.
                       </Text>
                     </View>
 
@@ -1148,71 +878,48 @@ export default function SettingsScreen() {
                       style={[
                         styles.linkButton,
                         {
-                          backgroundColor: accentColor + "22",
-                          borderColor: accentColor + "AA",
+                          backgroundColor: accentPreview + "22",
+                          borderColor: accentPreview + "AA",
                         },
                       ]}
                       onPress={handleImportJobs}
                       activeOpacity={0.85}
                     >
-                      <Text
-                        style={[
-                          styles.linkButtonText,
-                          { color: accentColor },
-                        ]}
-                      >
+                      <Text style={[styles.linkButtonText, { color: accentPreview }]}>
                         Use copied backup
                       </Text>
                     </TouchableOpacity>
                   </View>
                 </View>
 
-                {/* ACCOUNT / LOGOUT (NEW) */}
+                {/* ACCOUNT */}
                 <View
                   style={[
                     styles.sectionCard,
                     {
                       backgroundColor: theme.cardBackground + "F2",
                       borderColor: theme.cardBorder + "55",
-                      borderTopColor: accentColor + "AA",
+                      borderTopColor: accentPreview + "AA",
                       borderTopWidth: 2,
                     },
                   ]}
-                  onLayout={(e) =>
-                    registerSection("account", e.nativeEvent.layout.y)
-                  }
+                  onLayout={(e) => registerSection("account", e.nativeEvent.layout.y)}
                 >
                   <View style={styles.sectionHeaderRow}>
                     <View
                       style={[
                         styles.sectionIconBadge,
                         {
-                          borderColor: accentColor + "80",
-                          backgroundColor: accentColor + "1A",
+                          borderColor: accentPreview + "80",
+                          backgroundColor: accentPreview + "1A",
                         },
                       ]}
                     >
-                      <Ionicons
-                        name="person-circle-outline"
-                        size={16}
-                        color={accentColor}
-                      />
+                      <Ionicons name="person-circle-outline" size={16} color={accentPreview} />
                     </View>
-                    <Text
-                      style={[
-                        styles.sectionTitle,
-                        { color: accentColor },
-                      ]}
-                    >
-                      Account
-                    </Text>
+                    <Text style={[styles.sectionTitle, { color: accentPreview }]}>Account</Text>
                   </View>
-                  <Text
-                    style={[
-                      styles.sectionSubtitle,
-                      { color: theme.textMuted },
-                    ]}
-                  >
+                  <Text style={[styles.sectionSubtitle, { color: theme.textMuted }]}>
                     Log out of Traktr on this device.
                   </Text>
 
@@ -1220,26 +927,15 @@ export default function SettingsScreen() {
                     style={[
                       styles.logoutButton,
                       {
-                        borderColor: accentColor + "AA",
-                        backgroundColor: accentColor + "1A",
+                        borderColor: accentPreview + "AA",
+                        backgroundColor: accentPreview + "1A",
                       },
                     ]}
                     onPress={handleLogout}
                     activeOpacity={0.9}
                   >
-                    <Ionicons
-                      name="log-out-outline"
-                      size={16}
-                      color={accentColor}
-                    />
-                    <Text
-                      style={[
-                        styles.logoutText,
-                        { color: accentColor },
-                      ]}
-                    >
-                      Log out
-                    </Text>
+                    <Ionicons name="log-out-outline" size={16} color={accentPreview} />
+                    <Text style={[styles.logoutText, { color: accentPreview }]}>Log out</Text>
                   </TouchableOpacity>
                 </View>
 
@@ -1250,38 +946,25 @@ export default function SettingsScreen() {
                     {
                       backgroundColor: theme.cardBackground + "F2",
                       borderColor: theme.cardBorder + "55",
-                      borderTopColor: accentColor + "AA",
+                      borderTopColor: accentPreview + "AA",
                       borderTopWidth: 2,
                     },
                   ]}
-                  onLayout={(e) =>
-                    registerSection("about", e.nativeEvent.layout.y)
-                  }
+                  onLayout={(e) => registerSection("about", e.nativeEvent.layout.y)}
                 >
                   <View style={styles.sectionHeaderRow}>
                     <View
                       style={[
                         styles.sectionIconBadge,
                         {
-                          borderColor: accentColor + "80",
-                          backgroundColor: accentColor + "1A",
+                          borderColor: accentPreview + "80",
+                          backgroundColor: accentPreview + "1A",
                         },
                       ]}
                     >
-                      <Ionicons
-                        name="information-circle-outline"
-                        size={16}
-                        color={accentColor}
-                      />
+                      <Ionicons name="information-circle-outline" size={16} color={accentPreview} />
                     </View>
-                    <Text
-                      style={[
-                        styles.sectionTitle,
-                        { color: accentColor },
-                      ]}
-                    >
-                      About Traktr
-                    </Text>
+                    <Text style={[styles.sectionTitle, { color: accentPreview }]}>About Traktr</Text>
                   </View>
 
                   <TouchableOpacity
@@ -1290,71 +973,30 @@ export default function SettingsScreen() {
                     activeOpacity={0.8}
                   >
                     <View style={{ flex: 1 }}>
-                      <Text
-                        style={[
-                          styles.rowTitle,
-                          { color: theme.textPrimary },
-                        ]}
-                      >
+                      <Text style={[styles.rowTitle, { color: theme.textPrimary }]}>
                         About this app
                       </Text>
-                      <Text
-                        style={[
-                          styles.rowSubtitle,
-                          { color: theme.textMuted },
-                        ]}
-                      >
+                      <Text style={[styles.rowSubtitle, { color: theme.textMuted }]}>
                         See version, purpose, and future plans.
                       </Text>
                     </View>
-                    <Text
-                      style={[
-                        styles.rowValue,
-                        { color: accentColor },
-                      ]}
-                    >
-                      Details
-                    </Text>
+                    <Text style={[styles.rowValue, { color: accentPreview }]}>Details</Text>
                   </TouchableOpacity>
 
-                  <TouchableOpacity
-                    style={styles.aboutRow}
-                    onPress={handleSendFeedback}
-                    activeOpacity={0.8}
-                  >
+                  <TouchableOpacity style={styles.aboutRow} onPress={handleSendFeedback} activeOpacity={0.8}>
                     <View style={{ flex: 1 }}>
-                      <Text
-                        style={[
-                          styles.rowTitle,
-                          { color: theme.textPrimary },
-                        ]}
-                      >
-                        Feedback
-                      </Text>
-                      <Text
-                        style={[
-                          styles.rowSubtitle,
-                          { color: theme.textMuted },
-                        ]}
-                      >
+                      <Text style={[styles.rowTitle, { color: theme.textPrimary }]}>Feedback</Text>
+                      <Text style={[styles.rowSubtitle, { color: theme.textMuted }]}>
                         Share ideas or report issues.
                       </Text>
                     </View>
-                    <Text
-                      style={[
-                        styles.rowValue,
-                        { color: accentColor },
-                      ]}
-                    >
-                      Email
-                    </Text>
+                    <Text style={[styles.rowValue, { color: accentPreview }]}>Email</Text>
                   </TouchableOpacity>
                 </View>
               </View>
             </TouchableWithoutFeedback>
           </ScrollView>
         </View>
-
       </Animated.View>
     </KeyboardAvoidingView>
   );
@@ -1540,7 +1182,6 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
   },
 
-  // Accent styling
   accentValuePill: {
     flexDirection: "row",
     alignItems: "center",
@@ -1603,11 +1244,4 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: "700",
   },
-  navWrapper: {
-    position: "absolute",
-    left: 0,
-    right: 0,
-    bottom: 0,
-  },
-  
 });

@@ -28,14 +28,8 @@ import {
   TouchableWithoutFeedback,
   View,
 } from "react-native";
-import {
-  ACCENT_STORAGE_KEY,
-  AccentName,
-  getAccentColor,
-  THEME_STORAGE_KEY,
-  ThemeName,
-  themes,
-} from "../constants/appTheme";
+import { themes } from "../constants/appTheme";
+import { usePreferences } from "../context/PreferencesContext";
 
 type Job = {
   id: string;
@@ -315,53 +309,10 @@ const FocusJobCard: FC<FocusJobCardProps> = ({
 const HomeScreen: FC = () => {
   const router = useRouter();
 
-  const [theme, setTheme] = useState<Theme>(themes.dark);
-
- 
-
-  const [accentName, setAccentName] = useState<AccentName>("jobsiteAmber");
-  const accentColor = getAccentColor(accentName);
+  // ✅ Global theme + accent (kills swap-flash)
+  const { isReady, theme, accentColor } = usePreferences();
 
   const [isEditing, setIsEditing] = useState(false);
-
-  useFocusEffect(
-    useCallback(() => {
-      let isActive = true;
-      const loadThemeAndAccent = async () => {
-        try {
-          const [savedTheme, savedAccent] = await Promise.all([
-            AsyncStorage.getItem(THEME_STORAGE_KEY),
-            AsyncStorage.getItem(ACCENT_STORAGE_KEY),
-          ]);
-
-          if (
-            isActive &&
-            (savedTheme === "light" ||
-              savedTheme === "dark" ||
-              savedTheme === "midnight")
-          ) {
-            setTheme(themes[savedTheme as ThemeName]);
-          }
-
-          if (
-            isActive &&
-            savedAccent &&
-            (savedAccent === "jobsiteAmber" ||
-              savedAccent === "electricBlue" ||
-              savedAccent === "safetyGreen")
-          ) {
-            setAccentName(savedAccent as AccentName);
-          }
-        } catch (err) {
-          console.warn("Failed to load theme/accent in Home:", err);
-        }
-      };
-      loadThemeAndAccent();
-      return () => {
-        isActive = false;
-      };
-    }, [])
-  );
 
   // ✅ FIX: start empty (no fake placeholder jobs that cause flash)
   const [jobs, setJobs] = useState<Job[]>([]);
@@ -656,6 +607,13 @@ const HomeScreen: FC = () => {
     setIsEditing(false);
   };
 
+  // ✅ Don’t render until prefs are ready (kills initial flash completely)
+  if (!isReady) {
+    return (
+      <View style={{ flex: 1, backgroundColor: themes.dark.screenBackground }} />
+    );
+  }
+
   return (
     <KeyboardAvoidingView
       style={{ flex: 1, backgroundColor: theme.screenBackground }}
@@ -671,7 +629,6 @@ const HomeScreen: FC = () => {
                 transform: [{ scale: screenScale }],
                 backgroundColor: theme.screenBackground,
                 paddingBottom: 20,
-
               },
             ]}
           >
@@ -798,7 +755,6 @@ const HomeScreen: FC = () => {
               </Text>
             </View>
 
-            {/* ✅ FIX: don’t render cards until hydrated (kills the flash) */}
             {!isHydrated ? (
               <Text style={[styles.emptyText, { color: theme.textMuted }]}>Loading…</Text>
             ) : visibleJobs.length === 0 ? (
@@ -819,8 +775,6 @@ const HomeScreen: FC = () => {
               />
             )}
           </Animated.View>
-
-         
         </View>
       </TouchableWithoutFeedback>
     </KeyboardAvoidingView>
@@ -1071,12 +1025,5 @@ const styles = StyleSheet.create({
     textAlign: "center",
     fontSize: 14,
     marginTop: 16,
-  },
-
-  navWrapper: {
-    position: "absolute",
-    left: 0,
-    right: 0,
-    bottom: 0,
   },
 });

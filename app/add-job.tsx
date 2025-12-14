@@ -22,12 +22,7 @@ import {
   View,
 } from "react-native";
 import ImageViewing from "react-native-image-viewing";
-import {
-  THEME_STORAGE_KEY,
-  ThemeName,
-  themes,
-} from "../constants/appTheme";
-
+import { usePreferences } from "../context/PreferencesContext";
 
 type Job = {
   id: string;
@@ -61,8 +56,6 @@ const THUMB_SIZE =
   (screenWidth - GRID_HORIZONTAL_PADDING - GRID_GAP * (GRID_COLUMNS - 1)) /
   GRID_COLUMNS;
 
- 
-  
 /**
  * Reusable Photos section (same polish as job-detail)
  * Handles:
@@ -145,28 +138,20 @@ function JobPhotos({
 
   const handleRemovePhoto = (uriToRemove: string) => {
     const index = photoUris.indexOf(uriToRemove);
-    Alert.alert(
-      "Remove photo",
-      "Are you sure you want to remove this photo?",
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Remove",
-          style: "destructive",
-          onPress: () => {
-            LayoutAnimation.configureNext(
-              LayoutAnimation.Presets.easeInEaseOut
-            );
-            setPhotoUris((prev: string[]) =>
-              prev.filter((u) => u !== uriToRemove)
-            );
-            setPhotoBase64s((prev: string[]) =>
-              index >= 0 ? prev.filter((_, i) => i !== index) : prev
-            );
-          },
+    Alert.alert("Remove photo", "Are you sure you want to remove this photo?", [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Remove",
+        style: "destructive",
+        onPress: () => {
+          LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+          setPhotoUris((prev: string[]) => prev.filter((u) => u !== uriToRemove));
+          setPhotoBase64s((prev: string[]) =>
+            index >= 0 ? prev.filter((_, i) => i !== index) : prev
+          );
         },
-      ]
-    );
+      },
+    ]);
   };
 
   const handleOpenFullImage = (index: number) => {
@@ -176,7 +161,6 @@ function JobPhotos({
 
   return (
     <>
-      {/* Add photo button + grid */}
       <View style={styles.photosRow}>
         <TouchableOpacity
           style={[
@@ -189,12 +173,7 @@ function JobPhotos({
           onPress={() => setIsAddPhotoMenuVisible(true)}
           activeOpacity={0.9}
         >
-          <Text
-            style={[
-              styles.addPhotoButtonText,
-              { color: theme.textPrimary },
-            ]}
-          >
+          <Text style={[styles.addPhotoButtonText, { color: theme.textPrimary }]}>
             + Add Photo
           </Text>
         </TouchableOpacity>
@@ -209,11 +188,7 @@ function JobPhotos({
                 activeOpacity={0.9}
                 onPress={() => handleOpenFullImage(index)}
               >
-                <Image
-                  source={{ uri }}
-                  style={styles.photoThumb}
-                  resizeMode="cover"
-                />
+                <Image source={{ uri }} style={styles.photoThumb} resizeMode="cover" />
               </TouchableOpacity>
 
               <TouchableOpacity
@@ -227,12 +202,9 @@ function JobPhotos({
         </View>
       )}
 
-      {/* Add Photo bottom sheet */}
       {isAddPhotoMenuVisible && (
         <View style={styles.addPhotoMenuOverlay}>
-          <TouchableWithoutFeedback
-            onPress={() => setIsAddPhotoMenuVisible(false)}
-          >
+          <TouchableWithoutFeedback onPress={() => setIsAddPhotoMenuVisible(false)}>
             <View style={styles.addPhotoMenuBackdrop} />
           </TouchableWithoutFeedback>
 
@@ -242,12 +214,7 @@ function JobPhotos({
               { backgroundColor: theme.cardBackground },
             ]}
           >
-            <Text
-              style={[
-                styles.addPhotoMenuTitle,
-                { color: theme.textPrimary },
-              ]}
-            >
+            <Text style={[styles.addPhotoMenuTitle, { color: theme.textPrimary }]}>
               Add Photo
             </Text>
 
@@ -265,12 +232,7 @@ function JobPhotos({
               }}
               activeOpacity={0.9}
             >
-              <Text
-                style={[
-                  styles.addPhotoMenuOptionText,
-                  { color: theme.textPrimary },
-                ]}
-              >
+              <Text style={[styles.addPhotoMenuOptionText, { color: theme.textPrimary }]}>
                 📸 Take Photo
               </Text>
             </TouchableOpacity>
@@ -289,12 +251,7 @@ function JobPhotos({
               }}
               activeOpacity={0.9}
             >
-              <Text
-                style={[
-                  styles.addPhotoMenuOptionText,
-                  { color: theme.textPrimary },
-                ]}
-              >
+              <Text style={[styles.addPhotoMenuOptionText, { color: theme.textPrimary }]}>
                 🖼️ Choose from Gallery
               </Text>
             </TouchableOpacity>
@@ -304,12 +261,7 @@ function JobPhotos({
               onPress={() => setIsAddPhotoMenuVisible(false)}
               activeOpacity={0.8}
             >
-              <Text
-                style={[
-                  styles.addPhotoMenuCancelText,
-                  { color: theme.textMuted },
-                ]}
-              >
+              <Text style={[styles.addPhotoMenuCancelText, { color: theme.textMuted }]}>
                 Cancel
               </Text>
             </TouchableOpacity>
@@ -317,7 +269,6 @@ function JobPhotos({
         </View>
       )}
 
-      {/* Fullscreen viewer */}
       {photoUris.length > 0 && (
         <ImageViewing
           images={photoUris.map((uri: string) => ({ uri }))}
@@ -336,26 +287,8 @@ function JobPhotos({
 export default function AddJobScreen() {
   const router = useRouter();
 
-
-
-  // THEME
-  const [themeName, setThemeName] = useState<ThemeName>("dark");
-  const theme = themes[themeName] ?? themes.dark;
-
-  useEffect(() => {
-    const loadTheme = async () => {
-      try {
-        const saved = await AsyncStorage.getItem(THEME_STORAGE_KEY);
-        if (saved === "light" || saved === "dark" || saved === "midnight") {
-          setThemeName(saved as ThemeName);
-        }
-      } catch (err) {
-        console.warn("Failed to load theme:", err);
-      }
-    };
-
-    loadTheme();
-  }, []);
+  // ✅ Use global theme (prevents theme “swap flash”)
+  const { theme } = usePreferences();
 
   // Form state
   const [title, setTitle] = useState("");
@@ -372,7 +305,6 @@ export default function AddJobScreen() {
   const [photoUris, setPhotoUris] = useState<string[]>([]);
   const [photoBase64s, setPhotoBase64s] = useState<string[]>([]);
 
-  // Are we typing in any TextInput?
   const [isEditing, setIsEditing] = useState(false);
 
   // Scroll / sections
@@ -431,8 +363,7 @@ export default function AddJobScreen() {
   };
 
   const totalAmount =
-    parseNumber(laborHours) * parseNumber(hourlyRate) +
-    parseNumber(materialCost);
+    parseNumber(laborHours) * parseNumber(hourlyRate) + parseNumber(materialCost);
 
   const createJobId = () =>
     `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
@@ -441,17 +372,13 @@ export default function AddJobScreen() {
     await AsyncStorage.setItem(STORAGE_KEYS.JOBS, JSON.stringify(jobs));
   };
 
-  // Save new job
   const handleSaveJob = async () => {
     const trimmedTitle = title.trim();
     const trimmedAddress = address.trim();
     const trimmedDescription = description.trim();
 
     if (!trimmedTitle || !trimmedAddress || !trimmedDescription) {
-      Alert.alert(
-        "Missing info",
-        "Please fill in Title, Address, and Description."
-      );
+      Alert.alert("Missing info", "Please fill in Title, Address, and Description.");
       return;
     }
 
@@ -476,7 +403,7 @@ export default function AddJobScreen() {
       const jobsJson = await AsyncStorage.getItem(STORAGE_KEYS.JOBS);
       const jobs: Job[] = jobsJson ? JSON.parse(jobsJson) : [];
 
-      const next = [newJob, ...jobs]; // newest on top
+      const next = [newJob, ...jobs];
       await persistJobs(next);
 
       Alert.alert("Saved", "Job created.", [
@@ -502,7 +429,6 @@ export default function AddJobScreen() {
     <KeyboardAvoidingView
       style={{ flex: 1, backgroundColor: theme.screenBackground }}
       behavior={Platform.OS === "ios" ? "padding" : "height"}
-      // match settings: let content hug the keyboard
       keyboardVerticalOffset={0}
     >
       <Animated.View
@@ -514,50 +440,29 @@ export default function AddJobScreen() {
           },
         ]}
       >
-        {/* MAIN CONTENT */}
         <View style={{ flex: 1 }}>
-          {/* Header (no Back, Add is now a tab) */}
           <View style={styles.headerRow}>
             <View style={{ width: 60 }} />
-            <Text style={[styles.headerTitle, { color: theme.headerText }]}>
-              Add Job
-            </Text>
+            <Text style={[styles.headerTitle, { color: theme.headerText }]}>Add Job</Text>
             <View style={{ width: 60 }} />
           </View>
 
           <ScrollView
             ref={scrollRef}
+            // ✅ force background so no 1-frame flash
+            style={{ flex: 1, backgroundColor: theme.screenBackground }}
             contentContainerStyle={[
               styles.detailsScroll,
-              {
-                paddingBottom: isEditing ? 8 : 24,
-
-
-              },
+              { paddingBottom: isEditing ? 8 : 24 },
             ]}
             keyboardShouldPersistTaps="always"
             showsVerticalScrollIndicator={false}
             onScrollBeginDrag={dismissKeyboardAndEditing}
           >
-            <TouchableWithoutFeedback
-              onPress={dismissKeyboardAndEditing}
-              accessible={false}
-            >
+            <TouchableWithoutFeedback onPress={dismissKeyboardAndEditing} accessible={false}>
               <View>
-                {/* Title */}
-                <View
-                  onLayout={(e) =>
-                    registerSection("title", e.nativeEvent.layout.y)
-                  }
-                >
-                  <Text
-                    style={[
-                      styles.modalLabel,
-                      { color: theme.textSecondary },
-                    ]}
-                  >
-                    Title
-                  </Text>
+                <View onLayout={(e) => registerSection("title", e.nativeEvent.layout.y)}>
+                  <Text style={[styles.modalLabel, { color: theme.textSecondary }]}>Title</Text>
                   <TextInput
                     style={[
                       styles.modalInput,
@@ -580,20 +485,8 @@ export default function AddJobScreen() {
                   />
                 </View>
 
-                {/* Address */}
-                <View
-                  onLayout={(e) =>
-                    registerSection("address", e.nativeEvent.layout.y)
-                  }
-                >
-                  <Text
-                    style={[
-                      styles.modalLabel,
-                      { color: theme.textSecondary },
-                    ]}
-                  >
-                    Address
-                  </Text>
+                <View onLayout={(e) => registerSection("address", e.nativeEvent.layout.y)}>
+                  <Text style={[styles.modalLabel, { color: theme.textSecondary }]}>Address</Text>
                   <TextInput
                     style={[
                       styles.modalInput,
@@ -616,18 +509,8 @@ export default function AddJobScreen() {
                   />
                 </View>
 
-                {/* Description */}
-                <View
-                  onLayout={(e) =>
-                    registerSection("description", e.nativeEvent.layout.y)
-                  }
-                >
-                  <Text
-                    style={[
-                      styles.modalLabel,
-                      { color: theme.textSecondary },
-                    ]}
-                  >
+                <View onLayout={(e) => registerSection("description", e.nativeEvent.layout.y)}>
+                  <Text style={[styles.modalLabel, { color: theme.textSecondary }]}>
                     Description / Scope
                   </Text>
                   <TextInput
@@ -653,29 +536,12 @@ export default function AddJobScreen() {
                   />
                 </View>
 
-                {/* Client info */}
-                <View
-                  onLayout={(e) =>
-                    registerSection("client", e.nativeEvent.layout.y)
-                  }
-                >
-                  <Text
-                    style={[
-                      styles.sectionTitle,
-                      { color: theme.textSecondary },
-                    ]}
-                  >
+                <View onLayout={(e) => registerSection("client", e.nativeEvent.layout.y)}>
+                  <Text style={[styles.sectionTitle, { color: theme.textSecondary }]}>
                     Client Info
                   </Text>
 
-                  <Text
-                    style={[
-                      styles.modalLabel,
-                      { color: theme.textSecondary },
-                    ]}
-                  >
-                    Client Name
-                  </Text>
+                  <Text style={[styles.modalLabel, { color: theme.textSecondary }]}>Client Name</Text>
                   <TextInput
                     style={[
                       styles.modalInput,
@@ -697,14 +563,7 @@ export default function AddJobScreen() {
                     onBlur={() => setIsEditing(false)}
                   />
 
-                  <Text
-                    style={[
-                      styles.modalLabel,
-                      { color: theme.textSecondary },
-                    ]}
-                  >
-                    Client Phone
-                  </Text>
+                  <Text style={[styles.modalLabel, { color: theme.textSecondary }]}>Client Phone</Text>
                   <TextInput
                     style={[
                       styles.modalInput,
@@ -727,14 +586,7 @@ export default function AddJobScreen() {
                     onBlur={() => setIsEditing(false)}
                   />
 
-                  <Text
-                    style={[
-                      styles.modalLabel,
-                      { color: theme.textSecondary },
-                    ]}
-                  >
-                    Client Notes
-                  </Text>
+                  <Text style={[styles.modalLabel, { color: theme.textSecondary }]}>Client Notes</Text>
                   <TextInput
                     style={[
                       styles.modalInputMultiline,
@@ -758,20 +610,8 @@ export default function AddJobScreen() {
                   />
                 </View>
 
-                {/* Pricing */}
-                <View
-                  onLayout={(e) =>
-                    registerSection("pricing", e.nativeEvent.layout.y)
-                  }
-                >
-                  <Text
-                    style={[
-                      styles.sectionTitle,
-                      { color: theme.textSecondary },
-                    ]}
-                  >
-                    Pricing
-                  </Text>
+                <View onLayout={(e) => registerSection("pricing", e.nativeEvent.layout.y)}>
+                  <Text style={[styles.sectionTitle, { color: theme.textSecondary }]}>Pricing</Text>
 
                   <View
                     style={[
@@ -783,12 +623,7 @@ export default function AddJobScreen() {
                     ]}
                   >
                     <View style={styles.pricingTotalHeader}>
-                      <Text
-                        style={[
-                          styles.pricingTotalHeaderLabel,
-                          { color: theme.textMuted },
-                        ]}
-                      >
+                      <Text style={[styles.pricingTotalHeaderLabel, { color: theme.textMuted }]}>
                         Total
                       </Text>
                       <Text style={styles.pricingTotalHeaderValue}>
@@ -801,12 +636,7 @@ export default function AddJobScreen() {
 
                     <View style={styles.pricingInputsRow}>
                       <View style={styles.pricingColumn}>
-                        <Text
-                          style={[
-                            styles.modalLabel,
-                            { color: theme.textSecondary },
-                          ]}
-                        >
+                        <Text style={[styles.modalLabel, { color: theme.textSecondary }]}>
                           Labor hours
                         </Text>
                         <TextInput
@@ -834,12 +664,7 @@ export default function AddJobScreen() {
                       </View>
 
                       <View style={styles.pricingColumn}>
-                        <Text
-                          style={[
-                            styles.modalLabel,
-                            { color: theme.textSecondary },
-                          ]}
-                        >
+                        <Text style={[styles.modalLabel, { color: theme.textSecondary }]}>
                           Hourly rate
                         </Text>
                         <TextInput
@@ -868,12 +693,7 @@ export default function AddJobScreen() {
                     </View>
 
                     <View style={styles.pricingSingleRow}>
-                      <Text
-                        style={[
-                          styles.modalLabel,
-                          { color: theme.textSecondary },
-                        ]}
-                      >
+                      <Text style={[styles.modalLabel, { color: theme.textSecondary }]}>
                         Material cost
                       </Text>
                       <TextInput
@@ -902,20 +722,8 @@ export default function AddJobScreen() {
                   </View>
                 </View>
 
-                {/* Photos */}
-                <View
-                  onLayout={(e) =>
-                    registerSection("photos", e.nativeEvent.layout.y)
-                  }
-                >
-                  <Text
-                    style={[
-                      styles.sectionTitle,
-                      { color: theme.textSecondary },
-                    ]}
-                  >
-                    Photos
-                  </Text>
+                <View onLayout={(e) => registerSection("photos", e.nativeEvent.layout.y)}>
+                  <Text style={[styles.sectionTitle, { color: theme.textSecondary }]}>Photos</Text>
 
                   <JobPhotos
                     theme={theme}
@@ -926,30 +734,16 @@ export default function AddJobScreen() {
                   />
                 </View>
 
-                {/* Save button */}
                 <View style={styles.modalButtonRow}>
-                  <Animated.View
-                    style={{
-                      flex: 1,
-                      transform: [{ scale: saveScale }],
-                    }}
-                  >
+                  <Animated.View style={{ flex: 1, transform: [{ scale: saveScale }] }}>
                     <TouchableOpacity
-                      style={[
-                        styles.modalButton,
-                        { backgroundColor: theme.primaryButtonBackground },
-                      ]}
+                      style={[styles.modalButton, { backgroundColor: theme.primaryButtonBackground }]}
                       onPress={handleSaveJob}
                       activeOpacity={0.9}
                       onPressIn={saveAnim.onPressIn}
                       onPressOut={saveAnim.onPressOut}
                     >
-                      <Text
-                        style={[
-                          styles.modalButtonText,
-                          { color: theme.primaryButtonText },
-                        ]}
-                      >
+                      <Text style={[styles.modalButtonText, { color: theme.primaryButtonText }]}>
                         Save Job
                       </Text>
                     </TouchableOpacity>
@@ -959,8 +753,6 @@ export default function AddJobScreen() {
             </TouchableWithoutFeedback>
           </ScrollView>
         </View>
-
-
       </Animated.View>
     </KeyboardAvoidingView>
   );
@@ -972,7 +764,6 @@ const styles = StyleSheet.create({
     paddingTop: 48,
   },
 
-  // HEADER
   headerRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -992,14 +783,12 @@ const styles = StyleSheet.create({
     fontWeight: "700",
   },
 
-  // SCROLL CONTENT
   detailsScroll: {
     flexGrow: 1,
     paddingHorizontal: 18,
-    paddingBottom: 110, // baseline, overridden dynamically
+    paddingBottom: 110,
   },
 
-  // SECTION TITLES
   sectionTitle: {
     fontSize: 14,
     fontWeight: "700",
@@ -1007,7 +796,6 @@ const styles = StyleSheet.create({
     marginBottom: 6,
   },
 
-  // INPUTS
   modalLabel: {
     fontSize: 12,
     marginBottom: 4,
@@ -1029,7 +817,6 @@ const styles = StyleSheet.create({
     textAlignVertical: "top",
   },
 
-  // BUTTON ROW
   modalButtonRow: {
     flexDirection: "row",
     justifyContent: "space-between",
@@ -1048,7 +835,6 @@ const styles = StyleSheet.create({
     fontWeight: "600",
   },
 
-  // Photos
   photosRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -1097,7 +883,6 @@ const styles = StyleSheet.create({
     fontWeight: "700",
   },
 
-  // Add Photo bottom sheet
   addPhotoMenuOverlay: {
     position: "absolute",
     left: 0,
@@ -1143,7 +928,6 @@ const styles = StyleSheet.create({
     textAlign: "center",
   },
 
-  // Pricing card
   pricingCard: {
     borderRadius: 18,
     padding: 14,
@@ -1187,11 +971,4 @@ const styles = StyleSheet.create({
     marginTop: 6,
     marginBottom: 4,
   },
-  navWrapper: {
-    position: "absolute",
-    left: 0,
-    right: 0,
-    bottom: 0,
-  },
-  
 });

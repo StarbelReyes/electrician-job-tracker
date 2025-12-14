@@ -14,7 +14,8 @@ import {
   View,
 } from "react-native";
 
-import { THEME_STORAGE_KEY, ThemeName, themes } from "../constants/appTheme";
+import { themes } from "../constants/appTheme";
+import { usePreferences } from "../context/PreferencesContext";
 
 type Job = {
   id: string;
@@ -38,24 +39,8 @@ const STORAGE_KEYS = {
 };
 
 export default function TrashScreen() {
-  // THEME
-  const [themeName, setThemeName] = useState<ThemeName>("dark");
-  const theme = themes[themeName] ?? themes.dark;
-
-  useEffect(() => {
-    const loadTheme = async () => {
-      try {
-        const saved = await AsyncStorage.getItem(THEME_STORAGE_KEY);
-        if (saved === "light" || saved === "dark" || saved === "midnight") {
-          setThemeName(saved as ThemeName);
-        }
-      } catch (err) {
-        console.warn("Failed to load theme in Trash:", err);
-      }
-    };
-
-    loadTheme();
-  }, []);
+  // ✅ Global theme (kills theme swap flash)
+  const { isReady, theme } = usePreferences();
 
   const [jobs, setJobs] = useState<Job[]>([]);
   const [trashJobs, setTrashJobs] = useState<Job[]>([]);
@@ -156,6 +141,11 @@ export default function TrashScreen() {
     );
   };
 
+  // ✅ Don’t render until preferences are ready (prevents first-frame flash)
+  if (!isReady) {
+    return <View style={{ flex: 1, backgroundColor: themes.dark.screenBackground }} />;
+  }
+
   return (
     <KeyboardAvoidingView
       style={{ flex: 1, backgroundColor: theme.screenBackground }}
@@ -172,9 +162,7 @@ export default function TrashScreen() {
           },
         ]}
       >
-        {/* Main content + list */}
         <View style={{ flex: 1 }}>
-          {/* Header (no Back button, just title) */}
           <View style={styles.headerRow}>
             <Text style={[styles.headerTitle, { color: theme.headerText }]}>
               Trash
@@ -199,10 +187,7 @@ export default function TrashScreen() {
               data={trashJobs}
               keyExtractor={(item) => item.id}
               showsVerticalScrollIndicator={false}
-              contentContainerStyle={[
-                styles.listContent,
-                { paddingBottom: 16 }, // ✅ FIX: runtime value must be inline
-              ]}
+              contentContainerStyle={[styles.listContent, { paddingBottom: 16 }]}
               renderItem={({ item }) => (
                 <View
                   style={[
@@ -217,16 +202,12 @@ export default function TrashScreen() {
                     {item.title}
                   </Text>
 
-                  <Text
-                    style={[styles.trashAddress, { color: theme.textSecondary }]}
-                  >
+                  <Text style={[styles.trashAddress, { color: theme.textSecondary }]}>
                     {item.address}
                   </Text>
 
                   {item.clientName && (
-                    <Text
-                      style={[styles.trashClient, { color: theme.textPrimary }]}
-                    >
+                    <Text style={[styles.trashClient, { color: theme.textPrimary }]}>
                       Client: {item.clientName}
                     </Text>
                   )}
@@ -306,9 +287,6 @@ export default function TrashScreen() {
             />
           )}
         </View>
-
-        {/* PINNED NAV */}
-       
       </Animated.View>
     </KeyboardAvoidingView>
   );
@@ -326,13 +304,6 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     marginBottom: 14,
   },
-  backButton: {
-    paddingVertical: 4,
-    paddingHorizontal: 4,
-  },
-  backText: {
-    fontSize: 14,
-  },
   headerTitle: {
     fontSize: 22,
     fontWeight: "700",
@@ -348,9 +319,7 @@ const styles = StyleSheet.create({
   emptyText: {
     fontSize: 14,
   },
-  listContent: {
-    // ✅ keep static styles only; safe-area padding is applied inline
-  },
+  listContent: {},
   trashCard: {
     borderRadius: 16,
     padding: 14,
@@ -412,11 +381,5 @@ const styles = StyleSheet.create({
   trashDeleteText: {
     fontSize: 11,
     fontWeight: "600",
-  },
-  navWrapper: {
-    position: "absolute",
-    left: 0,
-    right: 0,
-    bottom: 0,
   },
 });
