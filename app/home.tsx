@@ -1,6 +1,7 @@
 // app/home.tsx
 import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { LinearGradient } from "expo-linear-gradient";
 import { useFocusEffect, useRouter } from "expo-router";
 import React, {
   FC,
@@ -12,6 +13,7 @@ import React, {
 } from "react";
 import {
   Animated,
+  Image,
   Keyboard,
   KeyboardAvoidingView,
   NativeScrollEvent,
@@ -24,7 +26,7 @@ import {
   TextInput,
   TouchableOpacity,
   TouchableWithoutFeedback,
-  View
+  View,
 } from "react-native";
 import BottomNavBar from "../components/BottomNavBar";
 import {
@@ -130,7 +132,7 @@ const STORAGE_KEYS = {
 const NAV_HEIGHT = 72;
 
 // Focused carousel sizing
-const CARD_HEIGHT = 170;
+const CARD_HEIGHT = 180;
 const CARD_SPACING = 18;
 const CARD_OUTER_HEIGHT = CARD_HEIGHT + CARD_SPACING;
 
@@ -166,6 +168,67 @@ const getStatusStyles = (job: Job, theme: Theme): StatusStyles =>
         textColor: theme.textSecondary,
       };
 
+// ------------- MEDIA HEADER COMPONENT -------------
+
+type JobCardMediaHeaderProps = {
+  job: Job;
+  theme: Theme;
+  accentColor: string;
+};
+
+const JobCardMediaHeader: FC<JobCardMediaHeaderProps> = ({
+  job,
+  theme,
+  accentColor,
+}) => {
+  const hasPhoto = !!(job.photoUris && job.photoUris.length > 0);
+  const firstPhotoUri = job.photoUris?.[0];
+
+  const statusColor = job.isDone ? "#9CA3AF" : "#22C55E"; // gray for done, green for open
+
+  return (
+    <View style={styles.mediaHeaderWrapper}>
+      {hasPhoto && firstPhotoUri ? (
+        // PHOTO VARIANT – strong image, soft overlay
+        <View style={styles.mediaHeader}>
+          <Image
+            source={{ uri: firstPhotoUri }}
+            style={styles.mediaHeaderImage}
+            resizeMode="cover"
+          />
+          {/* subtle dark overlay so future text/icons will always read */}
+          <View style={styles.mediaHeaderOverlay} />
+        </View>
+      ) : (
+        // NO-PHOTO VARIANT – glassy, accent-tinted strip
+        <LinearGradient
+          style={[
+            styles.mediaHeader,
+            {
+              borderWidth: 1,
+              borderColor: accentColor + "40", // soft accent outline
+              backgroundColor: "transparent",
+            },
+          ]}
+          colors={[accentColor + "26", theme.cardBackground]}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+        />
+      )}
+
+      {/* Status indicator bar */}
+      <View
+        style={[
+          styles.mediaStatusBar,
+          {
+            backgroundColor: statusColor,
+          },
+        ]}
+      />
+    </View>
+  );
+};
+
 // ---------------- FOCUSED JOB CARD ----------------
 
 type FocusJobCardProps = {
@@ -188,6 +251,7 @@ const FocusJobCard: FC<FocusJobCardProps> = ({
   const statusStyles = getStatusStyles(job, theme);
   const jobTotal = getJobTotal(job);
   const hasPhotos = !!(job.photoUris && job.photoUris.length > 0);
+  const hasTotal = jobTotal > 0;
 
   const scale = animatedIndex.interpolate({
     inputRange: [index - 1, index, index + 1],
@@ -203,12 +267,12 @@ const FocusJobCard: FC<FocusJobCardProps> = ({
 
   const shadowOpacity = animatedIndex.interpolate({
     inputRange: [index - 1, index, index + 1],
-    outputRange: [0.03, 0.08, 0.03],
+    outputRange: [0.03, 0.1, 0.03],
     extrapolate: "clamp",
   });
 
   const totalString =
-    jobTotal > 0
+    hasTotal
       ? jobTotal.toLocaleString("en-US", {
           minimumFractionDigits: 2,
           maximumFractionDigits: 2,
@@ -236,73 +300,95 @@ const FocusJobCard: FC<FocusJobCardProps> = ({
           },
         ]}
       >
-        <Text
-          style={[
-            styles.focusTitle,
-            {
-              color: theme.textPrimary,
-            },
-          ]}
-          numberOfLines={2}
-        >
-          {job.title}
-        </Text>
-        <Text
-          style={[
-            styles.focusAddress,
-            {
-              color: theme.textSecondary,
-            },
-          ]}
-          numberOfLines={1}
-        >
-          {job.address}
-        </Text>
+        <View style={styles.focusCardContent}>
+          {/* NEW media header (photo or accent gradient) + status bar */}
+          <JobCardMediaHeader job={job} theme={theme} accentColor={accentColor} />
 
-        <View style={styles.focusMetaRow}>
-          {/* Status pill */}
-          <View
+          {/* Title / client / address */}
+          <Text
             style={[
-              styles.focusStatusPill,
-              {
-                backgroundColor: statusStyles.tagBg,
-                borderColor: accentColor,
-              },
+              styles.focusTitle,
+              { color: statusStyles.titleColor },
+              job.isDone && styles.focusTextDone,
             ]}
+            numberOfLines={2}
           >
-            <Text
-              style={[
-                styles.focusStatusText,
-                { color: statusStyles.tagText },
-              ]}
-            >
-              {job.isDone ? "Done" : "Open"}
-            </Text>
-          </View>
+            {job.title}
+          </Text>
 
-          {/* Photos */}
-          {hasPhotos && (
-            <View style={styles.focusPhotoRow}>
-              <Text style={[styles.focusPhotoIcon, { color: theme.textSecondary }]}>
-                📷
+          {job.clientName ? (
+            <>
+              <Text
+                style={[
+                  styles.focusClient,
+                  { color: statusStyles.textColor },
+                  job.isDone && styles.focusTextDone,
+                ]}
+                numberOfLines={1}
+              >
+                {job.clientName}
               </Text>
               <Text
                 style={[
-                  styles.focusPhotoText,
-                  { color: theme.textSecondary },
+                  styles.focusAddress,
+                  { color: statusStyles.textColor },
+                  job.isDone && styles.focusTextDone,
                 ]}
+                numberOfLines={1}
               >
-                {job.photoUris!.length}
+                {job.address}
               </Text>
-            </View>
-          )}
-
-          {/* Total */}
-          {totalString && (
-            <Text style={[styles.focusAmount, { color: "#F59E0B" }]}>
-              ${totalString}
+            </>
+          ) : (
+            <Text
+              style={[
+                styles.focusAddress,
+                { color: statusStyles.textColor },
+                job.isDone && styles.focusTextDone,
+              ]}
+              numberOfLines={2}
+            >
+              {job.address}
             </Text>
           )}
+
+          {/* Meta row */}
+          <View style={styles.focusMetaRow}>
+            {/* Status pill */}
+            <View
+              style={[
+                styles.focusStatusPill,
+                {
+                  backgroundColor: statusStyles.tagBg,
+                  borderColor: statusStyles.tagBorder,
+                },
+              ]}
+            >
+              <Text
+                style={[
+                  styles.focusStatusText,
+                  { color: statusStyles.tagText },
+                ]}
+              >
+                {job.isDone ? "Done" : "Open"}
+              </Text>
+            </View>
+
+            {/* Photos chip */}
+            {hasPhotos && (
+              <View style={styles.focusPhotoChip}>
+                <Ionicons name="camera-outline" size={14} color="#9CA3AF" />
+                <Text style={styles.focusPhotoChipText}>
+                  {job.photoUris!.length}
+                </Text>
+              </View>
+            )}
+
+            {/* Money */}
+            {hasTotal && totalString && (
+              <Text style={styles.focusAmountClean}>${totalString}</Text>
+            )}
+          </View>
         </View>
       </Pressable>
     </Animated.View>
@@ -580,7 +666,10 @@ const HomeScreen: FC = () => {
     setActiveIndex(index);
   };
 
-  const animatedIndex = Animated.divide(scrollY, new Animated.Value(CARD_OUTER_HEIGHT));
+  const animatedIndex = Animated.divide(
+    scrollY,
+    new Animated.Value(CARD_OUTER_HEIGHT)
+  );
 
   const renderFocusedItem = useCallback(
     ({ item, index }: { item: Job; index: number }) => (
@@ -915,7 +1004,7 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 3 },
   },
   summaryCardActive: {
-    borderColor: "#2563EB", // overridden by accentColor in inline style
+    borderColor: "#2563EB", // overridden by accentColor
   },
   summaryLabel: {
     fontSize: 12,
@@ -1012,18 +1101,51 @@ const styles = StyleSheet.create({
     height: CARD_HEIGHT,
     borderRadius: 22,
     paddingHorizontal: 18,
-    paddingVertical: 16,
+    paddingVertical: 14,
     borderWidth: 1,
   },
+  focusCardContent: {
+    flex: 1,
+  },
+
+  // NEW media header + status bar
+  mediaHeaderWrapper: {
+    marginBottom: 10,
+  },
+  mediaHeader: {
+    height: 52,
+    borderRadius: 16,
+    overflow: "hidden",
+    backgroundColor: "#111827",
+  },
+  mediaHeaderImage: {
+    width: "100%",
+    height: "100%",
+  },
+  mediaHeaderOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "rgba(15,23,42,0.25)",
+  },
+  mediaStatusBar: {
+    marginTop: 6,
+    height: 5,
+    borderRadius: 999,
+  },
+
   focusTitle: {
     fontSize: 17,
     fontWeight: "700",
-    marginBottom: 4,
+  },
+  focusClient: {
+    fontSize: 13,
+    marginTop: 3,
   },
   focusAddress: {
     fontSize: 13,
+    marginTop: 1,
     marginBottom: 10,
   },
+
   focusMetaRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -1040,21 +1162,32 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: "600",
   },
-  focusPhotoRow: {
+
+  focusPhotoChip: {
     flexDirection: "row",
     alignItems: "center",
     gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 999,
+    backgroundColor: "rgba(148,163,184,0.12)",
   },
-  focusPhotoIcon: {
-    fontSize: 14,
-  },
-  focusPhotoText: {
+  focusPhotoChipText: {
     fontSize: 12,
+    color: "#9CA3AF",
+    fontWeight: "500",
   },
-  focusAmount: {
+
+  focusAmountClean: {
     marginLeft: "auto",
     fontSize: 13,
     fontWeight: "700",
+    color: "#F59E0B",
+  },
+
+  focusTextDone: {
+    textDecorationLine: "line-through",
+    opacity: 0.6,
   },
 
   emptyText: {
@@ -1072,4 +1205,3 @@ const styles = StyleSheet.create({
     height: NAV_HEIGHT,
   },
 });
-
