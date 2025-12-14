@@ -151,7 +151,11 @@ type StatusStyles = {
   textColor: string;
 };
 
-const getStatusStyles = (job: Job, theme: Theme): StatusStyles =>
+const getStatusStyles = (
+  job: Job,
+  theme: Theme,
+  accentColor: string
+): StatusStyles =>
   job.isDone
     ? {
         tagBg: theme.tagDoneBg,
@@ -161,9 +165,10 @@ const getStatusStyles = (job: Job, theme: Theme): StatusStyles =>
         textColor: theme.textSecondary,
       }
     : {
-        tagBg: theme.tagOpenBg,
-        tagBorder: theme.tagOpenBorder,
-        tagText: theme.tagOpenText,
+        // OPEN should follow ACCENT for consistency
+        tagBg: accentColor + "1A",
+        tagBorder: accentColor,
+        tagText: accentColor,
         titleColor: theme.textPrimary,
         textColor: theme.textSecondary,
       };
@@ -184,7 +189,8 @@ const JobCardMediaHeader: FC<JobCardMediaHeaderProps> = ({
   const hasPhoto = !!(job.photoUris && job.photoUris.length > 0);
   const firstPhotoUri = job.photoUris?.[0];
 
-  const statusColor = job.isDone ? "#9CA3AF" : "#22C55E"; // gray for done, green for open
+  // ✅ Consistent: open uses accent, done uses muted gray
+  const statusColor = job.isDone ? "#9CA3AF" : accentColor;
 
   return (
     <View style={styles.mediaHeaderWrapper}>
@@ -248,7 +254,7 @@ const FocusJobCard: FC<FocusJobCardProps> = ({
   animatedIndex,
   onOpen,
 }) => {
-  const statusStyles = getStatusStyles(job, theme);
+  const statusStyles = getStatusStyles(job, theme, accentColor);
   const jobTotal = getJobTotal(job);
   const hasPhotos = !!(job.photoUris && job.photoUris.length > 0);
   const hasTotal = jobTotal > 0;
@@ -301,7 +307,7 @@ const FocusJobCard: FC<FocusJobCardProps> = ({
         ]}
       >
         <View style={styles.focusCardContent}>
-          {/* NEW media header (photo or accent gradient) + status bar */}
+          {/* media header (photo or accent gradient) + status bar */}
           <JobCardMediaHeader job={job} theme={theme} accentColor={accentColor} />
 
           {/* Title / client / address */}
@@ -386,7 +392,9 @@ const FocusJobCard: FC<FocusJobCardProps> = ({
 
             {/* Money */}
             {hasTotal && totalString && (
-              <Text style={styles.focusAmountClean}>${totalString}</Text>
+              <Text style={[styles.focusAmountClean, { color: accentColor }]}>
+                ${totalString}
+              </Text>
             )}
           </View>
         </View>
@@ -1108,7 +1116,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
 
-  // NEW media header + status bar
+  // media header + status bar
   mediaHeaderWrapper: {
     marginBottom: 10,
   },
@@ -1178,11 +1186,11 @@ const styles = StyleSheet.create({
     fontWeight: "500",
   },
 
+  // ✅ no hard-coded amber anymore (color set inline with accentColor)
   focusAmountClean: {
     marginLeft: "auto",
     fontSize: 13,
     fontWeight: "700",
-    color: "#F59E0B",
   },
 
   focusTextDone: {

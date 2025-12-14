@@ -26,7 +26,14 @@ import {
 } from "react-native";
 import ImageViewing from "react-native-image-viewing";
 // 🔽 CHANGED: now using shared appTheme instead of "./theme"
-import { THEME_STORAGE_KEY, ThemeName, themes } from "../constants/appTheme";
+import {
+  ACCENT_STORAGE_KEY,
+  AccentName,
+  getAccentColor,
+  THEME_STORAGE_KEY,
+  ThemeName,
+  themes,
+} from "../constants/appTheme";
 
 // 👇 Job shape must match home.tsx / add-job.tsx
 type Job = {
@@ -73,9 +80,12 @@ const THUMB_SIZE =
 
 const STICKY_BAR_HEIGHT = 86;
 
+type ActiveSectionKey = "jobInfo" | "client" | "pricing" | "photos" | null;
+
 // 🔹 Small component just for Photos UI (header + button + grid)
 type JobPhotosSectionProps = {
   theme: any;
+  accentColor: string;
   photoUris: string[];
   onPressAddPhoto: () => void;
   onPressThumb: (index: number) => void;
@@ -84,6 +94,7 @@ type JobPhotosSectionProps = {
 
 function JobPhotosSection({
   theme,
+  accentColor,
   photoUris,
   onPressAddPhoto,
   onPressThumb,
@@ -101,7 +112,7 @@ function JobPhotosSection({
             styles.addPhotoButton,
             {
               backgroundColor: theme.cardBackground,
-              borderColor: theme.cardBorder,
+              borderColor: accentColor,
             },
           ]}
           onPress={onPressAddPhoto}
@@ -148,30 +159,91 @@ function JobPhotosSection({
 // ---------- Pure layout helpers (no logic changes) ----------
 function SectionCard({
   theme,
+  accentColor,
   title,
+  subtitle,
+  icon,
+  isActive,
+  isDimmed,
   children,
   onLayout,
 }: {
   theme: any;
-  title?: string;
+  accentColor: string;
+  title: string;
+  subtitle?: string;
+  icon?: string;
+  isActive?: boolean;
+  isDimmed?: boolean;
   children: React.ReactNode;
   onLayout?: (y: number) => void;
 }) {
   return (
-    <View
+    <Animated.View
       onLayout={(e) => onLayout?.(e.nativeEvent.layout.y)}
       style={[
         styles.card,
-        { backgroundColor: theme.cardBackground, borderColor: theme.cardBorder },
+        {
+          backgroundColor: theme.cardBackground,
+          borderColor: isActive ? accentColor : theme.cardBorder,
+          opacity: isDimmed ? 0.92 : 1,
+          transform: [{ scale: isActive ? 1.01 : 1 }],
+        },
+        isActive ? styles.cardActiveShadow : null,
       ]}
     >
-      {!!title && (
-        <Text style={[styles.cardTitle, { color: theme.textSecondary }]}>
-          {title}
-        </Text>
-      )}
-      {children}
-    </View>
+      <View style={styles.cardHeaderRow}>
+        <View
+          style={[
+            styles.cardIconBubble,
+            {
+              backgroundColor: theme.cardSecondaryBackground,
+              borderColor: theme.cardBorder,
+            },
+          ]}
+        >
+          <Text style={[styles.cardIconText, { color: theme.textPrimary }]}>
+            {icon ?? "•"}
+          </Text>
+        </View>
+
+        <View style={{ flex: 1 }}>
+          <Text style={[styles.cardTitle, { color: theme.textSecondary }]}>
+            {title}
+          </Text>
+
+          {!!subtitle && (
+            <View style={{ height: 16 }}>
+              {isActive ? (
+                <Text style={[styles.cardSubtitle, { color: theme.textMuted }]}>
+                  {subtitle}
+                </Text>
+              ) : null}
+            </View>
+          )}
+        </View>
+
+        {isActive ? (
+          <View
+            style={[
+              styles.cardActivePill,
+              {
+                borderColor: accentColor,
+                backgroundColor: accentColor + "1A",
+              },
+            ]}
+          >
+            <Text
+              style={[styles.cardActivePillText, { color: theme.textPrimary }]}
+            >
+              Editing
+            </Text>
+          </View>
+        ) : null}
+      </View>
+
+      <View style={{ marginTop: 10 }}>{children}</View>
+    </Animated.View>
   );
 }
 
@@ -214,6 +286,10 @@ export default function JobDetailScreen() {
   const [themeName, setThemeName] = useState<ThemeName>("dark");
   const theme = themes[themeName] ?? themes.dark;
 
+  // ✅ Accent shared with settings/home
+  const [accentName, setAccentName] = useState<AccentName>("jobsiteAmber");
+  const accentColor = getAccentColor(accentName);
+
   // 🔹 Company branding (used in PDFs)
   const [companyName, setCompanyName] = useState("");
   const [companyPhone, setCompanyPhone] = useState("");
@@ -221,16 +297,18 @@ export default function JobDetailScreen() {
   const [companyLicense, setCompanyLicense] = useState("");
 
   useEffect(() => {
-    const loadThemeAndBranding = async () => {
+    const loadThemeAccentAndBranding = async () => {
       try {
         const [
           savedTheme,
+          savedAccent,
           savedCompanyName,
           savedCompanyPhone,
           savedCompanyEmail,
           savedCompanyLicense,
         ] = await Promise.all([
           AsyncStorage.getItem(THEME_STORAGE_KEY),
+          AsyncStorage.getItem(ACCENT_STORAGE_KEY),
           AsyncStorage.getItem(BRANDING_KEYS.COMPANY_NAME),
           AsyncStorage.getItem(BRANDING_KEYS.COMPANY_PHONE),
           AsyncStorage.getItem(BRANDING_KEYS.COMPANY_EMAIL),
@@ -245,16 +323,25 @@ export default function JobDetailScreen() {
           setThemeName(savedTheme as ThemeName);
         }
 
+        if (
+          savedAccent &&
+          (savedAccent === "jobsiteAmber" ||
+            savedAccent === "electricBlue" ||
+            savedAccent === "safetyGreen")
+        ) {
+          setAccentName(savedAccent as AccentName);
+        }
+
         if (savedCompanyName) setCompanyName(savedCompanyName);
         if (savedCompanyPhone) setCompanyPhone(savedCompanyPhone);
         if (savedCompanyEmail) setCompanyEmail(savedCompanyEmail);
         if (savedCompanyLicense) setCompanyLicense(savedCompanyLicense);
       } catch (err) {
-        console.warn("Failed to load theme/branding:", err);
+        console.warn("Failed to load theme/accent/branding:", err);
       }
     };
 
-    loadThemeAndBranding();
+    loadThemeAccentAndBranding();
   }, []);
 
   const [job, setJob] = useState<Job | null>(null);
@@ -279,6 +366,9 @@ export default function JobDetailScreen() {
   // 🔹 Track editing (used for keyboard + sticky behavior)
   const [isEditing, setIsEditing] = useState(false);
 
+  // ✅ UI-only: which section is active
+  const [activeSection, setActiveSection] = useState<ActiveSectionKey>(null);
+
   // 🔹 Scroll + keyboard handling
   const scrollRef = useRef<ScrollView | null>(null);
   const sectionPositions = useRef<Record<string, number>>({});
@@ -294,23 +384,30 @@ export default function JobDetailScreen() {
     }
   };
 
-  const handleFocus = (sectionKey: string) => {
+  const handleFocus = (sectionKey: Exclude<ActiveSectionKey, null>) => {
     setIsEditing(true);
+    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+    setActiveSection(sectionKey);
     scrollToSection(sectionKey);
   };
 
   const dismissKeyboard = () => {
     Keyboard.dismiss();
     setIsEditing(false);
+    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+    setActiveSection(null);
   };
+
+  const hasActive = isEditing && activeSection !== null;
+  const cardIsActive = (k: Exclude<ActiveSectionKey, null>) =>
+    hasActive && activeSection === k;
+  const cardIsDimmed = (k: Exclude<ActiveSectionKey, null>) =>
+    hasActive && activeSection !== k;
 
   // Photos: full-screen + bottom sheet
   const [isImageOverlayVisible, setIsImageOverlayVisible] = useState(false);
   const [fullImageIndex, setFullImageIndex] = useState(0);
   const [isAddPhotoMenuVisible, setIsAddPhotoMenuVisible] = useState(false);
-
-  // ✅ Share menu (UI-only)
-  const [isShareMenuVisible, setIsShareMenuVisible] = useState(false);
 
   // Button animations
   const markDoneScale = useRef(new Animated.Value(1)).current;
@@ -724,6 +821,8 @@ export default function JobDetailScreen() {
         </div>
       `;
 
+      const openColor = accentColor;
+
       const html = `
         <!DOCTYPE html>
         <html>
@@ -738,8 +837,8 @@ export default function JobDetailScreen() {
               .title-block h1 { margin: 0; font-size: 20px; }
               .title-block .subtitle { margin-top: 4px; font-size: 11px; color: #6b7280; }
               .status-pill { border-radius: 999px; padding: 4px 10px; font-size: 11px; border: 1px solid ${
-                isDone ? "#059669" : "#2563EB"
-              }; color: ${isDone ? "#047857" : "#1D4ED8"}; }
+                isDone ? "#059669" : openColor
+              }; color: ${isDone ? "#047857" : openColor}; }
               .section { margin-top: 18px; padding-top: 14px; border-top: 1px solid #e5e7eb; }
               .section h2 { margin: 0 0 8px; font-size: 14px; }
               .label { font-size: 11px; color: #6b7280; margin-top: 2px; margin-bottom: 1px; }
@@ -750,7 +849,7 @@ export default function JobDetailScreen() {
               .table th { background: #f9fafb; font-weight: 600; }
               .table tfoot td { font-weight: 700; }
               .amount { text-align: right; }
-              .amount-total { color: #b45309; }
+              .amount-total { color: ${openColor}; }
               .photo-grid { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
               .photo { width: 160px; }
               .photo img { width: 100%; height: auto; border-radius: 8px; border: 1px solid #e5e7eb; object-fit: cover; }
@@ -883,6 +982,7 @@ export default function JobDetailScreen() {
 
       const createdAt = new Date(job.createdAt).toLocaleDateString();
       const statusLabel = isDone ? "Done" : "Open";
+      const openColor = accentColor;
 
       const brandName = companyName.trim();
       const brandPhone = companyPhone.trim();
@@ -927,9 +1027,9 @@ export default function JobDetailScreen() {
               .title-block h1 { margin: 0; font-size: 20px; }
               .title-block .subtitle { margin-top: 4px; font-size: 11px; color: #6b7280; }
               .status-pill { border-radius: 999px; padding: 4px 10px; font-size: 11px; border: 1px solid ${
-                isDone ? "#16a34a" : "#2563EB"
-              }; color: ${isDone ? "#15803d" : "#1D4ED8"}; background: ${
-        isDone ? "#dcfce7" : "#dbeafe"
+                isDone ? "#16a34a" : openColor
+              }; color: ${isDone ? "#15803d" : openColor}; background: ${
+        isDone ? "#dcfce7" : "#ffffff"
       }; }
               .right-header { text-align: right; }
               .company-block { font-size: 11px; color: #4b5563; margin-bottom: 6px; }
@@ -944,7 +1044,7 @@ export default function JobDetailScreen() {
               .table th { background: #f9fafb; font-weight: 600; }
               .table tfoot td { font-weight: 700; }
               .amount { text-align: right; }
-              .amount-total { color: #b45309; }
+              .amount-total { color: ${openColor}; }
               .brand-footnote { margin-top: 18px; font-size: 10px; color: #9ca3af; text-align: right; }
             </style>
           </head>
@@ -1041,6 +1141,15 @@ export default function JobDetailScreen() {
     }
   };
 
+  // ✅ Share chooser (UI-only): pick which PDF to generate
+  const openShareChooser = () => {
+    Alert.alert("Share", "Choose what to share", [
+      { text: "Cancel", style: "cancel" },
+      { text: "Share full report (PDF)", onPress: handleShareFullReport },
+      { text: "Share client report (PDF)", onPress: handleShareClientReport },
+    ]);
+  };
+
   // ---------- Render states ----------
   if (isLoading) {
     return (
@@ -1071,14 +1180,14 @@ export default function JobDetailScreen() {
         <TouchableOpacity
           style={[
             styles.simpleButton,
-            { backgroundColor: theme.primaryButtonBackground },
+            { backgroundColor: accentColor },
           ]}
           onPress={() => router.back()}
         >
           <Text
             style={[
               styles.simpleButtonText,
-              { color: theme.primaryButtonText },
+              { color: "#F9FAFB" },
             ]}
           >
             Back
@@ -1121,19 +1230,19 @@ export default function JobDetailScreen() {
             Job Detail
           </Text>
 
-          {/* ✅ Header Share (single entry point) */}
+          {/* ✅ Header right = Share (accent) */}
           <TouchableOpacity
             style={[
               styles.chatHeaderButton,
-              { backgroundColor: theme.primaryButtonBackground },
+              { backgroundColor: accentColor },
             ]}
             activeOpacity={0.9}
-            onPress={() => setIsShareMenuVisible(true)}
+            onPress={openShareChooser}
           >
             <Text
               style={[
                 styles.chatHeaderButtonText,
-                { color: theme.primaryButtonText },
+                { color: "#F9FAFB" },
               ]}
             >
               Share
@@ -1155,7 +1264,7 @@ export default function JobDetailScreen() {
           {/* ✅ Tap anywhere on empty space to dismiss keyboard */}
           <TouchableWithoutFeedback onPress={dismissKeyboard} accessible={false}>
             <View>
-              {/* HERO HEADER (layout-only) */}
+              {/* HERO HEADER */}
               <View style={styles.heroWrap}>
                 <View
                   style={[
@@ -1181,7 +1290,7 @@ export default function JobDetailScreen() {
                       style={[
                         StyleSheet.absoluteFillObject,
                         {
-                          backgroundColor: theme.primaryButtonBackground,
+                          backgroundColor: accentColor,
                           opacity: 0.18,
                         },
                       ]}
@@ -1210,17 +1319,17 @@ export default function JobDetailScreen() {
                       style={[
                         styles.statusPill,
                         {
-                          borderColor: isDone ? "#16a34a" : theme.cardBorder,
+                          borderColor: isDone ? "#16a34a" : accentColor,
                           backgroundColor: isDone
                             ? "rgba(22,163,74,0.10)"
-                            : "rgba(37,99,235,0.10)",
+                            : accentColor + "1A",
                         },
                       ]}
                     >
                       <Text
                         style={[
                           styles.statusPillText,
-                          { color: isDone ? "#22c55e" : theme.textPrimary },
+                          { color: isDone ? "#22c55e" : accentColor },
                         ]}
                       >
                         {isDone ? "Done" : "Open"}
@@ -1229,7 +1338,7 @@ export default function JobDetailScreen() {
                   </View>
                 </View>
 
-                {/* QUICK ACTIONS (Call / Maps / Team Chat) */}
+                {/* QUICK ACTIONS (no Share, Team Chat here) */}
                 <View style={styles.heroActionsRow}>
                   <ActionPill
                     theme={theme}
@@ -1259,7 +1368,12 @@ export default function JobDetailScreen() {
               {/* JOB INFO CARD */}
               <SectionCard
                 theme={theme}
+                accentColor={accentColor}
                 title="Job Info"
+                subtitle="Title, address, scope"
+                icon="🧾"
+                isActive={cardIsActive("jobInfo")}
+                isDimmed={cardIsDimmed("jobInfo")}
                 onLayout={(y) => registerSection("jobInfo", y)}
               >
                 <View style={styles.row}>
@@ -1336,7 +1450,12 @@ export default function JobDetailScreen() {
               {/* CLIENT CARD */}
               <SectionCard
                 theme={theme}
+                accentColor={accentColor}
                 title="Client"
+                subtitle="Name, phone, notes"
+                icon="👤"
+                isActive={cardIsActive("client")}
+                isDimmed={cardIsDimmed("client")}
                 onLayout={(y) => registerSection("client", y)}
               >
                 <Text style={[styles.modalLabel, { color: theme.textSecondary }]}>
@@ -1408,7 +1527,12 @@ export default function JobDetailScreen() {
               {/* PRICING CARD */}
               <SectionCard
                 theme={theme}
+                accentColor={accentColor}
                 title="Pricing"
+                subtitle="Labor + materials"
+                icon="💰"
+                isActive={cardIsActive("pricing")}
+                isDimmed={cardIsDimmed("pricing")}
                 onLayout={(y) => registerSection("pricing", y)}
               >
                 <View
@@ -1429,7 +1553,12 @@ export default function JobDetailScreen() {
                     >
                       Total
                     </Text>
-                    <Text style={styles.pricingTotalHeaderValue}>
+                    <Text
+                      style={[
+                        styles.pricingTotalHeaderValue,
+                        { color: accentColor },
+                      ]}
+                    >
                       $
                       {totalAmount.toLocaleString("en-US", {
                         minimumFractionDigits: 2,
@@ -1534,11 +1663,17 @@ export default function JobDetailScreen() {
               {/* PHOTOS CARD */}
               <SectionCard
                 theme={theme}
+                accentColor={accentColor}
                 title="Attachments"
+                subtitle="Photos + add"
+                icon="📎"
+                isActive={cardIsActive("photos")}
+                isDimmed={cardIsDimmed("photos")}
                 onLayout={(y) => registerSection("photos", y)}
               >
                 <JobPhotosSection
                   theme={theme}
+                  accentColor={accentColor}
                   photoUris={photoUris}
                   onPressAddPhoto={() => setIsAddPhotoMenuVisible(true)}
                   onPressThumb={handleOpenFullImage}
@@ -1546,8 +1681,8 @@ export default function JobDetailScreen() {
                 />
               </SectionCard>
 
-              {/* TRASH CARD (reports moved into header share sheet) */}
-              <SectionCard theme={theme} title="Trash">
+              {/* TRASH ONLY */}
+              <SectionCard theme={theme} accentColor={accentColor} title="Trash" icon="⚠️">
                 <TouchableOpacity
                   style={[
                     styles.modalDeleteButton,
@@ -1591,7 +1726,7 @@ export default function JobDetailScreen() {
                     {
                       backgroundColor: isDone
                         ? theme.secondaryButtonBackground
-                        : theme.primaryButtonBackground,
+                        : accentColor,
                     },
                   ]}
                   onPress={handleToggleDone}
@@ -1605,7 +1740,7 @@ export default function JobDetailScreen() {
                       {
                         color: isDone
                           ? theme.secondaryButtonText
-                          : theme.primaryButtonText,
+                          : "#F9FAFB",
                       },
                     ]}
                   >
@@ -1620,7 +1755,7 @@ export default function JobDetailScreen() {
                 <TouchableOpacity
                   style={[
                     styles.stickyButton,
-                    { backgroundColor: theme.primaryButtonBackground },
+                    { backgroundColor: accentColor },
                   ]}
                   onPress={handleSaveJobEdits}
                   activeOpacity={0.9}
@@ -1630,102 +1765,13 @@ export default function JobDetailScreen() {
                   <Text
                     style={[
                       styles.stickyButtonText,
-                      { color: theme.primaryButtonText },
+                      { color: "#F9FAFB" },
                     ]}
                   >
                     Save Changes
                   </Text>
                 </TouchableOpacity>
               </Animated.View>
-            </View>
-          </View>
-        )}
-
-        {/* ✅ Share bottom sheet (Full vs Client) */}
-        {isShareMenuVisible && (
-          <View style={styles.addPhotoMenuOverlay}>
-            <TouchableOpacity
-              activeOpacity={1}
-              onPress={() => setIsShareMenuVisible(false)}
-              style={styles.addPhotoMenuBackdrop}
-            />
-            <View
-              style={[
-                styles.addPhotoMenuSheet,
-                { backgroundColor: theme.cardBackground },
-              ]}
-            >
-              <Text
-                style={[
-                  styles.addPhotoMenuTitle,
-                  { color: theme.textPrimary },
-                ]}
-              >
-                Share
-              </Text>
-
-              <TouchableOpacity
-                style={[
-                  styles.addPhotoMenuOption,
-                  {
-                    backgroundColor: theme.cardBackground,
-                    borderColor: theme.cardBorder,
-                  },
-                ]}
-                onPress={() => {
-                  setIsShareMenuVisible(false);
-                  handleShareFullReport();
-                }}
-                activeOpacity={0.9}
-              >
-                <Text
-                  style={[
-                    styles.addPhotoMenuOptionText,
-                    { color: theme.textPrimary },
-                  ]}
-                >
-                  📄 Share Full Report
-                </Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={[
-                  styles.addPhotoMenuOption,
-                  {
-                    backgroundColor: theme.cardBackground,
-                    borderColor: theme.cardBorder,
-                  },
-                ]}
-                onPress={() => {
-                  setIsShareMenuVisible(false);
-                  handleShareClientReport();
-                }}
-                activeOpacity={0.9}
-              >
-                <Text
-                  style={[
-                    styles.addPhotoMenuOptionText,
-                    { color: theme.textPrimary },
-                  ]}
-                >
-                  🧾 Share Client Report
-                </Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={styles.addPhotoMenuCancel}
-                onPress={() => setIsShareMenuVisible(false)}
-                activeOpacity={0.8}
-              >
-                <Text
-                  style={[
-                    styles.addPhotoMenuCancelText,
-                    { color: theme.textMuted },
-                  ]}
-                >
-                  Cancel
-                </Text>
-              </TouchableOpacity>
             </View>
           </View>
         )}
@@ -1758,7 +1804,7 @@ export default function JobDetailScreen() {
                   styles.addPhotoMenuOption,
                   {
                     backgroundColor: theme.cardBackground,
-                    borderColor: theme.cardBorder,
+                    borderColor: accentColor,
                   },
                 ]}
                 onPress={() => {
@@ -1782,7 +1828,7 @@ export default function JobDetailScreen() {
                   styles.addPhotoMenuOption,
                   {
                     backgroundColor: theme.cardBackground,
-                    borderColor: theme.cardBorder,
+                    borderColor: accentColor,
                   },
                 ]}
                 onPress={() => {
@@ -1924,11 +1970,44 @@ const styles = StyleSheet.create({
     padding: 14,
     marginBottom: 12,
   },
+  cardActiveShadow: {
+    shadowColor: "#000",
+    shadowOpacity: 0.1,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 2,
+  },
+  cardHeaderRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+  cardIconBubble: {
+    width: 38,
+    height: 38,
+    borderRadius: 999,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+  },
+  cardIconText: { fontSize: 16, fontWeight: "800" },
   cardTitle: {
     fontSize: 13,
     fontWeight: "800",
-    marginBottom: 10,
+    marginBottom: 2,
   },
+  cardSubtitle: {
+    fontSize: 11,
+    fontWeight: "600",
+  },
+  cardActivePill: {
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderWidth: 1,
+  },
+  cardActivePillText: { fontSize: 11, fontWeight: "800" },
+
   row: { marginBottom: 10 },
   metaLabel: { fontSize: 11, fontWeight: "700" },
   metaValue: { fontSize: 13, fontWeight: "700", marginTop: 4 },
@@ -2020,7 +2099,6 @@ const styles = StyleSheet.create({
   pricingTotalHeaderLabel: { fontSize: 13, fontWeight: "600" },
   pricingTotalHeaderValue: {
     fontSize: 20,
-    color: "#FCD34D",
     fontWeight: "800",
   },
   pricingInputsRow: { flexDirection: "row", gap: 10, marginTop: 4 },
@@ -2028,7 +2106,7 @@ const styles = StyleSheet.create({
   pricingInput: { marginBottom: 8 },
   pricingSingleRow: { marginTop: 6, marginBottom: 4 },
 
-  // Reports buttons (kept)
+  // Buttons
   modalDeleteButton: {
     marginTop: 10,
     borderRadius: 999,
@@ -2058,7 +2136,7 @@ const styles = StyleSheet.create({
   },
   stickyButtonText: { fontSize: 14, fontWeight: "800" },
 
-  // Add Photo bottom sheet (reused for Share sheet)
+  // Add Photo bottom sheet
   addPhotoMenuOverlay: {
     position: "absolute",
     left: 0,
