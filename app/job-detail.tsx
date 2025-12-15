@@ -1,4 +1,8 @@
 // app/job-detail.tsx
+import CallIcon from "../assets/icons/call.png";
+import MapIcon from "../assets/icons/map.png";
+import TeamChatIcon from "../assets/icons/team-chat.png";
+
 import AsyncStorage from "@react-native-async-storage/async-storage";
 // We no longer depend on FileSystem for images, only for PDF via Print
 import * as ImagePicker from "expo-image-picker";
@@ -247,35 +251,62 @@ function SectionCard({
   );
 }
 
-function ActionPill({
+// ✅ NEW: icon-only action (no pill, no label)
+function ActionIcon({
   theme,
-  label,
+  iconSource,
   onPress,
   disabled,
+  size = 28,
 }: {
   theme: any;
-  label: string;
+  iconSource: any;
   onPress: () => void;
   disabled?: boolean;
+  size?: number;
 }) {
+  const scale = useRef(new Animated.Value(1)).current;
+
+  const onPressIn = () => {
+    Animated.spring(scale, {
+      toValue: 0.94,
+      useNativeDriver: true,
+      friction: 6,
+      tension: 180,
+    }).start();
+  };
+
+  const onPressOut = () => {
+    Animated.spring(scale, {
+      toValue: 1,
+      useNativeDriver: true,
+      friction: 6,
+      tension: 180,
+    }).start();
+  };
+
   return (
-    <TouchableOpacity
-      onPress={onPress}
-      disabled={!!disabled}
-      activeOpacity={0.9}
-      style={[
-        styles.actionPill,
-        {
-          backgroundColor: theme.cardBackground,
-          borderColor: theme.cardBorder,
-          opacity: disabled ? 0.45 : 1,
-        },
-      ]}
+    <Animated.View
+      style={{
+        transform: [{ scale }],
+        opacity: disabled ? 0.45 : 1,
+      }}
     >
-      <Text style={[styles.actionPillText, { color: theme.textPrimary }]}>
-        {label}
-      </Text>
-    </TouchableOpacity>
+      <TouchableOpacity
+        onPress={onPress}
+        disabled={!!disabled}
+        activeOpacity={0.9}
+        onPressIn={onPressIn}
+        onPressOut={onPressOut}
+        style={styles.actionIconButton}
+      >
+        <Image
+          source={iconSource}
+          style={{ width: size, height: size }}
+          resizeMode="contain"
+        />
+      </TouchableOpacity>
+    </Animated.View>
   );
 }
 
@@ -1029,8 +1060,8 @@ export default function JobDetailScreen() {
               .status-pill { border-radius: 999px; padding: 4px 10px; font-size: 11px; border: 1px solid ${
                 isDone ? "#16a34a" : openColor
               }; color: ${isDone ? "#15803d" : openColor}; background: ${
-        isDone ? "#dcfce7" : "#ffffff"
-      }; }
+                isDone ? "#dcfce7" : "#ffffff"
+              }; }
               .right-header { text-align: right; }
               .company-block { font-size: 11px; color: #4b5563; margin-bottom: 6px; }
               .company-name { font-weight: 600; font-size: 13px; color: #111827; }
@@ -1178,18 +1209,10 @@ export default function JobDetailScreen() {
           Job not found.
         </Text>
         <TouchableOpacity
-          style={[
-            styles.simpleButton,
-            { backgroundColor: accentColor },
-          ]}
+          style={[styles.simpleButton, { backgroundColor: accentColor }]}
           onPress={() => router.back()}
         >
-          <Text
-            style={[
-              styles.simpleButtonText,
-              { color: "#F9FAFB" },
-            ]}
-          >
+          <Text style={[styles.simpleButtonText, { color: "#F9FAFB" }]}>
             Back
           </Text>
         </TouchableOpacity>
@@ -1232,19 +1255,11 @@ export default function JobDetailScreen() {
 
           {/* ✅ Header right = Share (accent) */}
           <TouchableOpacity
-            style={[
-              styles.chatHeaderButton,
-              { backgroundColor: accentColor },
-            ]}
+            style={[styles.chatHeaderButton, { backgroundColor: accentColor }]}
             activeOpacity={0.9}
             onPress={openShareChooser}
           >
-            <Text
-              style={[
-                styles.chatHeaderButtonText,
-                { color: "#F9FAFB" },
-              ]}
-            >
+            <Text style={[styles.chatHeaderButtonText, { color: "#F9FAFB" }]}>
               Share
             </Text>
           </TouchableOpacity>
@@ -1338,29 +1353,35 @@ export default function JobDetailScreen() {
                   </View>
                 </View>
 
-                {/* QUICK ACTIONS (no Share, Team Chat here) */}
+                {/* QUICK ACTIONS */}
                 <View style={styles.heroActionsRow}>
-                  <ActionPill
+                  <ActionIcon
                     theme={theme}
-                    label="📞 Call"
+                    iconSource={CallIcon}
                     onPress={handleCallClient}
                     disabled={!editClientPhone.trim()}
+                    size={54}
                   />
-                  <ActionPill
+
+                  <ActionIcon
                     theme={theme}
-                    label="📍 Maps"
+                    iconSource={MapIcon}
                     onPress={handleOpenInMaps}
                     disabled={!editAddress.trim()}
+                    size={54}
                   />
-                  <ActionPill
+
+                  <ActionIcon
                     theme={theme}
-                    label="💬 Team Chat"
+                    iconSource={TeamChatIcon}
                     onPress={() =>
                       router.push({
                         pathname: "/job-chat",
                         params: { id: job.id, title: editTitle || job.title },
                       })
                     }
+                    size={82}
+                    
                   />
                 </View>
               </View>
@@ -1682,7 +1703,12 @@ export default function JobDetailScreen() {
               </SectionCard>
 
               {/* TRASH ONLY */}
-              <SectionCard theme={theme} accentColor={accentColor} title="Trash" icon="⚠️">
+              <SectionCard
+                theme={theme}
+                accentColor={accentColor}
+                title="Trash"
+                icon="⚠️"
+              >
                 <TouchableOpacity
                   style={[
                     styles.modalDeleteButton,
@@ -1691,7 +1717,10 @@ export default function JobDetailScreen() {
                   onPress={confirmMoveToTrash}
                 >
                   <Text
-                    style={[styles.modalDeleteText, { color: theme.dangerText }]}
+                    style={[
+                      styles.modalDeleteText,
+                      { color: theme.dangerText },
+                    ]}
                   >
                     Move to Trash
                   </Text>
@@ -1738,9 +1767,7 @@ export default function JobDetailScreen() {
                     style={[
                       styles.stickyButtonText,
                       {
-                        color: isDone
-                          ? theme.secondaryButtonText
-                          : "#F9FAFB",
+                        color: isDone ? theme.secondaryButtonText : "#F9FAFB",
                       },
                     ]}
                   >
@@ -1753,21 +1780,13 @@ export default function JobDetailScreen() {
                 style={{ flex: 1, transform: [{ scale: saveChangesScale }] }}
               >
                 <TouchableOpacity
-                  style={[
-                    styles.stickyButton,
-                    { backgroundColor: accentColor },
-                  ]}
+                  style={[styles.stickyButton, { backgroundColor: accentColor }]}
                   onPress={handleSaveJobEdits}
                   activeOpacity={0.9}
                   onPressIn={saveChangesAnim.onPressIn}
                   onPressOut={saveChangesAnim.onPressOut}
                 >
-                  <Text
-                    style={[
-                      styles.stickyButtonText,
-                      { color: "#F9FAFB" },
-                    ]}
-                  >
+                  <Text style={[styles.stickyButtonText, { color: "#F9FAFB" }]}>
                     Save Changes
                   </Text>
                 </TouchableOpacity>
@@ -1791,10 +1810,7 @@ export default function JobDetailScreen() {
               ]}
             >
               <Text
-                style={[
-                  styles.addPhotoMenuTitle,
-                  { color: theme.textPrimary },
-                ]}
+                style={[styles.addPhotoMenuTitle, { color: theme.textPrimary }]}
               >
                 Add Photo
               </Text>
@@ -1950,18 +1966,20 @@ const styles = StyleSheet.create({
 
   heroActionsRow: {
     flexDirection: "row",
-    gap: 8,
+    justifyContent: "center",
+    alignItems: "center",
+    gap: 35,
     marginTop: 10,
   },
-  actionPill: {
-    flex: 1,
-    borderRadius: 999,
-    paddingVertical: 9,
-    borderWidth: 1,
+
+  // ✅ NEW: icon-only button (keeps row stable)
+  actionIconButton: {
+    width: 62,
+    height: 52,
     alignItems: "center",
     justifyContent: "center",
+    borderRadius: 999,
   },
-  actionPillText: { fontSize: 12, fontWeight: "700" },
 
   // CARDS
   card: {
