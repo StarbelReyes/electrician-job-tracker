@@ -1,19 +1,14 @@
 // app/_layout.tsx
+import { useFonts } from "expo-font";
 import { Slot, usePathname } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import React, { useMemo } from "react";
 import { StyleSheet, View } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
-import {
-  SafeAreaProvider,
-  useSafeAreaInsets,
-} from "react-native-safe-area-context";
+import { SafeAreaProvider, useSafeAreaInsets } from "react-native-safe-area-context";
 import BottomNavBar from "../components/BottomNavBar";
 import { JobsProvider } from "../context/JobsContext";
-import {
-  PreferencesProvider,
-  usePreferences,
-} from "../context/PreferencesContext";
+import { PreferencesProvider, usePreferences } from "../context/PreferencesContext";
 
 type TabKey = "home" | "add" | "trash" | "settings";
 
@@ -23,7 +18,6 @@ function RootShell() {
   const { theme } = usePreferences();
 
   const activeTab = useMemo<TabKey | null>(() => {
-    // ✅ Your Home is /home (not /)
     if (pathname === "/home" || pathname === "/") return "home";
     if (pathname === "/add-job") return "add";
     if (pathname === "/trash") return "trash";
@@ -36,7 +30,6 @@ function RootShell() {
 
   return (
     <View style={[styles.shell, { backgroundColor: theme.screenBackground }]}>
-      {/* Give content space so it NEVER sits under the pinned nav */}
       <View style={{ flex: 1, paddingBottom: tabBarTotalHeight }}>
         <Slot />
       </View>
@@ -47,6 +40,15 @@ function RootShell() {
 }
 
 export default function RootLayout() {
+  const [fontsLoaded] = useFonts({
+    "Athiti-Regular": require("../assets/fonts/Athiti-Regular.ttf"),
+    "Athiti-Medium": require("../assets/fonts/Athiti-Medium.ttf"),
+    "Athiti-SemiBold": require("../assets/fonts/Athiti-SemiBold.ttf"),
+    "Athiti-Bold": require("../assets/fonts/Athiti-Bold.ttf"),
+  });
+
+  if (!fontsLoaded) return null;
+
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaProvider>
@@ -62,7 +64,5 @@ export default function RootLayout() {
 }
 
 const styles = StyleSheet.create({
-  shell: {
-    flex: 1,
-  },
+  shell: { flex: 1 },
 });

@@ -70,7 +70,13 @@ function JobPhotos({
   setPhotoUris,
   photoBase64s,
   setPhotoBase64s,
-}: any) {
+}: {
+  theme: any;
+  photoUris: string[];
+  setPhotoUris: React.Dispatch<React.SetStateAction<string[]>>;
+  photoBase64s: string[];
+  setPhotoBase64s: React.Dispatch<React.SetStateAction<string[]>>;
+}) {
   const [isImageOverlayVisible, setIsImageOverlayVisible] = useState(false);
   const [fullImageIndex, setFullImageIndex] = useState(0);
   const [isAddPhotoMenuVisible, setIsAddPhotoMenuVisible] = useState(false);
@@ -106,8 +112,8 @@ function JobPhotos({
     if (!newUris.length) return;
 
     LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-    setPhotoUris((prev: string[]) => [...prev, ...newUris]);
-    setPhotoBase64s((prev: string[]) => [...prev, ...newBase64s]);
+    setPhotoUris((prev) => [...prev, ...newUris]);
+    setPhotoBase64s((prev) => [...prev, ...newBase64s]);
   };
 
   const handleAddPhotoFromCamera = async () => {
@@ -132,8 +138,8 @@ function JobPhotos({
     if (!asset?.uri || !asset.base64) return;
 
     LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-    setPhotoUris((prev: string[]) => [...prev, asset.uri]);
-    setPhotoBase64s((prev: string[]) => [...prev, asset.base64 as string]);
+    setPhotoUris((prev) => [...prev, asset.uri]);
+    setPhotoBase64s((prev) => [...prev, asset.base64 as string]);
   };
 
   const handleRemovePhoto = (uriToRemove: string) => {
@@ -145,8 +151,8 @@ function JobPhotos({
         style: "destructive",
         onPress: () => {
           LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-          setPhotoUris((prev: string[]) => prev.filter((u) => u !== uriToRemove));
-          setPhotoBase64s((prev: string[]) =>
+          setPhotoUris((prev) => prev.filter((u) => u !== uriToRemove));
+          setPhotoBase64s((prev) =>
             index >= 0 ? prev.filter((_, i) => i !== index) : prev
           );
         },
@@ -449,7 +455,6 @@ export default function AddJobScreen() {
 
           <ScrollView
             ref={scrollRef}
-            // ✅ force background so no 1-frame flash
             style={{ flex: 1, backgroundColor: theme.screenBackground }}
             contentContainerStyle={[
               styles.detailsScroll,
@@ -541,7 +546,9 @@ export default function AddJobScreen() {
                     Client Info
                   </Text>
 
-                  <Text style={[styles.modalLabel, { color: theme.textSecondary }]}>Client Name</Text>
+                  <Text style={[styles.modalLabel, { color: theme.textSecondary }]}>
+                    Client Name
+                  </Text>
                   <TextInput
                     style={[
                       styles.modalInput,
@@ -563,7 +570,9 @@ export default function AddJobScreen() {
                     onBlur={() => setIsEditing(false)}
                   />
 
-                  <Text style={[styles.modalLabel, { color: theme.textSecondary }]}>Client Phone</Text>
+                  <Text style={[styles.modalLabel, { color: theme.textSecondary }]}>
+                    Client Phone
+                  </Text>
                   <TextInput
                     style={[
                       styles.modalInput,
@@ -586,7 +595,9 @@ export default function AddJobScreen() {
                     onBlur={() => setIsEditing(false)}
                   />
 
-                  <Text style={[styles.modalLabel, { color: theme.textSecondary }]}>Client Notes</Text>
+                  <Text style={[styles.modalLabel, { color: theme.textSecondary }]}>
+                    Client Notes
+                  </Text>
                   <TextInput
                     style={[
                       styles.modalInputMultiline,
@@ -737,7 +748,10 @@ export default function AddJobScreen() {
                 <View style={styles.modalButtonRow}>
                   <Animated.View style={{ flex: 1, transform: [{ scale: saveScale }] }}>
                     <TouchableOpacity
-                      style={[styles.modalButton, { backgroundColor: theme.primaryButtonBackground }]}
+                      style={[
+                        styles.modalButton,
+                        { backgroundColor: theme.primaryButtonBackground },
+                      ]}
                       onPress={handleSaveJob}
                       activeOpacity={0.9}
                       onPressIn={saveAnim.onPressIn}
@@ -777,10 +791,11 @@ const styles = StyleSheet.create({
   },
   backText: {
     fontSize: 14,
+    fontFamily: "Athiti-Medium",
   },
   headerTitle: {
     fontSize: 22,
-    fontWeight: "700",
+    fontFamily: "Athiti-Bold",
   },
 
   detailsScroll: {
@@ -791,7 +806,7 @@ const styles = StyleSheet.create({
 
   sectionTitle: {
     fontSize: 14,
-    fontWeight: "700",
+    fontFamily: "Athiti-Bold",
     marginTop: 16,
     marginBottom: 6,
   },
@@ -799,6 +814,7 @@ const styles = StyleSheet.create({
   modalLabel: {
     fontSize: 12,
     marginBottom: 4,
+    fontFamily: "Athiti-Medium",
   },
   modalInput: {
     borderRadius: 14,
@@ -806,6 +822,7 @@ const styles = StyleSheet.create({
     paddingVertical: 9,
     fontSize: 14,
     marginBottom: 10,
+    fontFamily: "Athiti-Regular",
   },
   modalInputMultiline: {
     borderRadius: 14,
@@ -815,6 +832,7 @@ const styles = StyleSheet.create({
     marginBottom: 10,
     minHeight: 96,
     textAlignVertical: "top",
+    fontFamily: "Athiti-Regular",
   },
 
   modalButtonRow: {
@@ -832,7 +850,7 @@ const styles = StyleSheet.create({
   },
   modalButtonText: {
     fontSize: 15,
-    fontWeight: "600",
+    fontFamily: "Athiti-SemiBold",
   },
 
   photosRow: {
@@ -849,7 +867,7 @@ const styles = StyleSheet.create({
   },
   addPhotoButtonText: {
     fontSize: 13,
-    fontWeight: "600",
+    fontFamily: "Athiti-SemiBold",
   },
   photoGrid: {
     flexDirection: "row",
@@ -880,7 +898,7 @@ const styles = StyleSheet.create({
   photoRemoveText: {
     color: "#FCA5A5",
     fontSize: 10,
-    fontWeight: "700",
+    fontFamily: "Athiti-Bold",
   },
 
   addPhotoMenuOverlay: {
@@ -904,7 +922,7 @@ const styles = StyleSheet.create({
   },
   addPhotoMenuTitle: {
     fontSize: 15,
-    fontWeight: "600",
+    fontFamily: "Athiti-SemiBold",
     marginBottom: 10,
     textAlign: "center",
   },
@@ -918,6 +936,7 @@ const styles = StyleSheet.create({
   addPhotoMenuOptionText: {
     fontSize: 14,
     textAlign: "center",
+    fontFamily: "Athiti-Medium",
   },
   addPhotoMenuCancel: {
     marginTop: 6,
@@ -926,6 +945,7 @@ const styles = StyleSheet.create({
   addPhotoMenuCancelText: {
     fontSize: 13,
     textAlign: "center",
+    fontFamily: "Athiti-Medium",
   },
 
   pricingCard: {
@@ -949,12 +969,12 @@ const styles = StyleSheet.create({
   },
   pricingTotalHeaderLabel: {
     fontSize: 13,
-    fontWeight: "600",
+    fontFamily: "Athiti-SemiBold",
   },
   pricingTotalHeaderValue: {
     fontSize: 20,
     color: "#FCD34D",
-    fontWeight: "800",
+    fontFamily: "Athiti-Bold",
   },
   pricingInputsRow: {
     flexDirection: "row",

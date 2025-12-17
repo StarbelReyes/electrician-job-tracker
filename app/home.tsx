@@ -609,9 +609,7 @@ const HomeScreen: FC = () => {
 
   // ✅ Don’t render until prefs are ready (kills initial flash completely)
   if (!isReady) {
-    return (
-      <View style={{ flex: 1, backgroundColor: themes.dark.screenBackground }} />
-    );
+    return <View style={{ flex: 1, backgroundColor: themes.dark.screenBackground }} />;
   }
 
   return (
@@ -651,7 +649,10 @@ const HomeScreen: FC = () => {
               <TouchableOpacity
                 style={[
                   styles.summaryCard,
-                  { backgroundColor: theme.summaryCardBackground + "F2", borderColor: theme.summaryCardBorder },
+                  {
+                    backgroundColor: theme.summaryCardBackground + "F2",
+                    borderColor: theme.summaryCardBorder,
+                  },
                   statusFilter === "open" && styles.summaryCardActive,
                   statusFilter === "open" && { borderColor: accentColor },
                 ]}
@@ -664,7 +665,10 @@ const HomeScreen: FC = () => {
               <TouchableOpacity
                 style={[
                   styles.summaryCard,
-                  { backgroundColor: theme.summaryCardBackground + "F2", borderColor: theme.summaryCardBorder },
+                  {
+                    backgroundColor: theme.summaryCardBackground + "F2",
+                    borderColor: theme.summaryCardBorder,
+                  },
                   statusFilter === "done" && styles.summaryCardActive,
                   statusFilter === "done" && { borderColor: accentColor },
                 ]}
@@ -677,7 +681,10 @@ const HomeScreen: FC = () => {
               <TouchableOpacity
                 style={[
                   styles.summaryCard,
-                  { backgroundColor: theme.summaryCardBackground + "F2", borderColor: theme.summaryCardBorder },
+                  {
+                    backgroundColor: theme.summaryCardBackground + "F2",
+                    borderColor: theme.summaryCardBorder,
+                  },
                   statusFilter === "all" && styles.summaryCardActive,
                   statusFilter === "all" && { borderColor: accentColor },
                 ]}
@@ -730,7 +737,11 @@ const HomeScreen: FC = () => {
                     ]}
                   >
                     {sortOptions.map((option) => (
-                      <TouchableOpacity key={option} style={styles.sortOption} onPress={() => handleSelectSort(option)}>
+                      <TouchableOpacity
+                        key={option}
+                        style={styles.sortOption}
+                        onPress={() => handleSelectSort(option)}
+                      >
                         <Text
                           style={[
                             styles.sortOptionText,
@@ -749,9 +760,13 @@ const HomeScreen: FC = () => {
             </View>
 
             <View style={styles.focusHeaderRow}>
-              <Text style={[styles.focusHeaderTitle, { color: theme.textPrimary }]}>Focused jobs</Text>
+              <Text style={[styles.focusHeaderTitle, { color: theme.textPrimary }]}>
+                Focused jobs
+              </Text>
               <Text style={[styles.focusHeaderCount, { color: theme.textMuted }]}>
-                {visibleJobs.length === 0 ? "0 / 0" : `${Math.min(activeIndex + 1, visibleJobs.length)} / ${visibleJobs.length}`}
+                {visibleJobs.length === 0
+                  ? "0 / 0"
+                  : `${Math.min(activeIndex + 1, visibleJobs.length)} / ${visibleJobs.length}`}
               </Text>
             </View>
 
@@ -797,7 +812,8 @@ const styles = StyleSheet.create({
   },
   header: {
     fontSize: 22,
-    fontWeight: "700",
+    fontFamily: "Athiti-Bold",
+    letterSpacing: 0.2,
   },
 
   aiHelperRow: {
@@ -819,8 +835,9 @@ const styles = StyleSheet.create({
   },
   aiHelperText: {
     fontSize: 12,
-    fontWeight: "600",
+    fontFamily: "Athiti-SemiBold",
     color: "#F9FAFB",
+    letterSpacing: 0.2,
   },
 
   summaryRow: {
@@ -844,11 +861,14 @@ const styles = StyleSheet.create({
   },
   summaryLabel: {
     fontSize: 12,
+    fontFamily: "Athiti-Medium",
     marginBottom: 6,
+    letterSpacing: 0.2,
   },
   summaryValue: {
     fontSize: 20,
-    fontWeight: "700",
+    fontFamily: "Athiti-Bold",
+    letterSpacing: 0.2,
   },
 
   controlsRow: {
@@ -865,6 +885,7 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     paddingHorizontal: 14,
     fontSize: 15,
+    fontFamily: "Athiti-Regular",
     borderWidth: 1,
   },
 
@@ -880,10 +901,13 @@ const styles = StyleSheet.create({
   },
   sortLabel: {
     fontSize: 11,
+    fontFamily: "Athiti-Medium",
+    letterSpacing: 0.2,
   },
   sortValue: {
     fontSize: 13,
-    fontWeight: "600",
+    fontFamily: "Athiti-SemiBold",
+    letterSpacing: 0.2,
   },
   sortDropdown: {
     marginTop: 6,
@@ -898,9 +922,10 @@ const styles = StyleSheet.create({
   },
   sortOptionText: {
     fontSize: 14,
+    fontFamily: "Athiti-Medium",
   },
   sortOptionTextActive: {
-    fontWeight: "700",
+    fontFamily: "Athiti-Bold",
   },
 
   focusHeaderRow: {
@@ -912,11 +937,12 @@ const styles = StyleSheet.create({
   },
   focusHeaderTitle: {
     fontSize: 18,
-    fontWeight: "700",
+    fontFamily: "Athiti-Bold",
+    letterSpacing: 0.2,
   },
   focusHeaderCount: {
     fontSize: 13,
-    fontWeight: "500",
+    fontFamily: "Athiti-Medium",
   },
 
   focusListContent: {
@@ -966,14 +992,17 @@ const styles = StyleSheet.create({
 
   focusTitle: {
     fontSize: 17,
-    fontWeight: "700",
+    fontFamily: "Athiti-Bold",
+    letterSpacing: 0.15,
   },
   focusClient: {
     fontSize: 13,
+    fontFamily: "Athiti-Medium",
     marginTop: 3,
   },
   focusAddress: {
     fontSize: 13,
+    fontFamily: "Athiti-Regular",
     marginTop: 1,
     marginBottom: 10,
   },
@@ -992,7 +1021,8 @@ const styles = StyleSheet.create({
   },
   focusStatusText: {
     fontSize: 11,
-    fontWeight: "600",
+    fontFamily: "Athiti-SemiBold",
+    letterSpacing: 0.2,
   },
 
   focusPhotoChip: {
@@ -1006,14 +1036,15 @@ const styles = StyleSheet.create({
   },
   focusPhotoChipText: {
     fontSize: 12,
+    fontFamily: "Athiti-Medium",
     color: "#9CA3AF",
-    fontWeight: "500",
   },
 
   focusAmountClean: {
     marginLeft: "auto",
     fontSize: 13,
-    fontWeight: "700",
+    fontFamily: "Athiti-Bold",
+    letterSpacing: 0.2,
   },
 
   focusTextDone: {
@@ -1024,6 +1055,7 @@ const styles = StyleSheet.create({
   emptyText: {
     textAlign: "center",
     fontSize: 14,
+    fontFamily: "Athiti-Medium",
     marginTop: 16,
   },
 });
