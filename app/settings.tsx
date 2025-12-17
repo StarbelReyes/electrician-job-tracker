@@ -1040,7 +1040,7 @@ const styles = StyleSheet.create({
   },
   headerTitle: {
     fontSize: 18,
-    fontWeight: "700",
+    fontFamily: "Athiti-Bold",
   },
 
   scrollContent: {
@@ -1074,11 +1074,12 @@ const styles = StyleSheet.create({
   },
   sectionTitle: {
     fontSize: 14,
-    fontWeight: "700",
+    fontFamily: "Athiti-Bold",
   },
   sectionSubtitle: {
     fontSize: 11,
     marginBottom: 6,
+    fontFamily: "Athiti-Regular",
   },
 
   row: {
@@ -1088,15 +1089,16 @@ const styles = StyleSheet.create({
   },
   rowTitle: {
     fontSize: 13,
-    fontWeight: "600",
+    fontFamily: "Athiti-SemiBold",
   },
   rowSubtitle: {
     fontSize: 11,
     marginTop: 2,
+    fontFamily: "Athiti-Regular",
   },
   rowValue: {
     fontSize: 13,
-    fontWeight: "600",
+    fontFamily: "Athiti-SemiBold",
     marginLeft: 12,
   },
 
@@ -1110,18 +1112,23 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     paddingHorizontal: 10,
   },
+  optionButtonText: {
+    fontSize: 13,
+    fontFamily: "Athiti-SemiBold",
+  },
 
   fieldBlock: {
     marginTop: 10,
   },
   fieldLabel: {
     fontSize: 12,
-    fontWeight: "600",
+    fontFamily: "Athiti-SemiBold",
   },
   fieldHelp: {
     fontSize: 11,
     marginTop: 2,
     marginBottom: 4,
+    fontFamily: "Athiti-Regular",
   },
   fieldInput: {
     borderRadius: 10,
@@ -1129,6 +1136,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     paddingVertical: 8,
     fontSize: 13,
+    fontFamily: "Athiti-Regular",
   },
   notesInput: {
     borderRadius: 10,
@@ -1138,6 +1146,7 @@ const styles = StyleSheet.create({
     fontSize: 13,
     minHeight: 80,
     textAlignVertical: "top",
+    fontFamily: "Athiti-Regular",
   },
 
   dataHeaderRow: {
@@ -1151,6 +1160,7 @@ const styles = StyleSheet.create({
     textAlign: "right",
     flexShrink: 1,
     maxWidth: "50%",
+    fontFamily: "Athiti-Regular",
   },
   dataRow: {
     flexDirection: "row",
@@ -1172,7 +1182,7 @@ const styles = StyleSheet.create({
   },
   linkButtonText: {
     fontSize: 12,
-    fontWeight: "600",
+    fontFamily: "Athiti-SemiBold",
   },
 
   aboutRow: {
@@ -1198,7 +1208,7 @@ const styles = StyleSheet.create({
   },
   accentValueText: {
     fontSize: 11,
-    fontWeight: "600",
+    fontFamily: "Athiti-SemiBold",
   },
   accentOptionButton: {
     borderRadius: 12,
@@ -1219,6 +1229,7 @@ const styles = StyleSheet.create({
   accentLabel: {
     fontSize: 13,
     flex: 1,
+    fontFamily: "Athiti-SemiBold",
   },
   accentSelectedTag: {
     fontSize: 10,
@@ -1227,6 +1238,7 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     borderWidth: 1,
     overflow: "hidden",
+    fontFamily: "Athiti-SemiBold",
   },
 
   logoutButton: {
@@ -1242,6 +1254,6 @@ const styles = StyleSheet.create({
   },
   logoutText: {
     fontSize: 14,
-    fontWeight: "700",
+    fontFamily: "Athiti-Bold",
   },
 });
