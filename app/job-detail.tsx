@@ -29,15 +29,8 @@ import {
   View,
 } from "react-native";
 import ImageViewing from "react-native-image-viewing";
-// 🔽 CHANGED: now using shared appTheme instead of "./theme"
-import {
-  ACCENT_STORAGE_KEY,
-  AccentName,
-  getAccentColor,
-  THEME_STORAGE_KEY,
-  ThemeName,
-  themes,
-} from "../constants/appTheme";
+import { themes } from "../constants/appTheme";
+import { usePreferences } from "../context/PreferencesContext";
 
 // 👇 Job shape must match home.tsx / add-job.tsx
 type Job = {
@@ -83,6 +76,9 @@ const THUMB_SIZE =
   GRID_COLUMNS;
 
 const STICKY_BAR_HEIGHT = 86;
+
+// ✅ Match add-job.tsx offset behavior
+const SCROLL_OFFSET = 80;
 
 type ActiveSectionKey = "jobInfo" | "client" | "pricing" | "photos" | null;
 
@@ -251,9 +247,8 @@ function SectionCard({
   );
 }
 
-// ✅ NEW: icon-only action (no pill, no label)
+// ✅ icon-only action (no pill, no label)
 function ActionIcon({
-  theme,
   iconSource,
   onPress,
   disabled,
@@ -314,12 +309,8 @@ export default function JobDetailScreen() {
   const router = useRouter();
   const { id } = useLocalSearchParams<{ id?: string }>();
 
-  const [themeName, setThemeName] = useState<ThemeName>("dark");
-  const theme = themes[themeName] ?? themes.dark;
-
-  // ✅ Accent shared with settings/home
-  const [accentName, setAccentName] = useState<AccentName>("jobsiteAmber");
-  const accentColor = getAccentColor(accentName);
+  // ✅ LOCKED theme + accent from PreferencesContext
+  const { isReady, theme, accentColor } = usePreferences();
 
   // 🔹 Company branding (used in PDFs)
   const [companyName, setCompanyName] = useState("");
@@ -328,51 +319,30 @@ export default function JobDetailScreen() {
   const [companyLicense, setCompanyLicense] = useState("");
 
   useEffect(() => {
-    const loadThemeAccentAndBranding = async () => {
+    const loadBranding = async () => {
       try {
         const [
-          savedTheme,
-          savedAccent,
           savedCompanyName,
           savedCompanyPhone,
           savedCompanyEmail,
           savedCompanyLicense,
         ] = await Promise.all([
-          AsyncStorage.getItem(THEME_STORAGE_KEY),
-          AsyncStorage.getItem(ACCENT_STORAGE_KEY),
           AsyncStorage.getItem(BRANDING_KEYS.COMPANY_NAME),
           AsyncStorage.getItem(BRANDING_KEYS.COMPANY_PHONE),
           AsyncStorage.getItem(BRANDING_KEYS.COMPANY_EMAIL),
           AsyncStorage.getItem(BRANDING_KEYS.COMPANY_LICENSE),
         ]);
 
-        if (
-          savedTheme === "light" ||
-          savedTheme === "dark" ||
-          savedTheme === "midnight"
-        ) {
-          setThemeName(savedTheme as ThemeName);
-        }
-
-        if (
-          savedAccent &&
-          (savedAccent === "jobsiteAmber" ||
-            savedAccent === "electricBlue" ||
-            savedAccent === "safetyGreen")
-        ) {
-          setAccentName(savedAccent as AccentName);
-        }
-
         if (savedCompanyName) setCompanyName(savedCompanyName);
         if (savedCompanyPhone) setCompanyPhone(savedCompanyPhone);
         if (savedCompanyEmail) setCompanyEmail(savedCompanyEmail);
         if (savedCompanyLicense) setCompanyLicense(savedCompanyLicense);
       } catch (err) {
-        console.warn("Failed to load theme/accent/branding:", err);
+        console.warn("Failed to load branding:", err);
       }
     };
 
-    loadThemeAccentAndBranding();
+    loadBranding();
   }, []);
 
   const [job, setJob] = useState<Job | null>(null);
@@ -408,18 +378,29 @@ export default function JobDetailScreen() {
     sectionPositions.current[key] = y;
   };
 
-  const scrollToSection = (key: string) => {
+  const scrollToSectionWithRetry = (key: string, triesLeft = 8, delayMs = 40) => {
     const y = sectionPositions.current[key];
-    if (scrollRef.current != null && y !== undefined) {
-      scrollRef.current.scrollTo({ y: Math.max(y - 90, 0), animated: true });
+
+    if (scrollRef.current && y !== undefined) {
+      scrollRef.current.scrollTo({
+        y: Math.max(y - SCROLL_OFFSET, 0),
+        animated: true,
+      });
+      return;
     }
+
+    if (triesLeft <= 0) return;
+    setTimeout(() => scrollToSectionWithRetry(key, triesLeft - 1, delayMs), delayMs);
   };
 
   const handleFocus = (sectionKey: Exclude<ActiveSectionKey, null>) => {
     setIsEditing(true);
     LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
     setActiveSection(sectionKey);
-    scrollToSection(sectionKey);
+
+    requestAnimationFrame(() => {
+      scrollToSectionWithRetry(sectionKey);
+    });
   };
 
   const dismissKeyboard = () => {
@@ -503,15 +484,9 @@ export default function JobDetailScreen() {
           setEditClientNotes(found.clientNotes || "");
           setIsDone(found.isDone);
 
-          setLaborHours(
-            found.laborHours !== undefined ? String(found.laborHours) : ""
-          );
-          setHourlyRate(
-            found.hourlyRate !== undefined ? String(found.hourlyRate) : ""
-          );
-          setMaterialCost(
-            found.materialCost !== undefined ? String(found.materialCost) : ""
-          );
+          setLaborHours(found.laborHours !== undefined ? String(found.laborHours) : "");
+          setHourlyRate(found.hourlyRate !== undefined ? String(found.hourlyRate) : "");
+          setMaterialCost(found.materialCost !== undefined ? String(found.materialCost) : "");
 
           setPhotoUris(found.photoUris || []);
           setPhotoBase64s(found.photoBase64s || []);
@@ -533,8 +508,7 @@ export default function JobDetailScreen() {
   };
 
   const totalAmount =
-    parseNumber(laborHours) * parseNumber(hourlyRate) +
-    parseNumber(materialCost);
+    parseNumber(laborHours) * parseNumber(hourlyRate) + parseNumber(materialCost);
 
   const persistJobs = async (updatedJobs: Job[]) => {
     await AsyncStorage.setItem(STORAGE_KEYS.JOBS, JSON.stringify(updatedJobs));
@@ -543,8 +517,7 @@ export default function JobDetailScreen() {
   const safeHtml = (value: string) =>
     value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
-  const withLineBreaks = (value: string) =>
-    safeHtml(value).replace(/\n/g, "<br />");
+  const withLineBreaks = (value: string) => safeHtml(value).replace(/\n/g, "<br />");
 
   // ---------- Actions ----------
   const handleSaveJobEdits = async () => {
@@ -592,9 +565,7 @@ export default function JobDetailScreen() {
     try {
       const jobsJson = await AsyncStorage.getItem(STORAGE_KEYS.JOBS);
       const jobs: Job[] = jobsJson ? JSON.parse(jobsJson) : [];
-      const next = jobs.map((j) =>
-        j.id === job.id ? { ...j, isDone: nextDone } : j
-      );
+      const next = jobs.map((j) => (j.id === job.id ? { ...j, isDone: nextDone } : j));
 
       LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
       await persistJobs(next);
@@ -640,50 +611,38 @@ export default function JobDetailScreen() {
   const confirmMoveToTrash = () => {
     if (!job) return;
 
-    Alert.alert(
-      "Move to Trash",
-      "Are you sure you want to move this job to Trash?",
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Move",
-          style: "destructive",
-          onPress: async () => {
-            try {
-              const [jobsJson, trashJson] = await Promise.all([
-                AsyncStorage.getItem(STORAGE_KEYS.JOBS),
-                AsyncStorage.getItem(STORAGE_KEYS.TRASH),
-              ]);
+    Alert.alert("Move to Trash", "Are you sure you want to move this job to Trash?", [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Move",
+        style: "destructive",
+        onPress: async () => {
+          try {
+            const [jobsJson, trashJson] = await Promise.all([
+              AsyncStorage.getItem(STORAGE_KEYS.JOBS),
+              AsyncStorage.getItem(STORAGE_KEYS.TRASH),
+            ]);
 
-              const jobs: Job[] = jobsJson ? JSON.parse(jobsJson) : [];
-              const trash: Job[] = trashJson ? JSON.parse(trashJson) : [];
+            const jobs: Job[] = jobsJson ? JSON.parse(jobsJson) : [];
+            const trash: Job[] = trashJson ? JSON.parse(trashJson) : [];
 
-              const remaining = jobs.filter((j) => j.id !== job.id);
-              const newTrash = [...trash, job];
+            const remaining = jobs.filter((j) => j.id !== job.id);
+            const newTrash = [...trash, job];
 
-              LayoutAnimation.configureNext(
-                LayoutAnimation.Presets.easeInEaseOut
-              );
-              await Promise.all([
-                AsyncStorage.setItem(
-                  STORAGE_KEYS.JOBS,
-                  JSON.stringify(remaining)
-                ),
-                AsyncStorage.setItem(
-                  STORAGE_KEYS.TRASH,
-                  JSON.stringify(newTrash)
-                ),
-              ]);
+            LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+            await Promise.all([
+              AsyncStorage.setItem(STORAGE_KEYS.JOBS, JSON.stringify(remaining)),
+              AsyncStorage.setItem(STORAGE_KEYS.TRASH, JSON.stringify(newTrash)),
+            ]);
 
-              router.back();
-            } catch (e) {
-              console.warn("Failed to move to trash:", e);
-              Alert.alert("Error", "Could not move job to Trash.");
-            }
-          },
+            router.back();
+          } catch (e) {
+            console.warn("Failed to move to trash:", e);
+            Alert.alert("Error", "Could not move job to Trash.");
+          }
         },
-      ]
-    );
+      },
+    ]);
   };
 
   // ---------- Photos ----------
@@ -750,24 +709,18 @@ export default function JobDetailScreen() {
 
   const handleRemovePhoto = (uriToRemove: string) => {
     const index = photoUris.indexOf(uriToRemove);
-    Alert.alert(
-      "Remove photo",
-      "Are you sure you want to remove this photo from the job?",
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Remove",
-          style: "destructive",
-          onPress: () => {
-            LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-            setPhotoUris((prev) => prev.filter((u) => u !== uriToRemove));
-            setPhotoBase64s((prev) =>
-              index >= 0 ? prev.filter((_, i) => i !== index) : prev
-            );
-          },
+    Alert.alert("Remove photo", "Are you sure you want to remove this photo from the job?", [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Remove",
+        style: "destructive",
+        onPress: () => {
+          LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+          setPhotoUris((prev) => prev.filter((u) => u !== uriToRemove));
+          setPhotoBase64s((prev) => (index >= 0 ? prev.filter((_, i) => i !== index) : prev));
         },
-      ]
-    );
+      },
+    ]);
   };
 
   const handleOpenFullImage = (index: number) => {
@@ -796,32 +749,23 @@ export default function JobDetailScreen() {
 
       const companyHeaderLines: string[] = [];
       if (brandName) {
-        companyHeaderLines.push(
-          `<div class="company-name">${safeHtml(brandName)}</div>`
-        );
+        companyHeaderLines.push(`<div class="company-name">${safeHtml(brandName)}</div>`);
       }
       if (brandPhone) {
-        companyHeaderLines.push(
-          `<div class="company-line">${safeHtml(brandPhone)}</div>`
-        );
+        companyHeaderLines.push(`<div class="company-line">${safeHtml(brandPhone)}</div>`);
       }
       if (brandEmail) {
-        companyHeaderLines.push(
-          `<div class="company-line">${safeHtml(brandEmail)}</div>`
-        );
+        companyHeaderLines.push(`<div class="company-line">${safeHtml(brandEmail)}</div>`);
       }
       if (brandLicense) {
-        companyHeaderLines.push(
-          `<div class="company-line">${safeHtml(brandLicense)}</div>`
-        );
+        companyHeaderLines.push(`<div class="company-line">${safeHtml(brandLicense)}</div>`);
       }
 
       const companyHeaderHtml = hasBranding
         ? `<div class="company-block">${companyHeaderLines.join("")}</div>`
         : "";
 
-      const bases: string[] =
-        photoBase64s.length > 0 ? photoBase64s : job.photoBase64s || [];
+      const bases: string[] = photoBase64s.length > 0 ? photoBase64s : job.photoBase64s || [];
 
       const photoBlocks: string[] = [];
       for (let i = 0; i < bases.length; i++) {
@@ -924,20 +868,12 @@ export default function JobDetailScreen() {
                 <h2>Client Info</h2>
                 <div class="label">Client Name</div>
                 <div class="value">
-                  ${
-                    editClientName.trim()
-                      ? safeHtml(editClientName.trim())
-                      : "Not set"
-                  }
+                  ${editClientName.trim() ? safeHtml(editClientName.trim()) : "Not set"}
                 </div>
 
                 <div class="label">Client Phone</div>
                 <div class="value">
-                  ${
-                    editClientPhone.trim()
-                      ? safeHtml(editClientPhone.trim())
-                      : "Not set"
-                  }
+                  ${editClientPhone.trim() ? safeHtml(editClientPhone.trim()) : "Not set"}
                 </div>
 
                 <div class="label">Client Notes</div>
@@ -975,9 +911,7 @@ export default function JobDetailScreen() {
                   <tfoot>
                     <tr>
                       <td colspan="2">Total</td>
-                      <td class="amount amount-total">$${totalAmount.toFixed(
-                        2
-                      )}</td>
+                      <td class="amount amount-total">$${totalAmount.toFixed(2)}</td>
                     </tr>
                   </tfoot>
                 </table>
@@ -1023,22 +957,10 @@ export default function JobDetailScreen() {
       const hasBranding = brandName || brandPhone || brandEmail || brandLicense;
 
       const companyHeaderLines: string[] = [];
-      if (brandName)
-        companyHeaderLines.push(
-          `<div class="company-name">${safeHtml(brandName)}</div>`
-        );
-      if (brandPhone)
-        companyHeaderLines.push(
-          `<div class="company-line">${safeHtml(brandPhone)}</div>`
-        );
-      if (brandEmail)
-        companyHeaderLines.push(
-          `<div class="company-line">${safeHtml(brandEmail)}</div>`
-        );
-      if (brandLicense)
-        companyHeaderLines.push(
-          `<div class="company-line">${safeHtml(brandLicense)}</div>`
-        );
+      if (brandName) companyHeaderLines.push(`<div class="company-name">${safeHtml(brandName)}</div>`);
+      if (brandPhone) companyHeaderLines.push(`<div class="company-line">${safeHtml(brandPhone)}</div>`);
+      if (brandEmail) companyHeaderLines.push(`<div class="company-line">${safeHtml(brandEmail)}</div>`);
+      if (brandLicense) companyHeaderLines.push(`<div class="company-line">${safeHtml(brandLicense)}</div>`);
 
       const companyHeaderHtml = hasBranding
         ? `<div class="company-block">${companyHeaderLines.join("")}</div>`
@@ -1098,26 +1020,16 @@ export default function JobDetailScreen() {
                 <div class="value">${safeHtml(editAddress || job.address)}</div>
 
                 <div class="label">Description / Scope</div>
-                <div class="value">${withLineBreaks(
-                  editDescription || job.description
-                )}</div>
+                <div class="value">${withLineBreaks(editDescription || job.description)}</div>
               </div>
 
               <div class="section">
                 <h2>Client Info</h2>
                 <div class="label">Client Name</div>
-                <div class="value">${
-                  editClientName.trim()
-                    ? safeHtml(editClientName.trim())
-                    : "Not set"
-                }</div>
+                <div class="value">${editClientName.trim() ? safeHtml(editClientName.trim()) : "Not set"}</div>
 
                 <div class="label">Client Phone</div>
-                <div class="value">${
-                  editClientPhone.trim()
-                    ? safeHtml(editClientPhone.trim())
-                    : "Not set"
-                }</div>
+                <div class="value">${editClientPhone.trim() ? safeHtml(editClientPhone.trim()) : "Not set"}</div>
               </div>
 
               <div class="section">
@@ -1145,9 +1057,7 @@ export default function JobDetailScreen() {
                   <tfoot>
                     <tr>
                       <td colspan="2">Total</td>
-                      <td class="amount amount-total">$${totalAmount.toFixed(
-                        2
-                      )}</td>
+                      <td class="amount amount-total">$${totalAmount.toFixed(2)}</td>
                     </tr>
                   </tfoot>
                 </table>
@@ -1172,7 +1082,6 @@ export default function JobDetailScreen() {
     }
   };
 
-  // ✅ Share chooser (UI-only): pick which PDF to generate
   const openShareChooser = () => {
     Alert.alert("Share", "Choose what to share", [
       { text: "Cancel", style: "cancel" },
@@ -1181,15 +1090,15 @@ export default function JobDetailScreen() {
     ]);
   };
 
+  // ✅ Don’t render until prefs are ready (kills initial flash)
+  if (!isReady) {
+    return <View style={{ flex: 1, backgroundColor: themes.light.screenBackground }} />;
+  }
+
   // ---------- Render states ----------
   if (isLoading) {
     return (
-      <View
-        style={[
-          styles.loadingScreen,
-          { backgroundColor: theme.screenBackground },
-        ]}
-      >
+      <View style={[styles.loadingScreen, { backgroundColor: theme.screenBackground }]}>
         <Text style={[styles.loadingText, { color: theme.textPrimary }]}>
           Loading job…
         </Text>
@@ -1199,12 +1108,7 @@ export default function JobDetailScreen() {
 
   if (!job) {
     return (
-      <View
-        style={[
-          styles.loadingScreen,
-          { backgroundColor: theme.screenBackground },
-        ]}
-      >
+      <View style={[styles.loadingScreen, { backgroundColor: theme.screenBackground }]}>
         <Text style={[styles.loadingText, { color: theme.textPrimary }]}>
           Job not found.
         </Text>
@@ -1253,7 +1157,6 @@ export default function JobDetailScreen() {
             Job Detail
           </Text>
 
-          {/* ✅ Header right = Share (accent) */}
           <TouchableOpacity
             style={[styles.chatHeaderButton, { backgroundColor: accentColor }]}
             activeOpacity={0.9}
@@ -1276,7 +1179,6 @@ export default function JobDetailScreen() {
           keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
           onScrollBeginDrag={dismissKeyboard}
         >
-          {/* ✅ Tap anywhere on empty space to dismiss keyboard */}
           <TouchableWithoutFeedback onPress={dismissKeyboard} accessible={false}>
             <View>
               {/* HERO HEADER */}
@@ -1304,10 +1206,7 @@ export default function JobDetailScreen() {
                     <View
                       style={[
                         StyleSheet.absoluteFillObject,
-                        {
-                          backgroundColor: accentColor,
-                          opacity: 0.18,
-                        },
+                        { backgroundColor: accentColor, opacity: 0.18 },
                       ]}
                     />
                   )}
@@ -1322,10 +1221,7 @@ export default function JobDetailScreen() {
 
                     <Text
                       numberOfLines={2}
-                      style={[
-                        styles.heroSubtitle,
-                        { color: theme.textSecondary },
-                      ]}
+                      style={[styles.heroSubtitle, { color: theme.textSecondary }]}
                     >
                       {editAddress || job.address}
                     </Text>
@@ -1381,7 +1277,6 @@ export default function JobDetailScreen() {
                       })
                     }
                     size={82}
-                    
                   />
                 </View>
               </View>
@@ -1566,20 +1461,10 @@ export default function JobDetailScreen() {
                   ]}
                 >
                   <View style={styles.pricingTotalHeader}>
-                    <Text
-                      style={[
-                        styles.pricingTotalHeaderLabel,
-                        { color: theme.textMuted },
-                      ]}
-                    >
+                    <Text style={[styles.pricingTotalHeaderLabel, { color: theme.textMuted }]}>
                       Total
                     </Text>
-                    <Text
-                      style={[
-                        styles.pricingTotalHeaderValue,
-                        { color: accentColor },
-                      ]}
-                    >
+                    <Text style={[styles.pricingTotalHeaderValue, { color: accentColor }]}>
                       $
                       {totalAmount.toLocaleString("en-US", {
                         minimumFractionDigits: 2,
@@ -1589,12 +1474,7 @@ export default function JobDetailScreen() {
 
                   <View style={styles.pricingInputsRow}>
                     <View style={styles.pricingColumn}>
-                      <Text
-                        style={[
-                          styles.modalLabel,
-                          { color: theme.textSecondary },
-                        ]}
-                      >
+                      <Text style={[styles.modalLabel, { color: theme.textSecondary }]}>
                         Labor hours
                       </Text>
                       <TextInput
@@ -1619,12 +1499,7 @@ export default function JobDetailScreen() {
                     </View>
 
                     <View style={styles.pricingColumn}>
-                      <Text
-                        style={[
-                          styles.modalLabel,
-                          { color: theme.textSecondary },
-                        ]}
-                      >
+                      <Text style={[styles.modalLabel, { color: theme.textSecondary }]}>
                         Hourly rate
                       </Text>
                       <TextInput
@@ -1650,12 +1525,7 @@ export default function JobDetailScreen() {
                   </View>
 
                   <View style={styles.pricingSingleRow}>
-                    <Text
-                      style={[
-                        styles.modalLabel,
-                        { color: theme.textSecondary },
-                      ]}
-                    >
+                    <Text style={[styles.modalLabel, { color: theme.textSecondary }]}>
                       Material cost
                     </Text>
                     <TextInput
@@ -1703,25 +1573,12 @@ export default function JobDetailScreen() {
               </SectionCard>
 
               {/* TRASH ONLY */}
-              <SectionCard
-                theme={theme}
-                accentColor={accentColor}
-                title="Trash"
-                icon="⚠️"
-              >
+              <SectionCard theme={theme} accentColor={accentColor} title="Trash" icon="⚠️">
                 <TouchableOpacity
-                  style={[
-                    styles.modalDeleteButton,
-                    { borderColor: theme.dangerBorder },
-                  ]}
+                  style={[styles.modalDeleteButton, { borderColor: theme.dangerBorder }]}
                   onPress={confirmMoveToTrash}
                 >
-                  <Text
-                    style={[
-                      styles.modalDeleteText,
-                      { color: theme.dangerText },
-                    ]}
-                  >
+                  <Text style={[styles.modalDeleteText, { color: theme.dangerText }]}>
                     Move to Trash
                   </Text>
                 </TouchableOpacity>
@@ -1746,16 +1603,12 @@ export default function JobDetailScreen() {
             ]}
           >
             <View style={styles.stickyButtonsRow}>
-              <Animated.View
-                style={{ flex: 1, transform: [{ scale: markDoneScale }] }}
-              >
+              <Animated.View style={{ flex: 1, transform: [{ scale: markDoneScale }] }}>
                 <TouchableOpacity
                   style={[
                     styles.stickyButton,
                     {
-                      backgroundColor: isDone
-                        ? theme.secondaryButtonBackground
-                        : accentColor,
+                      backgroundColor: isDone ? theme.secondaryButtonBackground : accentColor,
                     },
                   ]}
                   onPress={handleToggleDone}
@@ -1766,9 +1619,7 @@ export default function JobDetailScreen() {
                   <Text
                     style={[
                       styles.stickyButtonText,
-                      {
-                        color: isDone ? theme.secondaryButtonText : "#F9FAFB",
-                      },
+                      { color: isDone ? theme.secondaryButtonText : "#F9FAFB" },
                     ]}
                   >
                     {isDone ? "Mark Not Done" : "Mark Done"}
@@ -1776,9 +1627,7 @@ export default function JobDetailScreen() {
                 </TouchableOpacity>
               </Animated.View>
 
-              <Animated.View
-                style={{ flex: 1, transform: [{ scale: saveChangesScale }] }}
-              >
+              <Animated.View style={{ flex: 1, transform: [{ scale: saveChangesScale }] }}>
                 <TouchableOpacity
                   style={[styles.stickyButton, { backgroundColor: accentColor }]}
                   onPress={handleSaveJobEdits}
@@ -1803,25 +1652,15 @@ export default function JobDetailScreen() {
               onPress={() => setIsAddPhotoMenuVisible(false)}
               style={styles.addPhotoMenuBackdrop}
             />
-            <View
-              style={[
-                styles.addPhotoMenuSheet,
-                { backgroundColor: theme.cardBackground },
-              ]}
-            >
-              <Text
-                style={[styles.addPhotoMenuTitle, { color: theme.textPrimary }]}
-              >
+            <View style={[styles.addPhotoMenuSheet, { backgroundColor: theme.cardBackground }]}>
+              <Text style={[styles.addPhotoMenuTitle, { color: theme.textPrimary }]}>
                 Add Photo
               </Text>
 
               <TouchableOpacity
                 style={[
                   styles.addPhotoMenuOption,
-                  {
-                    backgroundColor: theme.cardBackground,
-                    borderColor: accentColor,
-                  },
+                  { backgroundColor: theme.cardBackground, borderColor: accentColor },
                 ]}
                 onPress={() => {
                   setIsAddPhotoMenuVisible(false);
@@ -1829,12 +1668,7 @@ export default function JobDetailScreen() {
                 }}
                 activeOpacity={0.9}
               >
-                <Text
-                  style={[
-                    styles.addPhotoMenuOptionText,
-                    { color: theme.textPrimary },
-                  ]}
-                >
+                <Text style={[styles.addPhotoMenuOptionText, { color: theme.textPrimary }]}>
                   📸 Take Photo
                 </Text>
               </TouchableOpacity>
@@ -1842,10 +1676,7 @@ export default function JobDetailScreen() {
               <TouchableOpacity
                 style={[
                   styles.addPhotoMenuOption,
-                  {
-                    backgroundColor: theme.cardBackground,
-                    borderColor: accentColor,
-                  },
+                  { backgroundColor: theme.cardBackground, borderColor: accentColor },
                 ]}
                 onPress={() => {
                   setIsAddPhotoMenuVisible(false);
@@ -1853,12 +1684,7 @@ export default function JobDetailScreen() {
                 }}
                 activeOpacity={0.9}
               >
-                <Text
-                  style={[
-                    styles.addPhotoMenuOptionText,
-                    { color: theme.textPrimary },
-                  ]}
-                >
+                <Text style={[styles.addPhotoMenuOptionText, { color: theme.textPrimary }]}>
                   🖼️ Choose from Gallery
                 </Text>
               </TouchableOpacity>
@@ -1868,12 +1694,7 @@ export default function JobDetailScreen() {
                 onPress={() => setIsAddPhotoMenuVisible(false)}
                 activeOpacity={0.8}
               >
-                <Text
-                  style={[
-                    styles.addPhotoMenuCancelText,
-                    { color: theme.textMuted },
-                  ]}
-                >
+                <Text style={[styles.addPhotoMenuCancelText, { color: theme.textMuted }]}>
                   Cancel
                 </Text>
               </TouchableOpacity>
@@ -1900,14 +1721,15 @@ export default function JobDetailScreen() {
 
 const styles = StyleSheet.create({
   loadingScreen: { flex: 1, alignItems: "center", justifyContent: "center" },
-  loadingText: { fontSize: 16 },
+  loadingText: { fontSize: 16, fontFamily: "Athiti-Regular" },
+
   simpleButton: {
     marginTop: 16,
     paddingHorizontal: 18,
     paddingVertical: 11,
     borderRadius: 999,
   },
-  simpleButtonText: { fontWeight: "600", fontSize: 14 },
+  simpleButtonText: { fontSize: 14, fontFamily: "Athiti-SemiBold" },
 
   detailsScreen: { flex: 1, paddingTop: 48 },
 
@@ -1919,14 +1741,16 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
   backButton: { paddingVertical: 4, paddingHorizontal: 4 },
-  backText: { fontSize: 14 },
-  headerTitle: { fontSize: 22, fontWeight: "700" },
+  backText: { fontSize: 14, fontFamily: "Athiti-SemiBold" },
+
+  headerTitle: { fontSize: 22, fontFamily: "Athiti-Bold" },
+
   chatHeaderButton: {
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 999,
   },
-  chatHeaderButtonText: { fontSize: 12, fontWeight: "600" },
+  chatHeaderButtonText: { fontSize: 12, fontFamily: "Athiti-SemiBold" },
 
   detailsScroll: { flexGrow: 1, paddingHorizontal: 18 },
 
@@ -1948,13 +1772,14 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
     justifyContent: "space-between",
   },
-  heroTitle: { fontSize: 18, fontWeight: "800" },
+  heroTitle: { fontSize: 18, fontFamily: "Athiti-Bold" },
   heroSubtitle: {
     marginTop: 4,
     fontSize: 12,
     lineHeight: 16,
-    fontWeight: "600",
+    fontFamily: "Athiti-SemiBold",
   },
+
   statusPill: {
     alignSelf: "flex-start",
     borderRadius: 999,
@@ -1962,7 +1787,7 @@ const styles = StyleSheet.create({
     paddingVertical: 5,
     borderWidth: 1,
   },
-  statusPillText: { fontSize: 11, fontWeight: "800" },
+  statusPillText: { fontSize: 11, fontFamily: "Athiti-Bold" },
 
   heroActionsRow: {
     flexDirection: "row",
@@ -1972,7 +1797,6 @@ const styles = StyleSheet.create({
     marginTop: 10,
   },
 
-  // ✅ NEW: icon-only button (keeps row stable)
   actionIconButton: {
     width: 62,
     height: 52,
@@ -2008,41 +1832,46 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     borderWidth: 1,
   },
-  cardIconText: { fontSize: 16, fontWeight: "800" },
+  cardIconText: { fontSize: 16, fontFamily: "Athiti-Bold" },
+
   cardTitle: {
     fontSize: 13,
-    fontWeight: "800",
     marginBottom: 2,
+    fontFamily: "Athiti-Bold",
   },
   cardSubtitle: {
     fontSize: 11,
-    fontWeight: "600",
+    fontFamily: "Athiti-SemiBold",
   },
+
   cardActivePill: {
     borderRadius: 999,
     paddingHorizontal: 10,
     paddingVertical: 5,
     borderWidth: 1,
   },
-  cardActivePillText: { fontSize: 11, fontWeight: "800" },
+  cardActivePillText: { fontSize: 11, fontFamily: "Athiti-Bold" },
 
   row: { marginBottom: 10 },
-  metaLabel: { fontSize: 11, fontWeight: "700" },
-  metaValue: { fontSize: 13, fontWeight: "700", marginTop: 4 },
+  metaLabel: { fontSize: 11, fontFamily: "Athiti-Bold" },
+  metaValue: { fontSize: 13, marginTop: 4, fontFamily: "Athiti-Bold" },
 
   sectionTitle: {
     fontSize: 14,
-    fontWeight: "700",
     marginTop: 10,
     marginBottom: 6,
+    fontFamily: "Athiti-Bold",
   },
-  modalLabel: { fontSize: 12, marginBottom: 4 },
+
+  modalLabel: { fontSize: 12, marginBottom: 4, fontFamily: "Athiti-SemiBold" },
+
   modalInput: {
     borderRadius: 14,
     paddingHorizontal: 12,
     paddingVertical: 9,
     fontSize: 14,
     marginBottom: 10,
+    fontFamily: "Athiti-Regular",
   },
   modalInputMultiline: {
     borderRadius: 14,
@@ -2052,8 +1881,9 @@ const styles = StyleSheet.create({
     marginBottom: 10,
     minHeight: 96,
     textAlignVertical: "top",
+    fontFamily: "Athiti-Regular",
   },
-  modalMeta: { fontSize: 11, marginTop: 8 },
+  modalMeta: { fontSize: 11, marginTop: 8, fontFamily: "Athiti-Regular" },
 
   // Photos
   photosRow: {
@@ -2068,7 +1898,8 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     borderWidth: 1,
   },
-  addPhotoButtonText: { fontSize: 13, fontWeight: "600" },
+  addPhotoButtonText: { fontSize: 13, fontFamily: "Athiti-SemiBold" },
+
   photoGrid: {
     flexDirection: "row",
     flexWrap: "wrap",
@@ -2092,7 +1923,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 4,
     paddingVertical: 1,
   },
-  photoRemoveText: { color: "#FCA5A5", fontSize: 10, fontWeight: "700" },
+  photoRemoveText: { color: "#FCA5A5", fontSize: 10, fontFamily: "Athiti-Bold" },
 
   // Pricing
   pricingCard: {
@@ -2114,10 +1945,10 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: "rgba(148,163,184,0.25)",
   },
-  pricingTotalHeaderLabel: { fontSize: 13, fontWeight: "600" },
+  pricingTotalHeaderLabel: { fontSize: 13, fontFamily: "Athiti-SemiBold" },
   pricingTotalHeaderValue: {
     fontSize: 20,
-    fontWeight: "800",
+    fontFamily: "Athiti-Bold",
   },
   pricingInputsRow: { flexDirection: "row", gap: 10, marginTop: 4 },
   pricingColumn: { flex: 1 },
@@ -2132,7 +1963,7 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     alignItems: "center",
   },
-  modalDeleteText: { fontSize: 13, fontWeight: "700" },
+  modalDeleteText: { fontSize: 13, fontFamily: "Athiti-Bold" },
 
   // Sticky bar
   stickyBar: {
@@ -2152,7 +1983,7 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     alignItems: "center",
   },
-  stickyButtonText: { fontSize: 14, fontWeight: "800" },
+  stickyButtonText: { fontSize: 14, fontFamily: "Athiti-Bold" },
 
   // Add Photo bottom sheet
   addPhotoMenuOverlay: {
@@ -2176,9 +2007,9 @@ const styles = StyleSheet.create({
   },
   addPhotoMenuTitle: {
     fontSize: 15,
-    fontWeight: "600",
     marginBottom: 10,
     textAlign: "center",
+    fontFamily: "Athiti-SemiBold",
   },
   addPhotoMenuOption: {
     borderRadius: 14,
@@ -2187,7 +2018,15 @@ const styles = StyleSheet.create({
     marginBottom: 8,
     borderWidth: 1,
   },
-  addPhotoMenuOptionText: { fontSize: 14, textAlign: "center" },
+  addPhotoMenuOptionText: {
+    fontSize: 14,
+    textAlign: "center",
+    fontFamily: "Athiti-SemiBold",
+  },
   addPhotoMenuCancel: { marginTop: 6, paddingVertical: 8 },
-  addPhotoMenuCancelText: { fontSize: 13, textAlign: "center" },
+  addPhotoMenuCancelText: {
+    fontSize: 13,
+    textAlign: "center",
+    fontFamily: "Athiti-Regular",
+  },
 });
