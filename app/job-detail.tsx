@@ -254,7 +254,6 @@ function ActionIcon({
   disabled,
   size = 28,
 }: {
-  theme: any;
   iconSource: any;
   onPress: () => void;
   disabled?: boolean;
@@ -378,7 +377,11 @@ export default function JobDetailScreen() {
     sectionPositions.current[key] = y;
   };
 
-  const scrollToSectionWithRetry = (key: string, triesLeft = 8, delayMs = 40) => {
+  const scrollToSectionWithRetry = (
+    key: string,
+    triesLeft = 8,
+    delayMs = 40
+  ) => {
     const y = sectionPositions.current[key];
 
     if (scrollRef.current && y !== undefined) {
@@ -390,7 +393,10 @@ export default function JobDetailScreen() {
     }
 
     if (triesLeft <= 0) return;
-    setTimeout(() => scrollToSectionWithRetry(key, triesLeft - 1, delayMs), delayMs);
+    setTimeout(
+      () => scrollToSectionWithRetry(key, triesLeft - 1, delayMs),
+      delayMs
+    );
   };
 
   const handleFocus = (sectionKey: Exclude<ActiveSectionKey, null>) => {
@@ -484,9 +490,15 @@ export default function JobDetailScreen() {
           setEditClientNotes(found.clientNotes || "");
           setIsDone(found.isDone);
 
-          setLaborHours(found.laborHours !== undefined ? String(found.laborHours) : "");
-          setHourlyRate(found.hourlyRate !== undefined ? String(found.hourlyRate) : "");
-          setMaterialCost(found.materialCost !== undefined ? String(found.materialCost) : "");
+          setLaborHours(
+            found.laborHours !== undefined ? String(found.laborHours) : ""
+          );
+          setHourlyRate(
+            found.hourlyRate !== undefined ? String(found.hourlyRate) : ""
+          );
+          setMaterialCost(
+            found.materialCost !== undefined ? String(found.materialCost) : ""
+          );
 
           setPhotoUris(found.photoUris || []);
           setPhotoBase64s(found.photoBase64s || []);
@@ -508,7 +520,8 @@ export default function JobDetailScreen() {
   };
 
   const totalAmount =
-    parseNumber(laborHours) * parseNumber(hourlyRate) + parseNumber(materialCost);
+    parseNumber(laborHours) * parseNumber(hourlyRate) +
+    parseNumber(materialCost);
 
   const persistJobs = async (updatedJobs: Job[]) => {
     await AsyncStorage.setItem(STORAGE_KEYS.JOBS, JSON.stringify(updatedJobs));
@@ -517,7 +530,8 @@ export default function JobDetailScreen() {
   const safeHtml = (value: string) =>
     value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
-  const withLineBreaks = (value: string) => safeHtml(value).replace(/\n/g, "<br />");
+  const withLineBreaks = (value: string) =>
+    safeHtml(value).replace(/\n/g, "<br />");
 
   // ---------- Actions ----------
   const handleSaveJobEdits = async () => {
@@ -565,7 +579,9 @@ export default function JobDetailScreen() {
     try {
       const jobsJson = await AsyncStorage.getItem(STORAGE_KEYS.JOBS);
       const jobs: Job[] = jobsJson ? JSON.parse(jobsJson) : [];
-      const next = jobs.map((j) => (j.id === job.id ? { ...j, isDone: nextDone } : j));
+      const next = jobs.map((j) =>
+        j.id === job.id ? { ...j, isDone: nextDone } : j
+      );
 
       LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
       await persistJobs(next);
@@ -611,38 +627,50 @@ export default function JobDetailScreen() {
   const confirmMoveToTrash = () => {
     if (!job) return;
 
-    Alert.alert("Move to Trash", "Are you sure you want to move this job to Trash?", [
-      { text: "Cancel", style: "cancel" },
-      {
-        text: "Move",
-        style: "destructive",
-        onPress: async () => {
-          try {
-            const [jobsJson, trashJson] = await Promise.all([
-              AsyncStorage.getItem(STORAGE_KEYS.JOBS),
-              AsyncStorage.getItem(STORAGE_KEYS.TRASH),
-            ]);
+    Alert.alert(
+      "Move to Trash",
+      "Are you sure you want to move this job to Trash?",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Move",
+          style: "destructive",
+          onPress: async () => {
+            try {
+              const [jobsJson, trashJson] = await Promise.all([
+                AsyncStorage.getItem(STORAGE_KEYS.JOBS),
+                AsyncStorage.getItem(STORAGE_KEYS.TRASH),
+              ]);
 
-            const jobs: Job[] = jobsJson ? JSON.parse(jobsJson) : [];
-            const trash: Job[] = trashJson ? JSON.parse(trashJson) : [];
+              const jobs: Job[] = jobsJson ? JSON.parse(jobsJson) : [];
+              const trash: Job[] = trashJson ? JSON.parse(trashJson) : [];
 
-            const remaining = jobs.filter((j) => j.id !== job.id);
-            const newTrash = [...trash, job];
+              const remaining = jobs.filter((j) => j.id !== job.id);
+              const newTrash = [...trash, job];
 
-            LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-            await Promise.all([
-              AsyncStorage.setItem(STORAGE_KEYS.JOBS, JSON.stringify(remaining)),
-              AsyncStorage.setItem(STORAGE_KEYS.TRASH, JSON.stringify(newTrash)),
-            ]);
+              LayoutAnimation.configureNext(
+                LayoutAnimation.Presets.easeInEaseOut
+              );
+              await Promise.all([
+                AsyncStorage.setItem(
+                  STORAGE_KEYS.JOBS,
+                  JSON.stringify(remaining)
+                ),
+                AsyncStorage.setItem(
+                  STORAGE_KEYS.TRASH,
+                  JSON.stringify(newTrash)
+                ),
+              ]);
 
-            router.back();
-          } catch (e) {
-            console.warn("Failed to move to trash:", e);
-            Alert.alert("Error", "Could not move job to Trash.");
-          }
+              router.back();
+            } catch (e) {
+              console.warn("Failed to move to trash:", e);
+              Alert.alert("Error", "Could not move job to Trash.");
+            }
+          },
         },
-      },
-    ]);
+      ]
+    );
   };
 
   // ---------- Photos ----------
@@ -709,18 +737,26 @@ export default function JobDetailScreen() {
 
   const handleRemovePhoto = (uriToRemove: string) => {
     const index = photoUris.indexOf(uriToRemove);
-    Alert.alert("Remove photo", "Are you sure you want to remove this photo from the job?", [
-      { text: "Cancel", style: "cancel" },
-      {
-        text: "Remove",
-        style: "destructive",
-        onPress: () => {
-          LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-          setPhotoUris((prev) => prev.filter((u) => u !== uriToRemove));
-          setPhotoBase64s((prev) => (index >= 0 ? prev.filter((_, i) => i !== index) : prev));
+    Alert.alert(
+      "Remove photo",
+      "Are you sure you want to remove this photo from the job?",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Remove",
+          style: "destructive",
+          onPress: () => {
+            LayoutAnimation.configureNext(
+              LayoutAnimation.Presets.easeInEaseOut
+            );
+            setPhotoUris((prev) => prev.filter((u) => u !== uriToRemove));
+            setPhotoBase64s((prev) =>
+              index >= 0 ? prev.filter((_, i) => i !== index) : prev
+            );
+          },
         },
-      },
-    ]);
+      ]
+    );
   };
 
   const handleOpenFullImage = (index: number) => {
@@ -749,23 +785,32 @@ export default function JobDetailScreen() {
 
       const companyHeaderLines: string[] = [];
       if (brandName) {
-        companyHeaderLines.push(`<div class="company-name">${safeHtml(brandName)}</div>`);
+        companyHeaderLines.push(
+          `<div class="company-name">${safeHtml(brandName)}</div>`
+        );
       }
       if (brandPhone) {
-        companyHeaderLines.push(`<div class="company-line">${safeHtml(brandPhone)}</div>`);
+        companyHeaderLines.push(
+          `<div class="company-line">${safeHtml(brandPhone)}</div>`
+        );
       }
       if (brandEmail) {
-        companyHeaderLines.push(`<div class="company-line">${safeHtml(brandEmail)}</div>`);
+        companyHeaderLines.push(
+          `<div class="company-line">${safeHtml(brandEmail)}</div>`
+        );
       }
       if (brandLicense) {
-        companyHeaderLines.push(`<div class="company-line">${safeHtml(brandLicense)}</div>`);
+        companyHeaderLines.push(
+          `<div class="company-line">${safeHtml(brandLicense)}</div>`
+        );
       }
 
       const companyHeaderHtml = hasBranding
         ? `<div class="company-block">${companyHeaderLines.join("")}</div>`
         : "";
 
-      const bases: string[] = photoBase64s.length > 0 ? photoBase64s : job.photoBase64s || [];
+      const bases: string[] =
+        photoBase64s.length > 0 ? photoBase64s : job.photoBase64s || [];
 
       const photoBlocks: string[] = [];
       for (let i = 0; i < bases.length; i++) {
@@ -868,12 +913,20 @@ export default function JobDetailScreen() {
                 <h2>Client Info</h2>
                 <div class="label">Client Name</div>
                 <div class="value">
-                  ${editClientName.trim() ? safeHtml(editClientName.trim()) : "Not set"}
+                  ${
+                    editClientName.trim()
+                      ? safeHtml(editClientName.trim())
+                      : "Not set"
+                  }
                 </div>
 
                 <div class="label">Client Phone</div>
                 <div class="value">
-                  ${editClientPhone.trim() ? safeHtml(editClientPhone.trim()) : "Not set"}
+                  ${
+                    editClientPhone.trim()
+                      ? safeHtml(editClientPhone.trim())
+                      : "Not set"
+                  }
                 </div>
 
                 <div class="label">Client Notes</div>
@@ -900,7 +953,9 @@ export default function JobDetailScreen() {
                     <tr>
                       <td>Labor</td>
                       <td>${laborNum} h × $${rateNum.toFixed(2)}</td>
-                      <td class="amount">$${(laborNum * rateNum).toFixed(2)}</td>
+                      <td class="amount">$${(laborNum * rateNum).toFixed(
+                        2
+                      )}</td>
                     </tr>
                     <tr>
                       <td>Material</td>
@@ -911,7 +966,9 @@ export default function JobDetailScreen() {
                   <tfoot>
                     <tr>
                       <td colspan="2">Total</td>
-                      <td class="amount amount-total">$${totalAmount.toFixed(2)}</td>
+                      <td class="amount amount-total">$${totalAmount.toFixed(
+                        2
+                      )}</td>
                     </tr>
                   </tfoot>
                 </table>
@@ -957,10 +1014,22 @@ export default function JobDetailScreen() {
       const hasBranding = brandName || brandPhone || brandEmail || brandLicense;
 
       const companyHeaderLines: string[] = [];
-      if (brandName) companyHeaderLines.push(`<div class="company-name">${safeHtml(brandName)}</div>`);
-      if (brandPhone) companyHeaderLines.push(`<div class="company-line">${safeHtml(brandPhone)}</div>`);
-      if (brandEmail) companyHeaderLines.push(`<div class="company-line">${safeHtml(brandEmail)}</div>`);
-      if (brandLicense) companyHeaderLines.push(`<div class="company-line">${safeHtml(brandLicense)}</div>`);
+      if (brandName)
+        companyHeaderLines.push(
+          `<div class="company-name">${safeHtml(brandName)}</div>`
+        );
+      if (brandPhone)
+        companyHeaderLines.push(
+          `<div class="company-line">${safeHtml(brandPhone)}</div>`
+        );
+      if (brandEmail)
+        companyHeaderLines.push(
+          `<div class="company-line">${safeHtml(brandEmail)}</div>`
+        );
+      if (brandLicense)
+        companyHeaderLines.push(
+          `<div class="company-line">${safeHtml(brandLicense)}</div>`
+        );
 
       const companyHeaderHtml = hasBranding
         ? `<div class="company-block">${companyHeaderLines.join("")}</div>`
@@ -1098,7 +1167,12 @@ export default function JobDetailScreen() {
   // ---------- Render states ----------
   if (isLoading) {
     return (
-      <View style={[styles.loadingScreen, { backgroundColor: theme.screenBackground }]}>
+      <View
+        style={[
+          styles.loadingScreen,
+          { backgroundColor: theme.screenBackground },
+        ]}
+      >
         <Text style={[styles.loadingText, { color: theme.textPrimary }]}>
           Loading job…
         </Text>
@@ -1108,7 +1182,12 @@ export default function JobDetailScreen() {
 
   if (!job) {
     return (
-      <View style={[styles.loadingScreen, { backgroundColor: theme.screenBackground }]}>
+      <View
+        style={[
+          styles.loadingScreen,
+          { backgroundColor: theme.screenBackground },
+        ]}
+      >
         <Text style={[styles.loadingText, { color: theme.textPrimary }]}>
           Job not found.
         </Text>
@@ -1221,7 +1300,10 @@ export default function JobDetailScreen() {
 
                     <Text
                       numberOfLines={2}
-                      style={[styles.heroSubtitle, { color: theme.textSecondary }]}
+                      style={[
+                        styles.heroSubtitle,
+                        { color: theme.textSecondary },
+                      ]}
                     >
                       {editAddress || job.address}
                     </Text>
@@ -1252,7 +1334,6 @@ export default function JobDetailScreen() {
                 {/* QUICK ACTIONS */}
                 <View style={styles.heroActionsRow}>
                   <ActionIcon
-                    theme={theme}
                     iconSource={CallIcon}
                     onPress={handleCallClient}
                     disabled={!editClientPhone.trim()}
@@ -1260,7 +1341,6 @@ export default function JobDetailScreen() {
                   />
 
                   <ActionIcon
-                    theme={theme}
                     iconSource={MapIcon}
                     onPress={handleOpenInMaps}
                     disabled={!editAddress.trim()}
@@ -1268,7 +1348,6 @@ export default function JobDetailScreen() {
                   />
 
                   <ActionIcon
-                    theme={theme}
                     iconSource={TeamChatIcon}
                     onPress={() =>
                       router.push({
@@ -1461,10 +1540,20 @@ export default function JobDetailScreen() {
                   ]}
                 >
                   <View style={styles.pricingTotalHeader}>
-                    <Text style={[styles.pricingTotalHeaderLabel, { color: theme.textMuted }]}>
+                    <Text
+                      style={[
+                        styles.pricingTotalHeaderLabel,
+                        { color: theme.textMuted },
+                      ]}
+                    >
                       Total
                     </Text>
-                    <Text style={[styles.pricingTotalHeaderValue, { color: accentColor }]}>
+                    <Text
+                      style={[
+                        styles.pricingTotalHeaderValue,
+                        { color: accentColor },
+                      ]}
+                    >
                       $
                       {totalAmount.toLocaleString("en-US", {
                         minimumFractionDigits: 2,
@@ -1474,7 +1563,12 @@ export default function JobDetailScreen() {
 
                   <View style={styles.pricingInputsRow}>
                     <View style={styles.pricingColumn}>
-                      <Text style={[styles.modalLabel, { color: theme.textSecondary }]}>
+                      <Text
+                        style={[
+                          styles.modalLabel,
+                          { color: theme.textSecondary },
+                        ]}
+                      >
                         Labor hours
                       </Text>
                       <TextInput
@@ -1499,7 +1593,12 @@ export default function JobDetailScreen() {
                     </View>
 
                     <View style={styles.pricingColumn}>
-                      <Text style={[styles.modalLabel, { color: theme.textSecondary }]}>
+                      <Text
+                        style={[
+                          styles.modalLabel,
+                          { color: theme.textSecondary },
+                        ]}
+                      >
                         Hourly rate
                       </Text>
                       <TextInput
@@ -1525,7 +1624,12 @@ export default function JobDetailScreen() {
                   </View>
 
                   <View style={styles.pricingSingleRow}>
-                    <Text style={[styles.modalLabel, { color: theme.textSecondary }]}>
+                    <Text
+                      style={[
+                        styles.modalLabel,
+                        { color: theme.textSecondary },
+                      ]}
+                    >
                       Material cost
                     </Text>
                     <TextInput
@@ -1573,12 +1677,22 @@ export default function JobDetailScreen() {
               </SectionCard>
 
               {/* TRASH ONLY */}
-              <SectionCard theme={theme} accentColor={accentColor} title="Trash" icon="⚠️">
+              <SectionCard
+                theme={theme}
+                accentColor={accentColor}
+                title="Trash"
+                icon="⚠️"
+              >
                 <TouchableOpacity
-                  style={[styles.modalDeleteButton, { borderColor: theme.dangerBorder }]}
+                  style={[
+                    styles.modalDeleteButton,
+                    { borderColor: theme.dangerBorder },
+                  ]}
                   onPress={confirmMoveToTrash}
                 >
-                  <Text style={[styles.modalDeleteText, { color: theme.dangerText }]}>
+                  <Text
+                    style={[styles.modalDeleteText, { color: theme.dangerText }]}
+                  >
                     Move to Trash
                   </Text>
                 </TouchableOpacity>
@@ -1608,7 +1722,9 @@ export default function JobDetailScreen() {
                   style={[
                     styles.stickyButton,
                     {
-                      backgroundColor: isDone ? theme.secondaryButtonBackground : accentColor,
+                      backgroundColor: isDone
+                        ? theme.secondaryButtonBackground
+                        : accentColor,
                     },
                   ]}
                   onPress={handleToggleDone}
@@ -1619,7 +1735,11 @@ export default function JobDetailScreen() {
                   <Text
                     style={[
                       styles.stickyButtonText,
-                      { color: isDone ? theme.secondaryButtonText : "#F9FAFB" },
+                      {
+                        color: isDone
+                          ? theme.secondaryButtonText
+                          : "#F9FAFB",
+                      },
                     ]}
                   >
                     {isDone ? "Mark Not Done" : "Mark Done"}
@@ -1652,7 +1772,12 @@ export default function JobDetailScreen() {
               onPress={() => setIsAddPhotoMenuVisible(false)}
               style={styles.addPhotoMenuBackdrop}
             />
-            <View style={[styles.addPhotoMenuSheet, { backgroundColor: theme.cardBackground }]}>
+            <View
+              style={[
+                styles.addPhotoMenuSheet,
+                { backgroundColor: theme.cardBackground },
+              ]}
+            >
               <Text style={[styles.addPhotoMenuTitle, { color: theme.textPrimary }]}>
                 Add Photo
               </Text>
@@ -1660,7 +1785,10 @@ export default function JobDetailScreen() {
               <TouchableOpacity
                 style={[
                   styles.addPhotoMenuOption,
-                  { backgroundColor: theme.cardBackground, borderColor: accentColor },
+                  {
+                    backgroundColor: theme.cardBackground,
+                    borderColor: accentColor,
+                  },
                 ]}
                 onPress={() => {
                   setIsAddPhotoMenuVisible(false);
@@ -1668,7 +1796,12 @@ export default function JobDetailScreen() {
                 }}
                 activeOpacity={0.9}
               >
-                <Text style={[styles.addPhotoMenuOptionText, { color: theme.textPrimary }]}>
+                <Text
+                  style={[
+                    styles.addPhotoMenuOptionText,
+                    { color: theme.textPrimary },
+                  ]}
+                >
                   📸 Take Photo
                 </Text>
               </TouchableOpacity>
@@ -1676,7 +1809,10 @@ export default function JobDetailScreen() {
               <TouchableOpacity
                 style={[
                   styles.addPhotoMenuOption,
-                  { backgroundColor: theme.cardBackground, borderColor: accentColor },
+                  {
+                    backgroundColor: theme.cardBackground,
+                    borderColor: accentColor,
+                  },
                 ]}
                 onPress={() => {
                   setIsAddPhotoMenuVisible(false);
@@ -1684,7 +1820,12 @@ export default function JobDetailScreen() {
                 }}
                 activeOpacity={0.9}
               >
-                <Text style={[styles.addPhotoMenuOptionText, { color: theme.textPrimary }]}>
+                <Text
+                  style={[
+                    styles.addPhotoMenuOptionText,
+                    { color: theme.textPrimary },
+                  ]}
+                >
                   🖼️ Choose from Gallery
                 </Text>
               </TouchableOpacity>
@@ -1694,7 +1835,12 @@ export default function JobDetailScreen() {
                 onPress={() => setIsAddPhotoMenuVisible(false)}
                 activeOpacity={0.8}
               >
-                <Text style={[styles.addPhotoMenuCancelText, { color: theme.textMuted }]}>
+                <Text
+                  style={[
+                    styles.addPhotoMenuCancelText,
+                    { color: theme.textMuted },
+                  ]}
+                >
                   Cancel
                 </Text>
               </TouchableOpacity>
