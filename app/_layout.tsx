@@ -5,10 +5,16 @@ import { StatusBar } from "expo-status-bar";
 import React, { useMemo } from "react";
 import { StyleSheet, View } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
-import { SafeAreaProvider, useSafeAreaInsets } from "react-native-safe-area-context";
+import {
+  SafeAreaProvider,
+  useSafeAreaInsets,
+} from "react-native-safe-area-context";
 import BottomNavBar from "../components/BottomNavBar";
 import { JobsProvider } from "../context/JobsContext";
-import { PreferencesProvider, usePreferences } from "../context/PreferencesContext";
+import {
+  PreferencesProvider,
+  usePreferences,
+} from "../context/PreferencesContext";
 
 type TabKey = "home" | "add" | "trash" | "settings";
 
@@ -39,6 +45,15 @@ function RootShell() {
   );
 }
 
+function ThemedStatusBar() {
+  const { theme, themeName } = usePreferences();
+
+  // ✅ For graphite/dark surfaces, use light content; for light theme, use dark content.
+  const barStyle = themeName === "light" ? "dark" : "light";
+
+  return <StatusBar style={barStyle} backgroundColor={theme.screenBackground} />;
+}
+
 export default function RootLayout() {
   const [fontsLoaded] = useFonts({
     "Athiti-Regular": require("../assets/fonts/Athiti-Regular.ttf"),
@@ -54,7 +69,8 @@ export default function RootLayout() {
       <SafeAreaProvider>
         <PreferencesProvider>
           <JobsProvider>
-            <StatusBar style="light" backgroundColor="#020617" />
+            {/* ✅ Theme-driven StatusBar (removes hardcoded light palette) */}
+            <ThemedStatusBar />
             <RootShell />
           </JobsProvider>
         </PreferencesProvider>

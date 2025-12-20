@@ -1,6 +1,18 @@
 // context/PreferencesContext.tsx
+// ✅ DEFAULT: Traktr launches with Warm Graphite theme.
+// ✅ Accent system remains active (no storage key changes).
+// ✅ Default accent is now Brand Red (#FF0800) via appTheme accentSwatchColors.
+// ✅ Public API shape stays the same so the rest of the app doesn’t break.
+
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
+import React, {
+    createContext,
+    useCallback,
+    useContext,
+    useEffect,
+    useMemo,
+    useState,
+} from "react";
 import {
     ACCENT_STORAGE_KEY,
     AccentName,
@@ -13,7 +25,7 @@ import {
 type Prefs = {
   isReady: boolean;
   themeName: ThemeName;
-  theme: (typeof themes)["dark"];
+  theme: (typeof themes)["light"]; // shape-compatible with all themes
   accentName: AccentName;
   accentColor: string;
 
@@ -23,15 +35,20 @@ type Prefs = {
 
 const PreferencesContext = createContext<Prefs | null>(null);
 
+// ✅ Defaults (graphite + brand red accent)
+const DEFAULT_THEME: ThemeName = "graphite";
+const DEFAULT_ACCENT: AccentName = "jobsiteAmber"; // now maps to #FF0800
+
 export function PreferencesProvider({ children }: { children: React.ReactNode }) {
   const [isReady, setIsReady] = useState(false);
 
-  const [themeName, setThemeNameState] = useState<ThemeName>("dark");
-  const [accentName, setAccentNameState] = useState<AccentName>("jobsiteAmber");
+  const [themeName, setThemeNameState] = useState<ThemeName>(DEFAULT_THEME);
+  const [accentName, setAccentNameState] = useState<AccentName>(DEFAULT_ACCENT);
 
-  // Load once at app start (prevents “accent swap flash” on every screen)
+  // Load saved preferences once at app start
   useEffect(() => {
     let alive = true;
+
     (async () => {
       try {
         const [savedTheme, savedAccent] = await Promise.all([
@@ -41,21 +58,22 @@ export function PreferencesProvider({ children }: { children: React.ReactNode })
 
         if (!alive) return;
 
-        if (savedTheme === "light" || savedTheme === "dark" || savedTheme === "midnight") {
-          setThemeNameState(savedTheme as ThemeName);
+        if (savedTheme) {
+          const t = savedTheme as ThemeName;
+          if (t in themes) setThemeNameState(t);
         }
 
-        if (
-          savedAccent === "jobsiteAmber" ||
-          savedAccent === "electricBlue" ||
-          savedAccent === "safetyGreen"
-        ) {
-          setAccentNameState(savedAccent as AccentName);
+        if (savedAccent) {
+          const a = savedAccent as AccentName;
+          if (a === "jobsiteAmber" || a === "electricBlue" || a === "safetyGreen") {
+            setAccentNameState(a);
+          }
         }
       } catch {
-        // keep defaults
+        // ignore; fall back to defaults
       } finally {
-        if (alive) setIsReady(true);
+        if (!alive) return;
+        setIsReady(true);
       }
     })();
 
@@ -74,7 +92,7 @@ export function PreferencesProvider({ children }: { children: React.ReactNode })
     AsyncStorage.setItem(ACCENT_STORAGE_KEY, name).catch(() => {});
   }, []);
 
-  const theme = useMemo(() => themes[themeName] ?? themes.dark, [themeName]);
+  const theme = useMemo(() => themes[themeName] ?? themes.graphite, [themeName]);
   const accentColor = useMemo(() => getAccentColor(accentName), [accentName]);
 
   const value = useMemo(
@@ -90,7 +108,11 @@ export function PreferencesProvider({ children }: { children: React.ReactNode })
     [isReady, themeName, theme, accentName, accentColor, setThemeName, setAccentName]
   );
 
-  return <PreferencesContext.Provider value={value}>{children}</PreferencesContext.Provider>;
+  return (
+    <PreferencesContext.Provider value={value}>
+      {children}
+    </PreferencesContext.Provider>
+  );
 }
 
 export function usePreferences() {

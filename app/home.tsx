@@ -3,14 +3,7 @@ import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { LinearGradient } from "expo-linear-gradient";
 import { useFocusEffect, useRouter } from "expo-router";
-import React, {
-  FC,
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
+import React, { FC, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Animated,
   Image,
@@ -78,11 +71,7 @@ type StatusStyles = {
   textColor: string;
 };
 
-const getStatusStyles = (
-  job: Job,
-  theme: Theme,
-  accentColor: string
-): StatusStyles =>
+const getStatusStyles = (job: Job, theme: Theme, brand: string): StatusStyles =>
   job.isDone
     ? {
         tagBg: theme.tagDoneBg,
@@ -92,9 +81,9 @@ const getStatusStyles = (
         textColor: theme.textSecondary,
       }
     : {
-        tagBg: accentColor + "1A",
-        tagBorder: accentColor,
-        tagText: accentColor,
+        tagBg: brand + "1A",
+        tagBorder: brand,
+        tagText: brand,
         titleColor: theme.textPrimary,
         textColor: theme.textSecondary,
       };
@@ -104,29 +93,21 @@ const getStatusStyles = (
 type JobCardMediaHeaderProps = {
   job: Job;
   theme: Theme;
-  accentColor: string;
+  brand: string;
 };
 
-const JobCardMediaHeader: FC<JobCardMediaHeaderProps> = ({
-  job,
-  theme,
-  accentColor,
-}) => {
+const JobCardMediaHeader: FC<JobCardMediaHeaderProps> = ({ job, theme, brand }) => {
   const hasPhoto = !!(job.photoUris && job.photoUris.length > 0);
   const firstPhotoUri = job.photoUris?.[0];
 
-  const statusColor = job.isDone ? "#9CA3AF" : accentColor;
+  const statusColor = job.isDone ? theme.textMuted : brand;
 
   return (
     <View style={styles.mediaHeaderWrapper}>
       {hasPhoto && firstPhotoUri ? (
-        <View style={styles.mediaHeader}>
-          <Image
-            source={{ uri: firstPhotoUri }}
-            style={styles.mediaHeaderImage}
-            resizeMode="cover"
-          />
-          <View style={styles.mediaHeaderOverlay} />
+        <View style={[styles.mediaHeader, { backgroundColor: theme.cardSecondaryBackground }]}>
+          <Image source={{ uri: firstPhotoUri }} style={styles.mediaHeaderImage} resizeMode="cover" />
+          <View style={[styles.mediaHeaderOverlay, { backgroundColor: theme.screenBackground + "66" }]} />
         </View>
       ) : (
         <LinearGradient
@@ -134,11 +115,11 @@ const JobCardMediaHeader: FC<JobCardMediaHeaderProps> = ({
             styles.mediaHeader,
             {
               borderWidth: 1,
-              borderColor: accentColor + "40",
+              borderColor: brand + "40",
               backgroundColor: "transparent",
             },
           ]}
-          colors={[accentColor + "26", theme.cardBackground]}
+          colors={[brand + "30", brand + "12", theme.cardBackground]}
           start={{ x: 0, y: 0 }}
           end={{ x: 1, y: 1 }}
         />
@@ -154,7 +135,7 @@ const JobCardMediaHeader: FC<JobCardMediaHeaderProps> = ({
 type FocusJobCardProps = {
   job: Job;
   theme: Theme;
-  accentColor: string;
+  brand: string;
   index: number;
   animatedIndex: Animated.AnimatedDivision<number>;
   onOpen: (job: Job) => void;
@@ -163,12 +144,12 @@ type FocusJobCardProps = {
 const FocusJobCard: FC<FocusJobCardProps> = ({
   job,
   theme,
-  accentColor,
+  brand,
   index,
   animatedIndex,
   onOpen,
 }) => {
-  const statusStyles = getStatusStyles(job, theme, accentColor);
+  const statusStyles = getStatusStyles(job, theme, brand);
   const jobTotal = getJobTotal(job);
   const hasPhotos = !!(job.photoUris && job.photoUris.length > 0);
   const hasTotal = jobTotal > 0;
@@ -221,7 +202,7 @@ const FocusJobCard: FC<FocusJobCardProps> = ({
         ]}
       >
         <View style={styles.focusCardContent}>
-          <JobCardMediaHeader job={job} theme={theme} accentColor={accentColor} />
+          <JobCardMediaHeader job={job} theme={theme} brand={brand} />
 
           <Text
             style={[
@@ -286,16 +267,21 @@ const FocusJobCard: FC<FocusJobCardProps> = ({
             </View>
 
             {hasPhotos && (
-              <View style={styles.focusPhotoChip}>
-                <Ionicons name="camera-outline" size={14} color="#9CA3AF" />
-                <Text style={styles.focusPhotoChipText}>{job.photoUris!.length}</Text>
+              <View
+                style={[
+                  styles.focusPhotoChip,
+                  { backgroundColor: theme.cardSecondaryBackground + "AA" },
+                ]}
+              >
+                <Ionicons name="camera-outline" size={14} color={theme.textMuted} />
+                <Text style={[styles.focusPhotoChipText, { color: theme.textMuted }]}>
+                  {job.photoUris!.length}
+                </Text>
               </View>
             )}
 
             {hasTotal && totalString && (
-              <Text style={[styles.focusAmountClean, { color: accentColor }]}>
-                ${totalString}
-              </Text>
+              <Text style={[styles.focusAmountClean, { color: brand }]}>${totalString}</Text>
             )}
           </View>
         </View>
@@ -309,12 +295,12 @@ const FocusJobCard: FC<FocusJobCardProps> = ({
 const HomeScreen: FC = () => {
   const router = useRouter();
 
-  // ✅ Global theme + accent (kills swap-flash)
+  // ✅ Global theme + accent
   const { isReady, theme, accentColor } = usePreferences();
+  const brand = accentColor;
 
   const [isEditing, setIsEditing] = useState(false);
 
-  // ✅ FIX: start empty (no fake placeholder jobs that cause flash)
   const [jobs, setJobs] = useState<Job[]>([]);
   const [trashJobs, setTrashJobs] = useState<Job[]>([]);
   const [isHydrated, setIsHydrated] = useState(false);
@@ -419,14 +405,12 @@ const HomeScreen: FC = () => {
     useCallback(() => {
       const loadData = async () => {
         try {
-          const [[, jobsJson], [, trashJson], [, sortJson]] =
-            await AsyncStorage.multiGet([
-              STORAGE_KEYS.JOBS,
-              STORAGE_KEYS.TRASH,
-              STORAGE_KEYS.SORT,
-            ]);
+          const [[, jobsJson], [, trashJson], [, sortJson]] = await AsyncStorage.multiGet([
+            STORAGE_KEYS.JOBS,
+            STORAGE_KEYS.TRASH,
+            STORAGE_KEYS.SORT,
+          ]);
 
-          // ✅ if first run, seed with your demo jobs ONCE
           if (!jobsJson) {
             const seed: Job[] = [
               {
@@ -593,13 +577,13 @@ const HomeScreen: FC = () => {
       <FocusJobCard
         job={item}
         theme={theme}
-        accentColor={accentColor}
+        brand={brand}
         index={index}
         animatedIndex={animatedIndex}
         onOpen={handleOpenJob}
       />
     ),
-    [theme, accentColor, animatedIndex, handleOpenJob]
+    [theme, brand, animatedIndex, handleOpenJob]
   );
 
   const dismissKeyboardAndEditing = () => {
@@ -609,7 +593,7 @@ const HomeScreen: FC = () => {
 
   // ✅ Don’t render until prefs are ready (kills initial flash completely)
   if (!isReady) {
-    return <View style={{ flex: 1, backgroundColor: themes.dark.screenBackground }} />;
+    return <View style={{ flex: 1, backgroundColor: themes.graphite.screenBackground }} />;
   }
 
   return (
@@ -635,13 +619,16 @@ const HomeScreen: FC = () => {
             </View>
 
             <View style={styles.aiHelperRow}>
-              <TouchableOpacity
-                activeOpacity={0.9}
-                style={[styles.aiHelperButton, { backgroundColor: accentColor }]}
-                onPress={() => router.push("/ai-helper")}
-              >
-                <Ionicons name="sparkles-outline" size={16} color="#F9FAFB" />
-                <Text style={styles.aiHelperText}>Ask Traktr AI</Text>
+              <TouchableOpacity activeOpacity={0.9} style={styles.aiHelperButton} onPress={() => router.push("/ai-helper")}>
+                <LinearGradient
+                  colors={[brand, brand + "CC", brand + "88"]}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 1 }}
+                  style={styles.aiHelperGradient}
+                >
+                  <Ionicons name="sparkles-outline" size={16} color={theme.textPrimary} />
+                  <Text style={[styles.aiHelperText, { color: theme.textPrimary }]}>Ask Traktr AI</Text>
+                </LinearGradient>
               </TouchableOpacity>
             </View>
 
@@ -653,8 +640,7 @@ const HomeScreen: FC = () => {
                     backgroundColor: theme.summaryCardBackground + "F2",
                     borderColor: theme.summaryCardBorder,
                   },
-                  statusFilter === "open" && styles.summaryCardActive,
-                  statusFilter === "open" && { borderColor: accentColor },
+                  statusFilter === "open" && { borderColor: brand },
                 ]}
                 onPress={() => setStatusFilter((prev) => (prev === "open" ? "all" : "open"))}
               >
@@ -669,8 +655,7 @@ const HomeScreen: FC = () => {
                     backgroundColor: theme.summaryCardBackground + "F2",
                     borderColor: theme.summaryCardBorder,
                   },
-                  statusFilter === "done" && styles.summaryCardActive,
-                  statusFilter === "done" && { borderColor: accentColor },
+                  statusFilter === "done" && { borderColor: brand },
                 ]}
                 onPress={() => setStatusFilter((prev) => (prev === "done" ? "all" : "done"))}
               >
@@ -685,8 +670,7 @@ const HomeScreen: FC = () => {
                     backgroundColor: theme.summaryCardBackground + "F2",
                     borderColor: theme.summaryCardBorder,
                   },
-                  statusFilter === "all" && styles.summaryCardActive,
-                  statusFilter === "all" && { borderColor: accentColor },
+                  statusFilter === "all" && { borderColor: brand },
                 ]}
                 onPress={() => setStatusFilter("all")}
               >
@@ -721,7 +705,7 @@ const HomeScreen: FC = () => {
                   style={[
                     styles.sortButton,
                     { backgroundColor: theme.cardBackground + "F2", borderColor: theme.cardBorder },
-                    isSortMenuVisible && { borderColor: accentColor },
+                    isSortMenuVisible && { borderColor: brand },
                   ]}
                   onPress={() => setIsSortMenuVisible((prev) => !prev)}
                 >
@@ -737,17 +721,13 @@ const HomeScreen: FC = () => {
                     ]}
                   >
                     {sortOptions.map((option) => (
-                      <TouchableOpacity
-                        key={option}
-                        style={styles.sortOption}
-                        onPress={() => handleSelectSort(option)}
-                      >
+                      <TouchableOpacity key={option} style={styles.sortOption} onPress={() => handleSelectSort(option)}>
                         <Text
                           style={[
                             styles.sortOptionText,
                             { color: theme.textPrimary },
                             option === sortOption && styles.sortOptionTextActive,
-                            option === sortOption && { color: accentColor },
+                            option === sortOption && { color: brand },
                           ]}
                         >
                           {option}
@@ -760,9 +740,7 @@ const HomeScreen: FC = () => {
             </View>
 
             <View style={styles.focusHeaderRow}>
-              <Text style={[styles.focusHeaderTitle, { color: theme.textPrimary }]}>
-                Focused jobs
-              </Text>
+              <Text style={[styles.focusHeaderTitle, { color: theme.textPrimary }]}>Focused jobs</Text>
               <Text style={[styles.focusHeaderCount, { color: theme.textMuted }]}>
                 {visibleJobs.length === 0
                   ? "0 / 0"
@@ -822,6 +800,10 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
   aiHelperButton: {
+    borderRadius: 999,
+    overflow: "hidden",
+  },
+  aiHelperGradient: {
     flexDirection: "row",
     alignItems: "center",
     borderRadius: 999,
@@ -829,14 +811,13 @@ const styles = StyleSheet.create({
     paddingVertical: 7,
     gap: 6,
     shadowColor: "#000",
-    shadowOpacity: 0.12,
-    shadowRadius: 6,
-    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.14,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 6 },
   },
   aiHelperText: {
     fontSize: 12,
     fontFamily: "Athiti-SemiBold",
-    color: "#F9FAFB",
     letterSpacing: 0.2,
   },
 
@@ -855,9 +836,6 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.05,
     shadowRadius: 6,
     shadowOffset: { width: 0, height: 3 },
-  },
-  summaryCardActive: {
-    borderColor: "#2563EB",
   },
   summaryLabel: {
     fontSize: 12,
@@ -974,7 +952,6 @@ const styles = StyleSheet.create({
     height: 52,
     borderRadius: 16,
     overflow: "hidden",
-    backgroundColor: "#111827",
   },
   mediaHeaderImage: {
     width: "100%",
@@ -982,7 +959,6 @@ const styles = StyleSheet.create({
   },
   mediaHeaderOverlay: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: "rgba(15,23,42,0.25)",
   },
   mediaStatusBar: {
     marginTop: 6,
@@ -1032,12 +1008,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     paddingVertical: 3,
     borderRadius: 999,
-    backgroundColor: "rgba(148,163,184,0.12)",
   },
   focusPhotoChipText: {
     fontSize: 12,
     fontFamily: "Athiti-Medium",
-    color: "#9CA3AF",
   },
 
   focusAmountClean: {

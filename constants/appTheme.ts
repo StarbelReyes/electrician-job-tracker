@@ -1,11 +1,21 @@
 // constants/appTheme.ts
 // Central place for Traktr theme + accent system
+// ✅ NEW DIRECTION: App-wide Warm Graphite theme (no blue/white look)
+// ✅ Accent default is now #FF0800 (tightly controlled)
+// We keep legacy types/exports for compatibility while we migrate screens.
 
-export type ThemeName = "light" | "dark" | "midnight";
-
+export type ThemeName = "light" | "dark" | "midnight" | "graphite";
 export const THEME_STORAGE_KEY = "EJT_THEME";
 
-type Theme = {
+// ✅ global font tokens (used across the app)
+export const fonts = {
+  regular: "Athiti-Regular",
+  medium: "Athiti-Medium",
+  semibold: "Athiti-SemiBold",
+  bold: "Athiti-Bold",
+};
+
+export type Theme = {
   // Screen + cards
   screenBackground: string;
   cardBackground: string;
@@ -54,67 +64,195 @@ type Theme = {
   dangerText: string;
 };
 
-export type AccentName = "jobsiteAmber" | "electricBlue" | "safetyGreen";
+/**
+ * 🔒 Warm Graphite Palette (locked)
+ */
+export const GRAPHITE_COLORS = {
+  screenBackground: "#0F1115",
+  cardBackground: "#1A1D23",
+  cardSecondaryBackground: "#15181E",
+  cardBorder: "#2A2F38",
+  inputBackground: "#12151B",
+  inputBorder: "#2A2F38",
+  textPrimary: "#E5E7EB",
+  textSecondary: "#A1A7B3",
+  textMuted: "#6B7280",
+} as const;
 
+/**
+ * ✅ Brand + supporting secondaries for #FF0800 (tightly controlled)
+ * Use these for meaning/status only — not big surfaces.
+ */
+export const BRAND_COLORS = {
+  // Brand accent
+  brand: "#FF0800",
+
+  // Secondary support colors (small usage)
+  amber: "#F5A524", // warm contrast, warnings / subtle highlights
+  success: "#2FAE67", // muted green, readable on graphite
+  info: "#4FA3C6", // muted cyan/steel (links/info chips), keep subtle
+
+  // Danger should be readable but not harsh neon red on black
+  dangerText: "#F2A3A3",
+  dangerBorder: "#4B2A2A",
+} as const;
+
+/**
+ * Legacy palette (kept for compatibility; screens may still reference this)
+ * NOTE: Not used as the default anymore.
+ */
+export const TRAKTR_COLORS = {
+  // Brand (Warm Steel Blue) - legacy
+  brand: "#3A6EA5",
+  brandDeep: "#2F5D8A",
+  brandSoft: "#6F93B8",
+
+  // Neutrals (warm + clean)
+  bg: "#F7F8FA",
+  surface: "#FFFFFF",
+  text: "#2E2E2E",
+  textMuted: "#6B7280",
+  divider: "#E5E7EB",
+
+  // Surface tint
+  panel: "#EEF3F8",
+
+  // Meaning colors
+  success: "#16A34A",
+  warning: "#F59E0B",
+  error: "#DC2626",
+} as const;
+
+// --- Accent system (kept; do NOT change storage key) ---
+export type AccentName = "jobsiteAmber" | "electricBlue" | "safetyGreen";
 export const ACCENT_STORAGE_KEY = "EJT_ACCENT";
 
 export const accentLabels: Record<AccentName, string> = {
-  jobsiteAmber: "Jobsite Amber",
-  electricBlue: "Electric Blue",
+  jobsiteAmber: "Brand Red",
+  electricBlue: "Muted Cyan",
   safetyGreen: "Safety Green",
 };
 
+/**
+ * ✅ Accent stays controlled by our accent system.
+ * ✅ Default should complement graphite and be tightly controlled.
+ * We’re repurposing the options to keep Settings stable while you migrate UI.
+ */
 export const accentSwatchColors: Record<AccentName, string> = {
-  jobsiteAmber: "#F59E0B", // amber / jobsite
-  electricBlue: "#3B82F6", // bright electric blue
-  safetyGreen: "#22C55E", // safety green
+  // Default: Brand Red
+  jobsiteAmber: BRAND_COLORS.brand, // #FF0800
+
+  // Support accents (keep subtle in UI)
+  electricBlue: BRAND_COLORS.info, // muted cyan/steel
+  safetyGreen: BRAND_COLORS.success,
 };
 
 export const getAccentColor = (accent: AccentName): string =>
-  accentSwatchColors[accent] ?? accentSwatchColors.jobsiteAmber;
+  accentSwatchColors[accent] ?? BRAND_COLORS.brand;
 
-// Themes used across the app
+/**
+ * Themes used across the app
+ * ✅ graphite is now the new default (PreferencesContext sets it).
+ * ✅ Keep legacy themes so nothing breaks during migration.
+ */
 export const themes: Record<ThemeName, Theme> = {
+  /**
+   * ✅ NEW DEFAULT: Graphite (Warm Graphite locked palette)
+   * Accent is handled separately by accent system.
+   */
+  graphite: {
+    screenBackground: GRAPHITE_COLORS.screenBackground,
+    cardBackground: GRAPHITE_COLORS.cardBackground,
+    cardSecondaryBackground: GRAPHITE_COLORS.cardSecondaryBackground,
+    cardBorder: GRAPHITE_COLORS.cardBorder,
+
+    headerText: GRAPHITE_COLORS.textPrimary,
+    headerMuted: GRAPHITE_COLORS.textSecondary,
+
+    textPrimary: GRAPHITE_COLORS.textPrimary,
+    textSecondary: GRAPHITE_COLORS.textSecondary,
+    textMuted: GRAPHITE_COLORS.textMuted,
+
+    inputBackground: GRAPHITE_COLORS.inputBackground,
+    inputText: GRAPHITE_COLORS.textPrimary,
+    inputBorder: GRAPHITE_COLORS.inputBorder,
+
+    // Buttons: neutral defaults.
+    // Screens should apply `accentColor` for true CTAs.
+    primaryButtonBackground: GRAPHITE_COLORS.cardBorder,
+    primaryButtonText: GRAPHITE_COLORS.textPrimary,
+    secondaryButtonBackground: GRAPHITE_COLORS.cardSecondaryBackground,
+    secondaryButtonText: GRAPHITE_COLORS.textPrimary,
+
+    // Tags: neutral by default (avoid screaming red everywhere).
+    tagOpenBg: GRAPHITE_COLORS.cardSecondaryBackground,
+    tagOpenBorder: GRAPHITE_COLORS.cardBorder,
+    tagOpenText: GRAPHITE_COLORS.textSecondary,
+
+    tagDoneBg: GRAPHITE_COLORS.cardSecondaryBackground,
+    tagDoneBorder: GRAPHITE_COLORS.cardBorder,
+    tagDoneText: GRAPHITE_COLORS.textSecondary,
+
+    tagArchivedBg: GRAPHITE_COLORS.cardSecondaryBackground,
+    tagArchivedBorder: GRAPHITE_COLORS.cardBorder,
+    tagArchivedText: GRAPHITE_COLORS.textMuted,
+
+    summaryCardBackground: GRAPHITE_COLORS.cardBackground,
+    summaryCardBorder: GRAPHITE_COLORS.cardBorder,
+
+    // Danger: readable, not harsh neon on black
+    dangerBorder: BRAND_COLORS.dangerBorder,
+    dangerText: BRAND_COLORS.dangerText,
+  },
+
+  /**
+   * Legacy light theme (kept temporarily so the app doesn’t break while we migrate).
+   * Not the default anymore.
+   */
   light: {
-    screenBackground: "#F3F4F6",
-    cardBackground: "#FFFFFF",
-    cardSecondaryBackground: "#E5E7EB",
-    cardBorder: "#D1D5DB",
+    screenBackground: TRAKTR_COLORS.bg,
+    cardBackground: TRAKTR_COLORS.surface,
+    cardSecondaryBackground: TRAKTR_COLORS.panel,
+    cardBorder: TRAKTR_COLORS.divider,
 
-    headerText: "#111827",
-    headerMuted: "#6B7280",
+    headerText: TRAKTR_COLORS.text,
+    headerMuted: TRAKTR_COLORS.textMuted,
 
-    textPrimary: "#111827",
-    textSecondary: "#4B5563",
+    textPrimary: TRAKTR_COLORS.text,
+    textSecondary: TRAKTR_COLORS.textMuted,
     textMuted: "#9CA3AF",
 
-    inputBackground: "#FFFFFF",
-    inputText: "#111827",
-    inputBorder: "#D1D5DB",
+    inputBackground: TRAKTR_COLORS.surface,
+    inputText: TRAKTR_COLORS.text,
+    inputBorder: TRAKTR_COLORS.divider,
 
-    primaryButtonBackground: "#111827",
-    primaryButtonText: "#F9FAFB",
-    secondaryButtonBackground: "#E5E7EB",
-    secondaryButtonText: "#111827",
+    primaryButtonBackground: TRAKTR_COLORS.brand,
+    primaryButtonText: "#FFFFFF",
+    secondaryButtonBackground: TRAKTR_COLORS.panel,
+    secondaryButtonText: TRAKTR_COLORS.brandDeep,
 
-    tagOpenBg: "#ECFEFF",
-    tagOpenBorder: "#06B6D4",
-    tagOpenText: "#0E7490",
+    tagOpenBg: "#EFF6FF",
+    tagOpenBorder: TRAKTR_COLORS.brandSoft,
+    tagOpenText: TRAKTR_COLORS.brandDeep,
 
     tagDoneBg: "#ECFDF5",
-    tagDoneBorder: "#22C55E",
+    tagDoneBorder: TRAKTR_COLORS.success,
     tagDoneText: "#15803D",
 
     tagArchivedBg: "#F9FAFB",
-    tagArchivedBorder: "#D1D5DB",
-    tagArchivedText: "#6B7280",
+    tagArchivedBorder: TRAKTR_COLORS.divider,
+    tagArchivedText: TRAKTR_COLORS.textMuted,
 
-    summaryCardBackground: "#FFFFFF",
-    summaryCardBorder: "#E5E7EB",
+    summaryCardBackground: TRAKTR_COLORS.surface,
+    summaryCardBorder: TRAKTR_COLORS.divider,
 
-    dangerBorder: "#EF4444",
-    dangerText: "#B91C1C",
+    dangerBorder: TRAKTR_COLORS.error,
+    dangerText: "#991B1B",
   },
+
+  /**
+   * Legacy themes (kept temporarily so the app doesn’t break while we migrate).
+   */
   dark: {
     screenBackground: "#020617",
     cardBackground: "#020617",
@@ -152,9 +290,10 @@ export const themes: Record<ThemeName, Theme> = {
     summaryCardBackground: "#020617",
     summaryCardBorder: "#1F2937",
 
-    dangerBorder: "#F87171",
-    dangerText: "#FCA5A5",
+    dangerBorder: BRAND_COLORS.dangerBorder,
+    dangerText: BRAND_COLORS.dangerText,
   },
+
   midnight: {
     screenBackground: "#020617",
     cardBackground: "#020617",
@@ -192,7 +331,7 @@ export const themes: Record<ThemeName, Theme> = {
     summaryCardBackground: "#020617",
     summaryCardBorder: "#1E293B",
 
-    dangerBorder: "#FB7185",
-    dangerText: "#FDA4AF",
+    dangerBorder: BRAND_COLORS.dangerBorder,
+    dangerText: BRAND_COLORS.dangerText,
   },
 };

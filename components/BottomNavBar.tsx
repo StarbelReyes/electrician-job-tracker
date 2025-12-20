@@ -22,7 +22,6 @@ export type BottomNavBarProps = {
 
 const ORDER: TabKey[] = ["home", "add", "trash", "settings"] as const;
 
-// ✅ Use Href so router.replace() is happy (no TS error)
 const ROUTES = {
   home: "/home",
   add: "/add-job",
@@ -52,6 +51,9 @@ export default function BottomNavBar({ active }: BottomNavBarProps) {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { theme, accentColor } = usePreferences();
+
+  // ✅ Brand should come from accent system (your #FF0800)
+  const brand = accentColor;
 
   const layoutsRef = useRef<Record<TabKey, Layout | null>>({
     home: null,
@@ -129,13 +131,12 @@ export default function BottomNavBar({ active }: BottomNavBarProps) {
 
   const handlePress = (tab: TabKey) => {
     if (tab === active) return;
-    // ✅ switch screens without stacking
     router.replace(ROUTES[tab]);
   };
 
   const tintFor = useCallback(
-    (isActive: boolean) => (isActive ? accentColor : theme.textMuted),
-    [accentColor, theme.textMuted]
+    (isActive: boolean) => (isActive ? brand : theme.textMuted),
+    [brand, theme.textMuted]
   );
 
   const totalHeight = TAB_BAR_HEIGHT + insets.bottom;
@@ -161,8 +162,8 @@ export default function BottomNavBar({ active }: BottomNavBarProps) {
               opacity: pillOpacity,
               transform: [{ translateX: pillX }],
               width: pillW,
-              borderColor: accentColor,
-              backgroundColor: accentColor + "14",
+              borderColor: brand,
+              backgroundColor: brand + "14",
             },
           ]}
         />
@@ -212,7 +213,7 @@ const styles = StyleSheet.create({
   },
   label: {
     fontSize: 11,
-    fontWeight: "600",
+    fontFamily: "Athiti-SemiBold",
   },
   pill: {
     position: "absolute",
