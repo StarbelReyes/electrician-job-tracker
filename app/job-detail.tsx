@@ -4,7 +4,6 @@ import MapIcon from "../assets/icons/map.png";
 import TeamChatIcon from "../assets/icons/team-chat.png";
 
 import AsyncStorage from "@react-native-async-storage/async-storage";
- // (keep your existing import if it works in your project)
 import * as ImagePicker from "expo-image-picker";
 import * as Print from "expo-print";
 import { useLocalSearchParams, useRouter } from "expo-router";
@@ -33,13 +32,7 @@ import { themes } from "../constants/appTheme";
 import { usePreferences } from "../context/PreferencesContext";
 
 // ✅ Firestore
-import {
-  collection,
-  doc,
-  getDoc,
-  getDocs,
-  updateDoc,
-} from "firebase/firestore";
+import { collection, doc, getDoc, getDocs, updateDoc } from "firebase/firestore";
 import { db } from "../firebaseConfig";
 
 const USER_STORAGE_KEY = "EJT_USER_SESSION";
@@ -58,7 +51,7 @@ type Job = {
 
   // Photos
   photoUris?: string[]; // For in-app thumbnails
-  photoBase64s?: string[]; // For PDF export
+  photoBase64s?: string[]; // For PDF export (Independent mode only)
 
   // pricing
   laborHours?: number;
@@ -141,6 +134,21 @@ const normalizeCreatedAt = (value: any): string => {
   }
 
   return new Date().toISOString();
+};
+
+// ✅ Runtime-safe mediaTypes resolver
+// - Prefers MediaTypeOptions.Images (your requested approach)
+// - Avoids crashing if MediaTypeOptions is undefined at runtime (your screenshot)
+// - Only falls back to other shapes if available
+// - If nothing exists, we omit mediaTypes entirely (picker still works)
+const getImagesMediaType = (): any => {
+  const anyPicker: any = ImagePicker;
+  return (
+    anyPicker?.MediaTypeOptions?.Images ??
+    anyPicker?.MediaType?.Images ??
+    anyPicker?.MediaTypeOptions?.All ??
+    undefined
+  );
 };
 
 // 🔹 Small component just for Photos UI (header + button + grid)
@@ -295,7 +303,10 @@ function SectionCard({
             ]}
           >
             <Text
-              style={[styles.cardActivePillText, { color: theme.textPrimary }]}
+              style={[
+                styles.cardActivePillText,
+                { color: theme.textPrimary },
+              ]}
             >
               Editing
             </Text>
@@ -374,6 +385,7 @@ export default function JobDetailScreen() {
 
   // ✅ session (to know owner vs employee + company)
   const [session, setSession] = useState<Session | null>(null);
+  const [sessionLoaded, setSessionLoaded] = useState(false);
 
   const isOwner = session?.role === "owner";
   const isEmployee = session?.role === "employee";
@@ -391,6 +403,18 @@ export default function JobDetailScreen() {
   const [employees, setEmployees] = useState<EmployeeRecord[]>([]);
   const [assignedToUid, setAssignedToUid] = useState<string>("");
   const [isAssignMenuVisible, setIsAssignMenuVisible] = useState(false);
+
+  // ✅ safe back (prevents GO_BACK warning)
+  const safeBack = () => {
+    try {
+      // @ts-ignore
+      if (router?.canGoBack?.()) {
+        router.back();
+        return;
+      }
+    } catch {}
+    router.replace("/home" as any);
+  };
 
   useEffect(() => {
     const loadBranding = async () => {
@@ -426,15 +450,19 @@ export default function JobDetailScreen() {
         const stored = await AsyncStorage.getItem(USER_STORAGE_KEY);
         if (!stored) {
           setSession(null);
+          setSessionLoaded(true);
           return;
         }
         try {
           setSession(JSON.parse(stored));
         } catch {
           setSession(null);
+        } finally {
+          setSessionLoaded(true);
         }
       } catch {
         setSession(null);
+        setSessionLoaded(true);
       }
     };
     loadSession();
@@ -587,8 +615,8 @@ export default function JobDetailScreen() {
       return;
     }
 
-    // wait for session to load so isCloudMode/companyId is accurate
-    if (session === undefined) return;
+    // ✅ CRITICAL: wait until session is loaded, so we don't accidentally load local first.
+    if (!sessionLoaded) return;
 
     const loadJob = async () => {
       try {
@@ -617,14 +645,12 @@ export default function JobDetailScreen() {
             clientNotes: data.clientNotes ? String(data.clientNotes) : undefined,
 
             photoUris: Array.isArray(data.photoUris) ? data.photoUris : [],
-            photoBase64s: Array.isArray(data.photoBase64s)
-              ? data.photoBase64s
-              : [],
+            // ✅ IMPORTANT: NEVER hydrate base64s in cloud flow
+            photoBase64s: [],
 
             laborHours: typeof data.laborHours === "number" ? data.laborHours : 0,
             hourlyRate: typeof data.hourlyRate === "number" ? data.hourlyRate : 0,
-            materialCost:
-              typeof data.materialCost === "number" ? data.materialCost : 0,
+            materialCost: typeof data.materialCost === "number" ? data.materialCost : 0,
 
             assignedToUid:
               data.assignedToUid === null || data.assignedToUid === undefined
@@ -654,7 +680,7 @@ export default function JobDetailScreen() {
           );
 
           setPhotoUris(found.photoUris || []);
-          setPhotoBase64s(found.photoBase64s || []);
+          setPhotoBase64s([]); // ✅ keep empty in cloud mode
 
           setAssignedToUid(found.assignedToUid || "");
           return;
@@ -707,7 +733,7 @@ export default function JobDetailScreen() {
 
     loadJob();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [id, isCloudMode, companyId, session]);
+  }, [id, isCloudMode, companyId, sessionLoaded]);
 
   // ✅ Load employees list (owner only + has companyId)
   useEffect(() => {
@@ -730,10 +756,7 @@ export default function JobDetailScreen() {
           };
         });
 
-        const filtered = list.filter((e) =>
-          e.role ? e.role !== "owner" : true
-        );
-
+        const filtered = list.filter((e) => (e.role ? e.role !== "owner" : true));
         setEmployees(filtered);
       } catch (e) {
         console.warn("Failed to load employees:", e);
@@ -754,6 +777,13 @@ export default function JobDetailScreen() {
       ? found.email.trim()
       : "Assigned";
   }, [assignedToUid, employees]);
+
+  const employeeAssignedLabel = useMemo(() => {
+    if (!assignedToUid) return "Unassigned";
+    if (session?.uid && assignedToUid === session.uid) return "You";
+    const short = assignedToUid.slice(0, 6) + "…" + assignedToUid.slice(-4);
+    return `Assigned (${short})`;
+  }, [assignedToUid, session?.uid]);
 
   // ✅ Firestore update helpers
   const getCloudJobRef = () => {
@@ -787,10 +817,7 @@ export default function JobDetailScreen() {
     setAssignedToUid(nextUid || "");
     setIsAssignMenuVisible(false);
 
-    const updatedJob: Job = {
-      ...job,
-      assignedToUid: nextUid ? nextUid : null,
-    };
+    const updatedJob: Job = { ...job, assignedToUid: nextUid ? nextUid : null };
     setJob(updatedJob);
 
     // ✅ Cloud writes only in cloud mode
@@ -827,14 +854,19 @@ export default function JobDetailScreen() {
       hourlyRate: parseNumber(hourlyRate),
       materialCost: parseNumber(materialCost),
       photoUris,
-      photoBase64s,
+
+      // ✅ IMPORTANT:
+      // - Independent mode can keep base64 for PDFs
+      // - Cloud mode must NEVER store base64s (Firestore size limit)
+      photoBase64s: isCloudMode ? [] : photoBase64s,
+
       assignedToUid: assignedToUid ? assignedToUid : null,
     };
 
     try {
       LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
 
-      // ✅ CLOUD MODE: update Firestore
+      // ✅ CLOUD MODE: update Firestore (NO base64s)
       if (isCloudMode) {
         const jobRef = getCloudJobRef();
         if (!jobRef) {
@@ -854,14 +886,15 @@ export default function JobDetailScreen() {
           hourlyRate: updated.hourlyRate ?? 0,
           materialCost: updated.materialCost ?? 0,
           photoUris: updated.photoUris ?? [],
-          photoBase64s: updated.photoBase64s ?? [],
+
+          // ✅ DO NOT WRITE BASE64 TO FIRESTORE (omit entirely)
           assignedToUid: updated.assignedToUid || null,
         });
 
         setJob(updated);
 
         Alert.alert("Saved", "Job details updated.", [
-          { text: "OK", onPress: () => router.back() },
+          { text: "OK", onPress: safeBack },
         ]);
         return;
       }
@@ -875,7 +908,7 @@ export default function JobDetailScreen() {
       setJob(updated);
 
       Alert.alert("Saved", "Job details updated.", [
-        { text: "OK", onPress: () => router.back() },
+        { text: "OK", onPress: safeBack },
       ]);
     } catch (e) {
       console.warn("Failed to save job:", e);
@@ -950,7 +983,7 @@ export default function JobDetailScreen() {
   const confirmMoveToTrash = () => {
     if (!job) return;
 
-    // ✅ Cloud-mode: disable for now (your home.tsx already does “no local trash”)
+    // ✅ Cloud-mode: disable for now
     if (isCloudMode) {
       Alert.alert(
         "Not available yet",
@@ -984,17 +1017,11 @@ export default function JobDetailScreen() {
                 LayoutAnimation.Presets.easeInEaseOut
               );
               await Promise.all([
-                AsyncStorage.setItem(
-                  STORAGE_KEYS.JOBS,
-                  JSON.stringify(remaining)
-                ),
-                AsyncStorage.setItem(
-                  STORAGE_KEYS.TRASH,
-                  JSON.stringify(newTrash)
-                ),
+                AsyncStorage.setItem(STORAGE_KEYS.JOBS, JSON.stringify(remaining)),
+                AsyncStorage.setItem(STORAGE_KEYS.TRASH, JSON.stringify(newTrash)),
               ]);
 
-              router.back();
+              safeBack();
             } catch (e) {
               console.warn("Failed to move to trash:", e);
               Alert.alert("Error", "Could not move job to Trash.");
@@ -1007,64 +1034,89 @@ export default function JobDetailScreen() {
 
   // ---------- Photos ----------
   const handleAddPhotoFromGallery = async () => {
-    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (status !== "granted") {
-      Alert.alert(
-        "Permission needed",
-        "We need access to your photos to attach pictures to this job."
-      );
-      return;
+    try {
+      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (status !== "granted") {
+        Alert.alert(
+          "Permission needed",
+          "We need access to your photos to attach pictures to this job."
+        );
+        return;
+      }
+
+      const imagesType = getImagesMediaType();
+
+      const result = await ImagePicker.launchImageLibraryAsync({
+        ...(imagesType ? { mediaTypes: imagesType } : {}),
+        allowsMultipleSelection: true,
+        quality: 0.7,
+        // ✅ cloud mode: never request base64 (prevents size + accidental writes)
+        base64: !isCloudMode,
+      });
+
+      if (result.canceled || !result.assets?.length) return;
+
+      const newUris: string[] = [];
+      const newBase64s: string[] = [];
+
+      for (const asset of result.assets) {
+        if (!asset.uri) continue;
+        newUris.push(asset.uri);
+
+        // ✅ independent only
+        if (!isCloudMode && asset.base64) newBase64s.push(asset.base64);
+      }
+
+      if (!newUris.length) return;
+
+      LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+      setPhotoUris((prev) => [...prev, ...newUris]);
+
+      if (!isCloudMode) {
+        setPhotoBase64s((prev) => [...prev, ...newBase64s]);
+      }
+    } catch (e) {
+      console.warn("handleAddPhotoFromGallery error:", e);
+      Alert.alert("Error", "Could not open photo library. Try again.");
     }
-
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      allowsMultipleSelection: true,
-      quality: 0.7,
-      base64: true,
-    });
-
-    if (result.canceled || !result.assets?.length) return;
-
-    const newUris: string[] = [];
-    const newBase64s: string[] = [];
-
-    for (const asset of result.assets) {
-      if (!asset.uri || !asset.base64) continue;
-      newUris.push(asset.uri);
-      newBase64s.push(asset.base64);
-    }
-
-    if (!newUris.length) return;
-
-    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-    setPhotoUris((prev) => [...prev, ...newUris]);
-    setPhotoBase64s((prev) => [...prev, ...newBase64s]);
   };
 
   const handleAddPhotoFromCamera = async () => {
-    const { status } = await ImagePicker.requestCameraPermissionsAsync();
-    if (status !== "granted") {
-      Alert.alert(
-        "Permission needed",
-        "We need access to your camera to take photos for this job."
-      );
-      return;
+    try {
+      const { status } = await ImagePicker.requestCameraPermissionsAsync();
+      if (status !== "granted") {
+        Alert.alert(
+          "Permission needed",
+          "We need access to your camera to take photos for this job."
+        );
+        return;
+      }
+
+      const imagesType = getImagesMediaType();
+
+      const result = await ImagePicker.launchCameraAsync({
+        ...(imagesType ? { mediaTypes: imagesType } : {}),
+        quality: 0.7,
+        // ✅ cloud mode: never request base64
+        base64: !isCloudMode,
+      });
+
+      if (result.canceled) return;
+
+      const asset = result.assets?.[0];
+      if (!asset?.uri) return;
+
+      LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+      setPhotoUris((prev) => [...prev, asset.uri]);
+
+      // ✅ independent only
+      if (!isCloudMode && asset.base64) {
+        setPhotoBase64s((prev) => [...prev, asset.base64 as string]);
+      }
+    } catch (e) {
+      console.warn("handleAddPhotoFromCamera error:", e);
+      Alert.alert("Error", "Could not open camera. Try again.");
     }
-
-    const result = await ImagePicker.launchCameraAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      quality: 0.7,
-      base64: true,
-    });
-
-    if (result.canceled) return;
-
-    const asset = result.assets[0];
-    if (!asset?.uri || !asset.base64) return;
-
-    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-    setPhotoUris((prev) => [...prev, asset.uri]);
-    setPhotoBase64s((prev) => [...prev, asset.base64 as string]);
   };
 
   const handleRemovePhoto = (uriToRemove: string) => {
@@ -1082,9 +1134,13 @@ export default function JobDetailScreen() {
               LayoutAnimation.Presets.easeInEaseOut
             );
             setPhotoUris((prev) => prev.filter((u) => u !== uriToRemove));
-            setPhotoBase64s((prev) =>
-              index >= 0 ? prev.filter((_, i) => i !== index) : prev
-            );
+
+            // ✅ only keep base64 list in independent mode
+            if (!isCloudMode) {
+              setPhotoBase64s((prev) =>
+                index >= 0 ? prev.filter((_, i) => i !== index) : prev
+              );
+            }
           },
         },
       ]
@@ -1116,33 +1172,32 @@ export default function JobDetailScreen() {
       const hasBranding = brandName || brandPhone || brandEmail || brandLicense;
 
       const companyHeaderLines: string[] = [];
-      if (brandName) {
+      if (brandName)
         companyHeaderLines.push(
           `<div class="company-name">${safeHtml(brandName)}</div>`
         );
-      }
-      if (brandPhone) {
+      if (brandPhone)
         companyHeaderLines.push(
           `<div class="company-line">${safeHtml(brandPhone)}</div>`
         );
-      }
-      if (brandEmail) {
+      if (brandEmail)
         companyHeaderLines.push(
           `<div class="company-line">${safeHtml(brandEmail)}</div>`
         );
-      }
-      if (brandLicense) {
+      if (brandLicense)
         companyHeaderLines.push(
           `<div class="company-line">${safeHtml(brandLicense)}</div>`
         );
-      }
 
       const companyHeaderHtml = hasBranding
         ? `<div class="company-block">${companyHeaderLines.join("")}</div>`
         : "";
 
-      const bases: string[] =
-        photoBase64s.length > 0 ? photoBase64s : job.photoBase64s || [];
+      // ✅ If cloud mode, base64 will be empty (by design).
+      // PDF photos in cloud mode won't render until we add Firebase Storage.
+      const bases: string[] = photoBase64s.length
+        ? photoBase64s
+        : job.photoBase64s || [];
 
       const photoBlocks: string[] = [];
       for (let i = 0; i < bases.length; i++) {
@@ -1285,9 +1340,7 @@ export default function JobDetailScreen() {
                     <tr>
                       <td>Labor</td>
                       <td>${laborNum} h × $${rateNum.toFixed(2)}</td>
-                      <td class="amount">$${(laborNum * rateNum).toFixed(
-                        2
-                      )}</td>
+                      <td class="amount">$${(laborNum * rateNum).toFixed(2)}</td>
                     </tr>
                     <tr>
                       <td>Material</td>
@@ -1457,9 +1510,7 @@ export default function JobDetailScreen() {
                     <tr>
                       <td>Labor</td>
                       <td>${laborNum} h × $${rateNum.toFixed(2)}</td>
-                      <td class="amount">$${(laborNum * rateNum).toFixed(
-                        2
-                      )}</td>
+                      <td class="amount">$${(laborNum * rateNum).toFixed(2)}</td>
                     </tr>
                     <tr>
                       <td>Material</td>
@@ -1518,10 +1569,7 @@ export default function JobDetailScreen() {
   if (isLoading) {
     return (
       <View
-        style={[
-          styles.loadingScreen,
-          { backgroundColor: theme.screenBackground },
-        ]}
+        style={[styles.loadingScreen, { backgroundColor: theme.screenBackground }]}
       >
         <Text style={[styles.loadingText, { color: theme.textPrimary }]}>
           Loading job…
@@ -1533,17 +1581,14 @@ export default function JobDetailScreen() {
   if (!job) {
     return (
       <View
-        style={[
-          styles.loadingScreen,
-          { backgroundColor: theme.screenBackground },
-        ]}
+        style={[styles.loadingScreen, { backgroundColor: theme.screenBackground }]}
       >
         <Text style={[styles.loadingText, { color: theme.textPrimary }]}>
           Job not found.
         </Text>
         <TouchableOpacity
           style={[styles.simpleButton, { backgroundColor: accentColor }]}
-          onPress={() => router.back()}
+          onPress={safeBack}
         >
           <Text style={[styles.simpleButtonText, { color: "#F9FAFB" }]}>
             Back
@@ -1564,16 +1609,13 @@ export default function JobDetailScreen() {
       <Animated.View
         style={[
           styles.detailsScreen,
-          {
-            transform: [{ scale: screenScale }],
-            backgroundColor: theme.screenBackground,
-          },
+          { transform: [{ scale: screenScale }], backgroundColor: theme.screenBackground },
         ]}
       >
         {/* TOP NAV */}
         <View style={styles.headerRow}>
           <TouchableOpacity
-            onPress={() => router.back()}
+            onPress={safeBack}
             style={styles.backButton}
             activeOpacity={0.8}
           >
@@ -1615,10 +1657,7 @@ export default function JobDetailScreen() {
                 <View
                   style={[
                     styles.heroBg,
-                    {
-                      borderColor: theme.cardBorder,
-                      backgroundColor: theme.cardBackground,
-                    },
+                    { borderColor: theme.cardBorder, backgroundColor: theme.cardBackground },
                   ]}
                 >
                   {!!heroPhotoUri ? (
@@ -1650,10 +1689,7 @@ export default function JobDetailScreen() {
 
                     <Text
                       numberOfLines={2}
-                      style={[
-                        styles.heroSubtitle,
-                        { color: theme.textSecondary },
-                      ]}
+                      style={[styles.heroSubtitle, { color: theme.textSecondary }]}
                     >
                       {editAddress || job.address}
                     </Text>
@@ -1710,7 +1746,53 @@ export default function JobDetailScreen() {
                 </View>
               </View>
 
-              {/* ✅ OWNER ONLY: ASSIGNMENT CARD (Cloud only, because employees rely on Firestore) */}
+              {/* ✅ EMPLOYEE: read-only assignment info (Cloud mode) */}
+              {isEmployee && isCloudMode ? (
+                <SectionCard
+                  theme={theme}
+                  accentColor={accentColor}
+                  title="Assignment"
+                  subtitle="Who this job is assigned to"
+                  icon="🧑‍🔧"
+                  isActive={false}
+                  isDimmed={false}
+                  onLayout={(y) => registerSection("assignment", y)}
+                >
+                  <View style={styles.assignmentRow}>
+                    <Text
+                      style={[styles.assignmentLabel, { color: theme.textMuted }]}
+                    >
+                      Assigned to
+                    </Text>
+
+                    <View
+                      style={[
+                        styles.assignmentPicker,
+                        {
+                          backgroundColor: theme.inputBackground,
+                          borderColor: theme.inputBorder,
+                          opacity: 0.95,
+                        },
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.assignmentPickerText,
+                          { color: theme.textPrimary },
+                        ]}
+                      >
+                        {employeeAssignedLabel}
+                      </Text>
+                    </View>
+                  </View>
+
+                  <Text style={[styles.assignmentHint, { color: theme.textMuted }]}>
+                    Only assigned jobs appear on your Home screen.
+                  </Text>
+                </SectionCard>
+              ) : null}
+
+              {/* ✅ OWNER ONLY: ASSIGNMENT CARD (Cloud only) */}
               {isOwner && isCloudMode ? (
                 <SectionCard
                   theme={theme}
@@ -1812,22 +1894,18 @@ export default function JobDetailScreen() {
                       activeOpacity={0.9}
                       disabled={!assignedToUid}
                       onPress={() => {
-                        Alert.alert(
-                          "Unassign",
-                          "Remove assignment from this job?",
-                          [
-                            { text: "Cancel", style: "cancel" },
-                            {
-                              text: "Unassign",
-                              style: "destructive",
-                              onPress: async () => {
-                                try {
-                                  await handleAssignTo("");
-                                } catch {}
-                              },
+                        Alert.alert("Unassign", "Remove assignment from this job?", [
+                          { text: "Cancel", style: "cancel" },
+                          {
+                            text: "Unassign",
+                            style: "destructive",
+                            onPress: async () => {
+                              try {
+                                await handleAssignTo("");
+                              } catch {}
                             },
-                          ]
-                        );
+                          },
+                        ]);
                       }}
                     >
                       <Text
@@ -1882,9 +1960,7 @@ export default function JobDetailScreen() {
                             key={emp.uid}
                             style={[
                               styles.assignmentOption,
-                              isActive && {
-                                backgroundColor: accentColor + "1A",
-                              },
+                              isActive && { backgroundColor: accentColor + "1A" },
                             ]}
                             onPress={async () => {
                               try {
@@ -1895,11 +1971,7 @@ export default function JobDetailScreen() {
                             <Text
                               style={[
                                 styles.assignmentOptionText,
-                                {
-                                  color: isActive
-                                    ? accentColor
-                                    : theme.textPrimary,
-                                },
+                                { color: isActive ? accentColor : theme.textPrimary },
                               ]}
                             >
                               {label}
@@ -2129,12 +2201,7 @@ export default function JobDetailScreen() {
 
                   <View style={styles.pricingInputsRow}>
                     <View style={styles.pricingColumn}>
-                      <Text
-                        style={[
-                          styles.modalLabel,
-                          { color: theme.textSecondary },
-                        ]}
-                      >
+                      <Text style={[styles.modalLabel, { color: theme.textSecondary }]}>
                         Labor hours
                       </Text>
                       <TextInput
@@ -2159,12 +2226,7 @@ export default function JobDetailScreen() {
                     </View>
 
                     <View style={styles.pricingColumn}>
-                      <Text
-                        style={[
-                          styles.modalLabel,
-                          { color: theme.textSecondary },
-                        ]}
-                      >
+                      <Text style={[styles.modalLabel, { color: theme.textSecondary }]}>
                         Hourly rate
                       </Text>
                       <TextInput
@@ -2190,12 +2252,7 @@ export default function JobDetailScreen() {
                   </View>
 
                   <View style={styles.pricingSingleRow}>
-                    <Text
-                      style={[
-                        styles.modalLabel,
-                        { color: theme.textSecondary },
-                      ]}
-                    >
+                    <Text style={[styles.modalLabel, { color: theme.textSecondary }]}>
                       Material cost
                     </Text>
                     <TextInput
@@ -2333,12 +2390,7 @@ export default function JobDetailScreen() {
               onPress={() => setIsAddPhotoMenuVisible(false)}
               style={styles.addPhotoMenuBackdrop}
             />
-            <View
-              style={[
-                styles.addPhotoMenuSheet,
-                { backgroundColor: theme.cardBackground },
-              ]}
-            >
+            <View style={[styles.addPhotoMenuSheet, { backgroundColor: theme.cardBackground }]}>
               <Text style={[styles.addPhotoMenuTitle, { color: theme.textPrimary }]}>
                 Add Photo
               </Text>
@@ -2346,10 +2398,7 @@ export default function JobDetailScreen() {
               <TouchableOpacity
                 style={[
                   styles.addPhotoMenuOption,
-                  {
-                    backgroundColor: theme.cardBackground,
-                    borderColor: accentColor,
-                  },
+                  { backgroundColor: theme.cardBackground, borderColor: accentColor },
                 ]}
                 onPress={() => {
                   setIsAddPhotoMenuVisible(false);
@@ -2357,12 +2406,7 @@ export default function JobDetailScreen() {
                 }}
                 activeOpacity={0.9}
               >
-                <Text
-                  style={[
-                    styles.addPhotoMenuOptionText,
-                    { color: theme.textPrimary },
-                  ]}
-                >
+                <Text style={[styles.addPhotoMenuOptionText, { color: theme.textPrimary }]}>
                   📸 Take Photo
                 </Text>
               </TouchableOpacity>
@@ -2370,10 +2414,7 @@ export default function JobDetailScreen() {
               <TouchableOpacity
                 style={[
                   styles.addPhotoMenuOption,
-                  {
-                    backgroundColor: theme.cardBackground,
-                    borderColor: accentColor,
-                  },
+                  { backgroundColor: theme.cardBackground, borderColor: accentColor },
                 ]}
                 onPress={() => {
                   setIsAddPhotoMenuVisible(false);
@@ -2381,12 +2422,7 @@ export default function JobDetailScreen() {
                 }}
                 activeOpacity={0.9}
               >
-                <Text
-                  style={[
-                    styles.addPhotoMenuOptionText,
-                    { color: theme.textPrimary },
-                  ]}
-                >
+                <Text style={[styles.addPhotoMenuOptionText, { color: theme.textPrimary }]}>
                   🖼️ Choose from Gallery
                 </Text>
               </TouchableOpacity>
@@ -2396,12 +2432,7 @@ export default function JobDetailScreen() {
                 onPress={() => setIsAddPhotoMenuVisible(false)}
                 activeOpacity={0.8}
               >
-                <Text
-                  style={[
-                    styles.addPhotoMenuCancelText,
-                    { color: theme.textMuted },
-                  ]}
-                >
+                <Text style={[styles.addPhotoMenuCancelText, { color: theme.textMuted }]}>
                   Cancel
                 </Text>
               </TouchableOpacity>
@@ -2593,13 +2624,8 @@ const styles = StyleSheet.create({
   modalMeta: { fontSize: 11, marginTop: 8, fontFamily: "Athiti-Regular" },
 
   // ✅ Assignment
-  assignmentRow: {
-    gap: 8,
-  },
-  assignmentLabel: {
-    fontSize: 12,
-    fontFamily: "Athiti-SemiBold",
-  },
+  assignmentRow: { gap: 8 },
+  assignmentLabel: { fontSize: 12, fontFamily: "Athiti-SemiBold" },
   assignmentPicker: {
     flexDirection: "row",
     alignItems: "center",
@@ -2608,79 +2634,28 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     borderWidth: 1,
   },
-  assignmentPickerText: {
-    flex: 1,
-    fontSize: 14,
-    fontFamily: "Athiti-SemiBold",
-  },
-  assignmentPickerChevron: {
-    fontSize: 14,
-    fontFamily: "Athiti-Bold",
-    marginLeft: 8,
-  },
-  assignmentActionsRow: {
-    flexDirection: "row",
-    gap: 10,
-    marginTop: 10,
-  },
-  assignmentSmallButton: {
-    flex: 1,
-    borderRadius: 999,
-    paddingVertical: 10,
-    alignItems: "center",
-  },
-  assignmentSmallButtonText: {
-    fontSize: 13,
-    fontFamily: "Athiti-Bold",
-  },
-  assignmentDropdown: {
-    marginTop: 10,
-    borderRadius: 14,
-    borderWidth: 1,
-    overflow: "hidden",
-  },
+  assignmentPickerText: { flex: 1, fontSize: 14, fontFamily: "Athiti-SemiBold" },
+  assignmentPickerChevron: { fontSize: 14, fontFamily: "Athiti-Bold", marginLeft: 8 },
+  assignmentActionsRow: { flexDirection: "row", gap: 10, marginTop: 10 },
+  assignmentSmallButton: { flex: 1, borderRadius: 999, paddingVertical: 10, alignItems: "center" },
+  assignmentSmallButtonText: { fontSize: 13, fontFamily: "Athiti-Bold" },
+  assignmentDropdown: { marginTop: 10, borderRadius: 14, borderWidth: 1, overflow: "hidden" },
   assignmentOption: {
     flexDirection: "row",
     alignItems: "center",
     paddingVertical: 10,
     paddingHorizontal: 12,
   },
-  assignmentOptionText: {
-    flex: 1,
-    fontSize: 13,
-    fontFamily: "Athiti-SemiBold",
-  },
-  assignmentOptionCheck: {
-    fontSize: 14,
-    fontFamily: "Athiti-Bold",
-  },
-  assignmentHint: {
-    marginTop: 10,
-    fontSize: 11,
-    fontFamily: "Athiti-Regular",
-  },
+  assignmentOptionText: { flex: 1, fontSize: 13, fontFamily: "Athiti-SemiBold" },
+  assignmentOptionCheck: { fontSize: 14, fontFamily: "Athiti-Bold" },
+  assignmentHint: { marginTop: 10, fontSize: 11, fontFamily: "Athiti-Regular" },
 
   // Photos
-  photosRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginTop: 4,
-    marginBottom: 10,
-  },
-  addPhotoButton: {
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 999,
-    borderWidth: 1,
-  },
+  photosRow: { flexDirection: "row", alignItems: "center", marginTop: 4, marginBottom: 10 },
+  addPhotoButton: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 999, borderWidth: 1 },
   addPhotoButtonText: { fontSize: 13, fontFamily: "Athiti-SemiBold" },
 
-  photoGrid: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: GRID_GAP,
-    marginBottom: 12,
-  },
+  photoGrid: { flexDirection: "row", flexWrap: "wrap", gap: GRID_GAP, marginBottom: 12 },
   photoWrapper: {
     position: "relative",
     width: THUMB_SIZE,
@@ -2698,11 +2673,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 4,
     paddingVertical: 1,
   },
-  photoRemoveText: {
-    color: "#FCA5A5",
-    fontSize: 10,
-    fontFamily: "Athiti-Bold",
-  },
+  photoRemoveText: { color: "#FCA5A5", fontSize: 10, fontFamily: "Athiti-Bold" },
 
   // Pricing
   pricingCard: {
@@ -2725,10 +2696,7 @@ const styles = StyleSheet.create({
     borderBottomColor: "rgba(148,163,184,0.25)",
   },
   pricingTotalHeaderLabel: { fontSize: 13, fontFamily: "Athiti-SemiBold" },
-  pricingTotalHeaderValue: {
-    fontSize: 20,
-    fontFamily: "Athiti-Bold",
-  },
+  pricingTotalHeaderValue: { fontSize: 20, fontFamily: "Athiti-Bold" },
   pricingInputsRow: { flexDirection: "row", gap: 10, marginTop: 4 },
   pricingColumn: { flex: 1 },
   pricingInput: { marginBottom: 8 },
@@ -2756,12 +2724,7 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
   },
   stickyButtonsRow: { flexDirection: "row", gap: 10 },
-  stickyButton: {
-    flex: 1,
-    borderRadius: 999,
-    paddingVertical: 12,
-    alignItems: "center",
-  },
+  stickyButton: { flex: 1, borderRadius: 999, paddingVertical: 12, alignItems: "center" },
   stickyButtonText: { fontSize: 14, fontFamily: "Athiti-Bold" },
 
   // Add Photo bottom sheet
@@ -2773,10 +2736,7 @@ const styles = StyleSheet.create({
     top: 0,
     justifyContent: "flex-end",
   },
-  addPhotoMenuBackdrop: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: "rgba(0,0,0,0.4)",
-  },
+  addPhotoMenuBackdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: "rgba(0,0,0,0.4)" },
   addPhotoMenuSheet: {
     paddingHorizontal: 18,
     paddingTop: 14,
@@ -2797,15 +2757,7 @@ const styles = StyleSheet.create({
     marginBottom: 8,
     borderWidth: 1,
   },
-  addPhotoMenuOptionText: {
-    fontSize: 14,
-    textAlign: "center",
-    fontFamily: "Athiti-SemiBold",
-  },
+  addPhotoMenuOptionText: { fontSize: 14, textAlign: "center", fontFamily: "Athiti-SemiBold" },
   addPhotoMenuCancel: { marginTop: 6, paddingVertical: 8 },
-  addPhotoMenuCancelText: {
-    fontSize: 13,
-    textAlign: "center",
-    fontFamily: "Athiti-Regular",
-  },
+  addPhotoMenuCancelText: { fontSize: 13, textAlign: "center", fontFamily: "Athiti-Regular" },
 });
