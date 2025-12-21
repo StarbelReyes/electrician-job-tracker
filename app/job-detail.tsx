@@ -4,7 +4,7 @@ import MapIcon from "../assets/icons/map.png";
 import TeamChatIcon from "../assets/icons/team-chat.png";
 
 import AsyncStorage from "@react-native-async-storage/async-storage";
-// We no longer depend on FileSystem for images, only for PDF via Print
+ // (keep your existing import if it works in your project)
 import * as ImagePicker from "expo-image-picker";
 import * as Print from "expo-print";
 import { useLocalSearchParams, useRouter } from "expo-router";
@@ -32,8 +32,14 @@ import ImageViewing from "react-native-image-viewing";
 import { themes } from "../constants/appTheme";
 import { usePreferences } from "../context/PreferencesContext";
 
-// ✅ Firestore for employee assignment (Option B)
-import { collection, doc, getDocs, updateDoc } from "firebase/firestore";
+// ✅ Firestore
+import {
+  collection,
+  doc,
+  getDoc,
+  getDocs,
+  updateDoc,
+} from "firebase/firestore";
 import { db } from "../firebaseConfig";
 
 const USER_STORAGE_KEY = "EJT_USER_SESSION";
@@ -60,7 +66,7 @@ type Job = {
   materialCost?: number;
 
   // ✅ assignment (Option B)
-  assignedToUid?: string;
+  assignedToUid?: string | null;
 };
 
 type Role = "owner" | "employee" | "independent";
@@ -101,11 +107,41 @@ const THUMB_SIZE =
   GRID_COLUMNS;
 
 const STICKY_BAR_HEIGHT = 86;
-
-// ✅ Match add-job.tsx offset behavior
 const SCROLL_OFFSET = 80;
 
-type ActiveSectionKey = "jobInfo" | "client" | "pricing" | "photos" | "assignment" | null;
+type ActiveSectionKey =
+  | "jobInfo"
+  | "client"
+  | "pricing"
+  | "photos"
+  | "assignment"
+  | null;
+
+// ---------------- HELPERS ----------------
+
+// Best-effort createdAt normalization (string or Firestore Timestamp-like)
+const normalizeCreatedAt = (value: any): string => {
+  if (!value) return new Date().toISOString();
+  if (typeof value === "string") return value;
+
+  if (typeof value?.toDate === "function") {
+    try {
+      return value.toDate().toISOString();
+    } catch {
+      return new Date().toISOString();
+    }
+  }
+
+  if (typeof value === "number") {
+    try {
+      return new Date(value).toISOString();
+    } catch {
+      return new Date().toISOString();
+    }
+  }
+
+  return new Date().toISOString();
+};
 
 // 🔹 Small component just for Photos UI (header + button + grid)
 type JobPhotosSectionProps = {
@@ -338,8 +374,12 @@ export default function JobDetailScreen() {
 
   // ✅ session (to know owner vs employee + company)
   const [session, setSession] = useState<Session | null>(null);
+
   const isOwner = session?.role === "owner";
+  const isEmployee = session?.role === "employee";
   const companyId = session?.companyId ?? null;
+
+  const isCloudMode = (isOwner || isEmployee) && !!companyId;
 
   // 🔹 Company branding (used in PDFs)
   const [companyName, setCompanyName] = useState("");
@@ -520,24 +560,81 @@ export default function JobDetailScreen() {
     }).start();
   }, [screenScale]);
 
-  // ---------- Load job from storage ----------
+  // ---------- Helpers ----------
+  const parseNumber = (value: string) => {
+    const n = Number(value.replace(/[^0-9.]/g, ""));
+    return Number.isNaN(n) ? 0 : n;
+  };
+
+  const totalAmount =
+    parseNumber(laborHours) * parseNumber(hourlyRate) +
+    parseNumber(materialCost);
+
+  const persistJobs = async (updatedJobs: Job[]) => {
+    await AsyncStorage.setItem(STORAGE_KEYS.JOBS, JSON.stringify(updatedJobs));
+  };
+
+  const safeHtml = (value: string) =>
+    value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+  const withLineBreaks = (value: string) =>
+    safeHtml(value).replace(/\n/g, "<br />");
+
+  // ---------- Load job (Cloud OR Local) ----------
   useEffect(() => {
     if (!id) {
       setIsLoading(false);
       return;
     }
 
+    // wait for session to load so isCloudMode/companyId is accurate
+    if (session === undefined) return;
+
     const loadJob = async () => {
       try {
-        const jobsJson = await AsyncStorage.getItem(STORAGE_KEYS.JOBS);
-        if (!jobsJson) {
-          setIsLoading(false);
-          return;
-        }
-        const jobs: Job[] = JSON.parse(jobsJson);
-        const found = jobs.find((j) => j.id === id);
-        if (found) {
+        setIsLoading(true);
+
+        // ✅ CLOUD MODE: Firestore
+        if (isCloudMode && companyId) {
+          const jobRef = doc(db, "companies", companyId, "jobs", id);
+          const snap = await getDoc(jobRef);
+          if (!snap.exists()) {
+            setJob(null);
+            return;
+          }
+
+          const data: any = snap.data() ?? {};
+          const found: Job = {
+            id: snap.id,
+            title: String(data.title ?? ""),
+            address: String(data.address ?? ""),
+            description: String(data.description ?? ""),
+            createdAt: normalizeCreatedAt(data.createdAt),
+            isDone: Boolean(data.isDone ?? false),
+
+            clientName: data.clientName ? String(data.clientName) : undefined,
+            clientPhone: data.clientPhone ? String(data.clientPhone) : undefined,
+            clientNotes: data.clientNotes ? String(data.clientNotes) : undefined,
+
+            photoUris: Array.isArray(data.photoUris) ? data.photoUris : [],
+            photoBase64s: Array.isArray(data.photoBase64s)
+              ? data.photoBase64s
+              : [],
+
+            laborHours: typeof data.laborHours === "number" ? data.laborHours : 0,
+            hourlyRate: typeof data.hourlyRate === "number" ? data.hourlyRate : 0,
+            materialCost:
+              typeof data.materialCost === "number" ? data.materialCost : 0,
+
+            assignedToUid:
+              data.assignedToUid === null || data.assignedToUid === undefined
+                ? null
+                : String(data.assignedToUid),
+          };
+
           setJob(found);
+
+          // hydrate UI fields
           setEditTitle(found.title);
           setEditAddress(found.address);
           setEditDescription(found.description);
@@ -559,18 +656,58 @@ export default function JobDetailScreen() {
           setPhotoUris(found.photoUris || []);
           setPhotoBase64s(found.photoBase64s || []);
 
-          // ✅ assignment (local mirror)
           setAssignedToUid(found.assignedToUid || "");
+          return;
         }
+
+        // ✅ INDEPENDENT MODE: AsyncStorage (existing behavior)
+        const jobsJson = await AsyncStorage.getItem(STORAGE_KEYS.JOBS);
+        if (!jobsJson) {
+          setJob(null);
+          return;
+        }
+
+        const jobs: Job[] = JSON.parse(jobsJson);
+        const found = jobs.find((j) => j.id === id);
+        if (!found) {
+          setJob(null);
+          return;
+        }
+
+        setJob(found);
+        setEditTitle(found.title);
+        setEditAddress(found.address);
+        setEditDescription(found.description);
+        setEditClientName(found.clientName || "");
+        setEditClientPhone(found.clientPhone || "");
+        setEditClientNotes(found.clientNotes || "");
+        setIsDone(found.isDone);
+
+        setLaborHours(
+          found.laborHours !== undefined ? String(found.laborHours) : ""
+        );
+        setHourlyRate(
+          found.hourlyRate !== undefined ? String(found.hourlyRate) : ""
+        );
+        setMaterialCost(
+          found.materialCost !== undefined ? String(found.materialCost) : ""
+        );
+
+        setPhotoUris(found.photoUris || []);
+        setPhotoBase64s(found.photoBase64s || []);
+
+        setAssignedToUid(found.assignedToUid || "");
       } catch (e) {
         console.warn("Failed to load job:", e);
+        setJob(null);
       } finally {
         setIsLoading(false);
       }
     };
 
     loadJob();
-  }, [id]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id, isCloudMode, companyId, session]);
 
   // ✅ Load employees list (owner only + has companyId)
   useEffect(() => {
@@ -593,8 +730,9 @@ export default function JobDetailScreen() {
           };
         });
 
-        // Optional: prefer employees first, but keep owner out of list if present
-        const filtered = list.filter((e) => (e.role ? e.role !== "owner" : true));
+        const filtered = list.filter((e) =>
+          e.role ? e.role !== "owner" : true
+        );
 
         setEmployees(filtered);
       } catch (e) {
@@ -617,36 +755,21 @@ export default function JobDetailScreen() {
       : "Assigned";
   }, [assignedToUid, employees]);
 
-  // ---------- Helpers ----------
-  const parseNumber = (value: string) => {
-    const n = Number(value.replace(/[^0-9.]/g, ""));
-    return Number.isNaN(n) ? 0 : n;
+  // ✅ Firestore update helpers
+  const getCloudJobRef = () => {
+    if (!companyId) return null;
+    if (!job?.id) return null;
+    return doc(db, "companies", companyId, "jobs", job.id);
   };
 
-  const totalAmount =
-    parseNumber(laborHours) * parseNumber(hourlyRate) +
-    parseNumber(materialCost);
-
-  const persistJobs = async (updatedJobs: Job[]) => {
-    await AsyncStorage.setItem(STORAGE_KEYS.JOBS, JSON.stringify(updatedJobs));
-  };
-
-  const safeHtml = (value: string) =>
-    value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-
-  const withLineBreaks = (value: string) =>
-    safeHtml(value).replace(/\n/g, "<br />");
-
-  // ✅ Firestore update: assign/unassign job (Option B)
   const updateAssignmentFirestore = async (nextUid: string) => {
-    if (!companyId) {
-      Alert.alert("Missing company", "No company ID found for this account.");
+    const jobRef = getCloudJobRef();
+    if (!jobRef) {
+      Alert.alert("Missing company/job", "Could not locate the job in cloud.");
       return;
     }
-    if (!job?.id) return;
 
     try {
-      const jobRef = doc(db, "companies", companyId, "jobs", job.id);
       await updateDoc(jobRef, { assignedToUid: nextUid || null });
     } catch (e) {
       console.warn("Failed to update assignment:", e);
@@ -658,18 +781,25 @@ export default function JobDetailScreen() {
   const handleAssignTo = async (nextUid: string) => {
     if (!job) return;
 
-    // UI edit focus for the card
     handleFocus("assignment");
 
     LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
     setAssignedToUid(nextUid || "");
     setIsAssignMenuVisible(false);
 
-    // Keep local job mirror too (helps if you later show it anywhere)
-    const updatedJob: Job = { ...job, assignedToUid: nextUid || undefined };
+    const updatedJob: Job = {
+      ...job,
+      assignedToUid: nextUid ? nextUid : null,
+    };
     setJob(updatedJob);
 
-    // Save local AsyncStorage copy too (harmless for owner/independent list)
+    // ✅ Cloud writes only in cloud mode
+    if (isCloudMode) {
+      await updateAssignmentFirestore(nextUid);
+      return;
+    }
+
+    // ✅ Independent: keep local mirror
     try {
       const jobsJson = await AsyncStorage.getItem(STORAGE_KEYS.JOBS);
       const jobs: Job[] = jobsJson ? JSON.parse(jobsJson) : [];
@@ -678,9 +808,6 @@ export default function JobDetailScreen() {
     } catch (e) {
       console.warn("Failed to persist assignment locally:", e);
     }
-
-    // Now write Firestore (this is what makes employee home work)
-    await updateAssignmentFirestore(nextUid);
   };
 
   // ---------- Actions ----------
@@ -701,17 +828,49 @@ export default function JobDetailScreen() {
       materialCost: parseNumber(materialCost),
       photoUris,
       photoBase64s,
-
-      // ✅ keep assignment
-      assignedToUid: assignedToUid || undefined,
+      assignedToUid: assignedToUid ? assignedToUid : null,
     };
 
     try {
+      LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+
+      // ✅ CLOUD MODE: update Firestore
+      if (isCloudMode) {
+        const jobRef = getCloudJobRef();
+        if (!jobRef) {
+          Alert.alert("Missing company/job", "Could not locate the job in cloud.");
+          return;
+        }
+
+        await updateDoc(jobRef, {
+          title: updated.title,
+          address: updated.address,
+          description: updated.description,
+          clientName: updated.clientName || null,
+          clientPhone: updated.clientPhone || null,
+          clientNotes: updated.clientNotes || null,
+          isDone: updated.isDone,
+          laborHours: updated.laborHours ?? 0,
+          hourlyRate: updated.hourlyRate ?? 0,
+          materialCost: updated.materialCost ?? 0,
+          photoUris: updated.photoUris ?? [],
+          photoBase64s: updated.photoBase64s ?? [],
+          assignedToUid: updated.assignedToUid || null,
+        });
+
+        setJob(updated);
+
+        Alert.alert("Saved", "Job details updated.", [
+          { text: "OK", onPress: () => router.back() },
+        ]);
+        return;
+      }
+
+      // ✅ INDEPENDENT: AsyncStorage
       const jobsJson = await AsyncStorage.getItem(STORAGE_KEYS.JOBS);
       const jobs: Job[] = jobsJson ? JSON.parse(jobsJson) : [];
       const next = jobs.map((j) => (j.id === job.id ? updated : j));
 
-      LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
       await persistJobs(next);
       setJob(updated);
 
@@ -730,13 +889,24 @@ export default function JobDetailScreen() {
     setIsDone(nextDone);
 
     try {
+      LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+
+      // ✅ CLOUD MODE
+      if (isCloudMode) {
+        const jobRef = getCloudJobRef();
+        if (!jobRef) return;
+        await updateDoc(jobRef, { isDone: nextDone });
+        setJob((prev) => (prev ? { ...prev, isDone: nextDone } : prev));
+        return;
+      }
+
+      // ✅ INDEPENDENT
       const jobsJson = await AsyncStorage.getItem(STORAGE_KEYS.JOBS);
       const jobs: Job[] = jobsJson ? JSON.parse(jobsJson) : [];
       const next = jobs.map((j) =>
         j.id === job.id ? { ...j, isDone: nextDone } : j
       );
 
-      LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
       await persistJobs(next);
       setJob((prev) => (prev ? { ...prev, isDone: nextDone } : prev));
     } catch (e) {
@@ -779,6 +949,15 @@ export default function JobDetailScreen() {
 
   const confirmMoveToTrash = () => {
     if (!job) return;
+
+    // ✅ Cloud-mode: disable for now (your home.tsx already does “no local trash”)
+    if (isCloudMode) {
+      Alert.alert(
+        "Not available yet",
+        "Trash is only available for Independent mode right now. (We’ll add Firestore delete/trash next.)"
+      );
+      return;
+    }
 
     Alert.alert(
       "Move to Trash",
@@ -1204,8 +1383,8 @@ export default function JobDetailScreen() {
               .status-pill { border-radius: 999px; padding: 4px 10px; font-size: 11px; border: 1px solid ${
                 isDone ? "#16a34a" : openColor
               }; color: ${isDone ? "#15803d" : openColor}; background: ${
-                isDone ? "#dcfce7" : "#ffffff"
-              }; }
+        isDone ? "#dcfce7" : "#ffffff"
+      }; }
               .right-header { text-align: right; }
               .company-block { font-size: 11px; color: #4b5563; margin-bottom: 6px; }
               .company-name { font-weight: 600; font-size: 13px; color: #111827; }
@@ -1242,16 +1421,26 @@ export default function JobDetailScreen() {
                 <div class="value">${safeHtml(editAddress || job.address)}</div>
 
                 <div class="label">Description / Scope</div>
-                <div class="value">${withLineBreaks(editDescription || job.description)}</div>
+                <div class="value">${withLineBreaks(
+                  editDescription || job.description
+                )}</div>
               </div>
 
               <div class="section">
                 <h2>Client Info</h2>
                 <div class="label">Client Name</div>
-                <div class="value">${editClientName.trim() ? safeHtml(editClientName.trim()) : "Not set"}</div>
+                <div class="value">${
+                  editClientName.trim()
+                    ? safeHtml(editClientName.trim())
+                    : "Not set"
+                }</div>
 
                 <div class="label">Client Phone</div>
-                <div class="value">${editClientPhone.trim() ? safeHtml(editClientPhone.trim()) : "Not set"}</div>
+                <div class="value">${
+                  editClientPhone.trim()
+                    ? safeHtml(editClientPhone.trim())
+                    : "Not set"
+                }</div>
               </div>
 
               <div class="section">
@@ -1268,7 +1457,9 @@ export default function JobDetailScreen() {
                     <tr>
                       <td>Labor</td>
                       <td>${laborNum} h × $${rateNum.toFixed(2)}</td>
-                      <td class="amount">$${(laborNum * rateNum).toFixed(2)}</td>
+                      <td class="amount">$${(laborNum * rateNum).toFixed(
+                        2
+                      )}</td>
                     </tr>
                     <tr>
                       <td>Material</td>
@@ -1279,7 +1470,9 @@ export default function JobDetailScreen() {
                   <tfoot>
                     <tr>
                       <td colspan="2">Total</td>
-                      <td class="amount amount-total">$${totalAmount.toFixed(2)}</td>
+                      <td class="amount amount-total">$${totalAmount.toFixed(
+                        2
+                      )}</td>
                     </tr>
                   </tfoot>
                 </table>
@@ -1314,7 +1507,11 @@ export default function JobDetailScreen() {
 
   // ✅ Don’t render until prefs are ready (kills initial flash)
   if (!isReady) {
-    return <View style={{ flex: 1, backgroundColor: themes.light.screenBackground }} />;
+    return (
+      <View
+        style={{ flex: 1, backgroundColor: themes.graphite.screenBackground }}
+      />
+    );
   }
 
   // ---------- Render states ----------
@@ -1513,8 +1710,8 @@ export default function JobDetailScreen() {
                 </View>
               </View>
 
-              {/* ✅ OWNER ONLY: ASSIGNMENT CARD (Option B) */}
-              {isOwner && companyId ? (
+              {/* ✅ OWNER ONLY: ASSIGNMENT CARD (Cloud only, because employees rely on Firestore) */}
+              {isOwner && isCloudMode ? (
                 <SectionCard
                   theme={theme}
                   accentColor={accentColor}
@@ -1526,7 +1723,12 @@ export default function JobDetailScreen() {
                   onLayout={(y) => registerSection("assignment", y)}
                 >
                   <View style={styles.assignmentRow}>
-                    <Text style={[styles.assignmentLabel, { color: theme.textMuted }]}>
+                    <Text
+                      style={[
+                        styles.assignmentLabel,
+                        { color: theme.textMuted },
+                      ]}
+                    >
                       Assigned to
                     </Text>
 
@@ -1535,7 +1737,9 @@ export default function JobDetailScreen() {
                         styles.assignmentPicker,
                         {
                           backgroundColor: theme.inputBackground,
-                          borderColor: isAssignMenuVisible ? accentColor : theme.inputBorder,
+                          borderColor: isAssignMenuVisible
+                            ? accentColor
+                            : theme.inputBorder,
                         },
                       ]}
                       activeOpacity={0.9}
@@ -1544,16 +1748,25 @@ export default function JobDetailScreen() {
                         setIsAssignMenuVisible((p) => !p);
                       }}
                     >
-                      <Text style={[styles.assignmentPickerText, { color: theme.textPrimary }]}>
+                      <Text
+                        style={[
+                          styles.assignmentPickerText,
+                          { color: theme.textPrimary },
+                        ]}
+                      >
                         {assignedLabel}
                       </Text>
-                      <Text style={[styles.assignmentPickerChevron, { color: theme.textMuted }]}>
+                      <Text
+                        style={[
+                          styles.assignmentPickerChevron,
+                          { color: theme.textMuted },
+                        ]}
+                      >
                         ▾
                       </Text>
                     </TouchableOpacity>
                   </View>
 
-                  {/* quick actions */}
                   <View style={styles.assignmentActionsRow}>
                     <TouchableOpacity
                       style={[
@@ -1576,7 +1789,12 @@ export default function JobDetailScreen() {
                         setIsAssignMenuVisible(true);
                       }}
                     >
-                      <Text style={[styles.assignmentSmallButtonText, { color: "#F9FAFB" }]}>
+                      <Text
+                        style={[
+                          styles.assignmentSmallButtonText,
+                          { color: "#F9FAFB" },
+                        ]}
+                      >
                         Choose employee
                       </Text>
                     </TouchableOpacity>
@@ -1594,21 +1812,30 @@ export default function JobDetailScreen() {
                       activeOpacity={0.9}
                       disabled={!assignedToUid}
                       onPress={() => {
-                        Alert.alert("Unassign", "Remove assignment from this job?", [
-                          { text: "Cancel", style: "cancel" },
-                          {
-                            text: "Unassign",
-                            style: "destructive",
-                            onPress: async () => {
-                              try {
-                                await handleAssignTo("");
-                              } catch {}
+                        Alert.alert(
+                          "Unassign",
+                          "Remove assignment from this job?",
+                          [
+                            { text: "Cancel", style: "cancel" },
+                            {
+                              text: "Unassign",
+                              style: "destructive",
+                              onPress: async () => {
+                                try {
+                                  await handleAssignTo("");
+                                } catch {}
+                              },
                             },
-                          },
-                        ]);
+                          ]
+                        );
                       }}
                     >
-                      <Text style={[styles.assignmentSmallButtonText, { color: theme.secondaryButtonText }]}>
+                      <Text
+                        style={[
+                          styles.assignmentSmallButtonText,
+                          { color: theme.secondaryButtonText },
+                        ]}
+                      >
                         Unassign
                       </Text>
                     </TouchableOpacity>
@@ -1618,7 +1845,10 @@ export default function JobDetailScreen() {
                     <View
                       style={[
                         styles.assignmentDropdown,
-                        { backgroundColor: theme.cardSecondaryBackground, borderColor: theme.cardBorder },
+                        {
+                          backgroundColor: theme.cardSecondaryBackground,
+                          borderColor: theme.cardBorder,
+                        },
                       ]}
                     >
                       <TouchableOpacity
@@ -1629,7 +1859,12 @@ export default function JobDetailScreen() {
                           } catch {}
                         }}
                       >
-                        <Text style={[styles.assignmentOptionText, { color: theme.textPrimary }]}>
+                        <Text
+                          style={[
+                            styles.assignmentOptionText,
+                            { color: theme.textPrimary },
+                          ]}
+                        >
                           Unassigned
                         </Text>
                       </TouchableOpacity>
@@ -1647,7 +1882,9 @@ export default function JobDetailScreen() {
                             key={emp.uid}
                             style={[
                               styles.assignmentOption,
-                              isActive && { backgroundColor: accentColor + "1A" },
+                              isActive && {
+                                backgroundColor: accentColor + "1A",
+                              },
                             ]}
                             onPress={async () => {
                               try {
@@ -1658,13 +1895,22 @@ export default function JobDetailScreen() {
                             <Text
                               style={[
                                 styles.assignmentOptionText,
-                                { color: isActive ? accentColor : theme.textPrimary },
+                                {
+                                  color: isActive
+                                    ? accentColor
+                                    : theme.textPrimary,
+                                },
                               ]}
                             >
                               {label}
                             </Text>
                             {isActive ? (
-                              <Text style={[styles.assignmentOptionCheck, { color: accentColor }]}>
+                              <Text
+                                style={[
+                                  styles.assignmentOptionCheck,
+                                  { color: accentColor },
+                                ]}
+                              >
                                 ✓
                               </Text>
                             ) : null}
@@ -1996,23 +2242,20 @@ export default function JobDetailScreen() {
                 />
               </SectionCard>
 
-              {/* TRASH ONLY */}
-              <SectionCard
-                theme={theme}
-                accentColor={accentColor}
-                title="Trash"
-                icon="⚠️"
-              >
+              {/* TRASH */}
+              <SectionCard theme={theme} accentColor={accentColor} title="Trash" icon="⚠️">
                 <TouchableOpacity
                   style={[
                     styles.modalDeleteButton,
-                    { borderColor: theme.dangerBorder },
+                    {
+                      borderColor: theme.dangerBorder,
+                      opacity: isCloudMode ? 0.55 : 1,
+                    },
                   ]}
                   onPress={confirmMoveToTrash}
+                  disabled={isCloudMode}
                 >
-                  <Text
-                    style={[styles.modalDeleteText, { color: theme.dangerText }]}
-                  >
+                  <Text style={[styles.modalDeleteText, { color: theme.dangerText }]}>
                     Move to Trash
                   </Text>
                 </TouchableOpacity>
@@ -2056,9 +2299,7 @@ export default function JobDetailScreen() {
                     style={[
                       styles.stickyButtonText,
                       {
-                        color: isDone
-                          ? theme.secondaryButtonText
-                          : "#F9FAFB",
+                        color: isDone ? theme.secondaryButtonText : "#F9FAFB",
                       },
                     ]}
                   >
@@ -2457,7 +2698,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: 4,
     paddingVertical: 1,
   },
-  photoRemoveText: { color: "#FCA5A5", fontSize: 10, fontFamily: "Athiti-Bold" },
+  photoRemoveText: {
+    color: "#FCA5A5",
+    fontSize: 10,
+    fontFamily: "Athiti-Bold",
+  },
 
   // Pricing
   pricingCard: {
