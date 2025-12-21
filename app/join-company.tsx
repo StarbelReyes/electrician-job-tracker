@@ -3,27 +3,27 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useRouter } from "expo-router";
 import { onAuthStateChanged } from "firebase/auth";
 import {
-    collection,
-    doc,
-    getDocs,
-    query,
-    serverTimestamp,
-    updateDoc,
-    where,
+  collection,
+  doc,
+  getDocs,
+  query,
+  serverTimestamp,
+  setDoc,
+  updateDoc,
+  where,
 } from "firebase/firestore";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
-    Alert,
-    Animated,
-    Keyboard,
-    KeyboardAvoidingView,
-    Platform,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    TouchableWithoutFeedback,
-    View,
+  Alert,
+  Animated,
+  KeyboardAvoidingView,
+  Platform,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from "react-native";
 import { usePreferences } from "../context/PreferencesContext";
 import { db, firebaseAuth } from "../firebaseConfig";
@@ -68,50 +68,76 @@ export default function JoinCompanyScreen() {
     const unsub = onAuthStateChanged(firebaseAuth, (user) => {
       setUid(user?.uid ?? null);
       setAuthReady(true);
-      if (!user) {
-        // Not logged in → must authenticate first
-        router.replace("/login");
-      }
+      // ✅ No auto-redirect here (avoid loops)
     });
     return () => unsub();
-  }, [router]);
+  }, []);
 
   const canSubmit = useMemo(() => {
     return normalizeJoinCode(joinCode).length >= 6 && !loading;
   }, [joinCode, loading]);
 
+  const handleHelp = () => {
+    Alert.alert(
+      "Need help?",
+      "The join code comes from your company owner.\n\n• Ask your owner for the join code\n• Make sure you typed it exactly (example: TRAKTR-5821)\n\nIf you don’t have a code yet, you can’t continue as an employee until you join a company.",
+      [
+        { text: "OK" },
+        {
+          text: "Go to Login",
+          onPress: () => router.replace("/login"),
+          style: "default",
+        },
+      ]
+    );
+  };
+
   const handleJoin = async () => {
-    if (!uid) return;
+    if (!uid) {
+      Alert.alert("Not logged in", "Please log in first.");
+      router.replace("/login");
+      return;
+    }
+
     const code = normalizeJoinCode(joinCode);
-
-    if (!code) return Alert.alert("Missing code", "Enter your company join code.");
-
+    if (!code)
+      return Alert.alert("Missing code", "Enter your company join code.");
     if (loading) return;
+
     setLoading(true);
 
     try {
-      // Find company by joinCode
-      const qref = query(collection(db, "companies"), where("joinCode", "==", code));
+      const qref = query(
+        collection(db, "companies"),
+        where("joinCode", "==", code)
+      );
       const snap = await getDocs(qref);
 
       if (snap.empty) {
         setLoading(false);
-        return Alert.alert("Not found", "That join code was not found. Check the code and try again.");
+        return Alert.alert(
+          "Not found",
+          "That join code was not found. Check the code and try again."
+        );
       }
 
-      // If multiple match (shouldn’t happen), take the first
       const companyDoc = snap.docs[0];
       const companyId = companyDoc.id;
       const companyName = (companyDoc.data() as any)?.name ?? "Company";
 
-      // Attach companyId to user profile
+      // companies/{companyId}/employees/{uid}
+      const employeeRef = doc(db, "companies", companyId, "employees", uid);
+      await setDoc(employeeRef, { joinedAt: serverTimestamp() }, { merge: true });
+
+
+      // users/{uid}
       const userRef = doc(db, "users", uid);
       await updateDoc(userRef, {
         companyId,
         updatedAt: serverTimestamp(),
       });
 
-      // Update local session so index/home routing works immediately
+      // update local session
       const stored = await AsyncStorage.getItem(USER_STORAGE_KEY);
       let session: Session | null = null;
       if (stored) {
@@ -126,7 +152,7 @@ export default function JoinCompanyScreen() {
         ...(session ?? {}),
         uid,
         companyId,
-        role: (session?.role ?? "employee") as any,
+        role: "employee",
       };
 
       await AsyncStorage.setItem(USER_STORAGE_KEY, JSON.stringify(nextSession));
@@ -143,11 +169,15 @@ export default function JoinCompanyScreen() {
     }
   };
 
-  const dismissKeyboard = () => Keyboard.dismiss();
-
-  // Wait for theme + auth check (prevents flash)
   if (!isReady || !authReady) {
-    return <View style={{ flex: 1, backgroundColor: theme?.screenBackground ?? "#0F1115" }} />;
+    return (
+      <View
+        style={{
+          flex: 1,
+          backgroundColor: theme?.screenBackground ?? "#0F1115",
+        }}
+      />
+    );
   }
 
   return (
@@ -156,10 +186,20 @@ export default function JoinCompanyScreen() {
       behavior={Platform.OS === "ios" ? "padding" : "height"}
       keyboardVerticalOffset={0}
     >
-      <TouchableWithoutFeedback onPress={dismissKeyboard} accessible={false}>
-        <View style={[styles.screen, { backgroundColor: theme.screenBackground }]}>
+      <View style={{ flex: 1, backgroundColor: theme.screenBackground }}>
+        <ScrollView
+          style={{ flex: 1 }}
+          contentContainerStyle={[
+            styles.screen,
+            { backgroundColor: theme.screenBackground },
+          ]}
+          keyboardShouldPersistTaps="always"
+          keyboardDismissMode="on-drag"
+        >
           <View style={styles.headerRow}>
-            <Text style={[styles.appTitle, { color: theme.headerText }]}>THE TRAKTR APP</Text>
+            <Text style={[styles.appTitle, { color: theme.headerText }]}>
+              THE TRAKTR APP
+            </Text>
           </View>
 
           <View
@@ -171,12 +211,16 @@ export default function JoinCompanyScreen() {
               },
             ]}
           >
-            <Text style={[styles.cardTitle, { color: theme.textPrimary }]}>Join a company</Text>
+            <Text style={[styles.cardTitle, { color: theme.textPrimary }]}>
+              Join a company
+            </Text>
             <Text style={[styles.cardSubtitle, { color: theme.textMuted }]}>
               Enter the join code your owner gave you (example: TRAKTR-5821).
             </Text>
 
-            <Text style={[styles.label, { color: theme.textMuted }]}>Join code</Text>
+            <Text style={[styles.label, { color: theme.textMuted }]}>
+              Join code
+            </Text>
             <View
               style={[
                 styles.inputShell,
@@ -194,6 +238,7 @@ export default function JoinCompanyScreen() {
                 onChangeText={setJoinCode}
                 autoCapitalize="characters"
                 autoCorrect={false}
+                editable={!loading}
               />
             </View>
 
@@ -213,27 +258,56 @@ export default function JoinCompanyScreen() {
                 activeOpacity={0.9}
                 disabled={!canSubmit}
               >
-                <Text style={[styles.primaryButtonText, { color: theme.primaryButtonText }]}>
+                <Text
+                  style={[
+                    styles.primaryButtonText,
+                    { color: theme.primaryButtonText },
+                  ]}
+                >
                   {loading ? "Joining..." : "Join company"}
                 </Text>
               </TouchableOpacity>
             </Animated.View>
 
-            <TouchableOpacity onPress={() => router.replace("/home")} activeOpacity={0.8}>
-              <Text style={[styles.footerLink, { color: theme.textMuted }]}>
-                I’ll do this later
+            {/* ✅ Help action */}
+            <TouchableOpacity
+              onPress={handleHelp}
+              activeOpacity={0.85}
+              disabled={loading}
+              style={[
+                styles.helpButton,
+                {
+                  borderColor: theme.cardBorder + "99",
+                  backgroundColor: theme.cardBackground + "66",
+                },
+              ]}
+            >
+              <Text style={[styles.helpText, { color: theme.textMuted }]}>
+                Need help? I don’t have a join code
+              </Text>
+            </TouchableOpacity>
+
+            {/* ✅ Back to Login (always available) */}
+            <TouchableOpacity
+              onPress={() => router.replace("/login")}
+              activeOpacity={0.85}
+              disabled={loading}
+              style={styles.backToLoginButton}
+            >
+              <Text style={[styles.backToLoginText, { color: theme.textMuted }]}>
+                Back to login
               </Text>
             </TouchableOpacity>
           </View>
-        </View>
-      </TouchableWithoutFeedback>
+        </ScrollView>
+      </View>
     </KeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
   screen: {
-    flex: 1,
+    flexGrow: 1,
     paddingTop: 48,
     paddingHorizontal: 18,
   },
@@ -297,10 +371,31 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: "700",
   },
-  footerLink: {
-    textAlign: "center",
+
+  helpButton: {
     marginTop: 10,
+    borderRadius: 14,
+    borderWidth: 1,
+    paddingVertical: 12,
+    paddingHorizontal: 12,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  helpText: {
     fontSize: 13,
-    fontWeight: "600",
+    fontWeight: "700",
+    textDecorationLine: "underline",
+  },
+
+  backToLoginButton: {
+    marginTop: 10,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 10,
+  },
+  backToLoginText: {
+    fontSize: 13,
+    fontWeight: "700",
+    textDecorationLine: "underline",
   },
 });
