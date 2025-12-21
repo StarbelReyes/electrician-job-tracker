@@ -164,23 +164,17 @@ export default function TrashScreen() {
       >
         <View style={{ flex: 1 }}>
           <View style={styles.headerRow}>
-            <Text style={[styles.headerTitle, { color: theme.headerText }]}>
-              Trash
-            </Text>
+            <Text style={[styles.headerTitle, { color: theme.headerText }]}>Trash</Text>
             <View style={{ width: 60 }} />
           </View>
 
           {isLoading ? (
             <View style={styles.centerContent}>
-              <Text style={[styles.loadingText, { color: theme.textPrimary }]}>
-                Loading…
-              </Text>
+              <Text style={[styles.loadingText, { color: theme.textPrimary }]}>Loading…</Text>
             </View>
           ) : trashJobs.length === 0 ? (
             <View style={styles.centerContent}>
-              <Text style={[styles.emptyText, { color: theme.textMuted }]}>
-                Trash is empty.
-              </Text>
+              <Text style={[styles.emptyText, { color: theme.textMuted }]}>Trash is empty.</Text>
             </View>
           ) : (
             <FlatList
@@ -271,12 +265,7 @@ export default function TrashScreen() {
                         activeOpacity={0.9}
                         onPress={() => handleDeleteForever(item.id)}
                       >
-                        <Text
-                          style={[
-                            styles.trashDeleteText,
-                            { color: theme.dangerText },
-                          ]}
-                        >
+                        <Text style={[styles.trashDeleteText, { color: theme.dangerText }]}>
                           Delete Forever
                         </Text>
                       </TouchableOpacity>
@@ -306,7 +295,8 @@ const styles = StyleSheet.create({
   },
   headerTitle: {
     fontSize: 22,
-    fontWeight: "700",
+    fontFamily: "Athiti-Bold",
+    letterSpacing: 0.2,
   },
   centerContent: {
     flex: 1,
@@ -315,9 +305,11 @@ const styles = StyleSheet.create({
   },
   loadingText: {
     fontSize: 16,
+    fontFamily: "Athiti-Medium",
   },
   emptyText: {
     fontSize: 14,
+    fontFamily: "Athiti-Medium",
   },
   listContent: {},
   trashCard: {
@@ -332,19 +324,23 @@ const styles = StyleSheet.create({
   },
   trashTitle: {
     fontSize: 15,
-    fontWeight: "600",
+    fontFamily: "Athiti-SemiBold",
     marginBottom: 2,
+    letterSpacing: 0.15,
   },
   trashAddress: {
     fontSize: 13,
+    fontFamily: "Athiti-Regular",
     marginBottom: 2,
   },
   trashClient: {
     fontSize: 12,
+    fontFamily: "Athiti-Medium",
     marginBottom: 2,
   },
   trashDate: {
     fontSize: 11,
+    fontFamily: "Athiti-Regular",
     marginBottom: 8,
   },
   statusAndButtonsRow: {
@@ -361,7 +357,8 @@ const styles = StyleSheet.create({
   },
   statusPillText: {
     fontSize: 11,
-    fontWeight: "600",
+    fontFamily: "Athiti-SemiBold",
+    letterSpacing: 0.2,
   },
   trashButtonRow: {
     flexDirection: "row",
@@ -376,10 +373,12 @@ const styles = StyleSheet.create({
   },
   trashRestoreText: {
     fontSize: 11,
-    fontWeight: "600",
+    fontFamily: "Athiti-SemiBold",
+    letterSpacing: 0.2,
   },
   trashDeleteText: {
     fontSize: 11,
-    fontWeight: "600",
+    fontFamily: "Athiti-SemiBold",
+    letterSpacing: 0.2,
   },
 });

@@ -3,6 +3,7 @@
 
 import { getApp, getApps, initializeApp } from "firebase/app";
 import { getAuth } from "firebase/auth";
+import { getFirestore } from "firebase/firestore";
 
 // Your actual Firebase config
 const firebaseConfig = {
@@ -20,4 +21,8 @@ const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
 // ✅ Single Firebase Auth instance for the whole app
 const firebaseAuth = getAuth(app);
 
-export { app, firebaseAuth };
+// ✅ Firestore instance (this MUST be a real FirebaseFirestore)
+const db = getFirestore(app);
+
+export { app, db, firebaseAuth };
+

@@ -3,6 +3,7 @@ import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useRouter } from "expo-router";
 import { signInWithEmailAndPassword } from "firebase/auth";
+import { doc, getDoc } from "firebase/firestore";
 import React, { useEffect, useRef, useState } from "react";
 import {
   Alert,
@@ -26,9 +27,19 @@ import {
   ThemeName,
   themes,
 } from "../constants/appTheme";
-import { firebaseAuth } from "../firebaseConfig";
+import { db, firebaseAuth } from "../firebaseConfig";
 
 const USER_STORAGE_KEY = "EJT_USER_SESSION";
+
+type Role = "owner" | "employee" | "independent";
+
+type UserProfile = {
+  uid?: string;
+  email?: string;
+  name?: string;
+  role?: Role;
+  companyId?: string | null;
+};
 
 export default function LoginScreen() {
   const router = useRouter();
@@ -50,7 +61,8 @@ export default function LoginScreen() {
         if (
           savedTheme === "light" ||
           savedTheme === "dark" ||
-          savedTheme === "midnight"
+          savedTheme === "midnight" ||
+          savedTheme === "graphite"
         ) {
           setThemeName(savedTheme as ThemeName);
         }
@@ -107,22 +119,46 @@ export default function LoginScreen() {
 
       const user = cred.user;
 
+      // ✅ Fetch Firestore profile (source of truth for role + company)
+      let profile: UserProfile | null = null;
+      try {
+        const userRef = doc(db, "users", user.uid);
+        const snap = await getDoc(userRef);
+        if (snap.exists()) {
+          profile = (snap.data() as UserProfile) ?? null;
+        }
+      } catch (err) {
+        console.warn("Failed to fetch user profile:", err);
+        profile = null;
+      }
+
+      const role = (profile?.role ?? "independent") as Role;
+      const companyId =
+        typeof profile?.companyId === "string" ? profile!.companyId : null;
+
       const session = {
         uid: user.uid,
-        email: user.email,
+        email: user.email ?? trimmedEmail,
+        name: profile?.name ?? "",
+        role,
+        companyId,
         provider: "firebase-email",
         loggedInAt: new Date().toISOString(),
       };
+
+      console.log("[LOGIN] saving session =>", session);
+
 
       LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
       await AsyncStorage.setItem(USER_STORAGE_KEY, JSON.stringify(session));
       setLoading(false);
 
-      Alert.alert(
-        "Success",
-        `Welcome back, ${user.email ?? "electrician"}!`,
-        [{ text: "Continue", onPress: () => router.replace("/home") }]
-      );
+      const nextRoute =
+        role === "employee" && !companyId ? "/join-company" : "/home";
+
+      Alert.alert("Success", `Welcome back, ${user.email ?? "electrician"}!`, [
+        { text: "Continue", onPress: () => router.replace(nextRoute) },
+      ]);
     } catch (err: any) {
       console.warn("Firebase login error:", err);
       setLoading(false);
@@ -156,12 +192,7 @@ export default function LoginScreen() {
       keyboardVerticalOffset={0}
     >
       <TouchableWithoutFeedback onPress={dismissKeyboard} accessible={false}>
-        <View
-          style={[
-            styles.screen,
-            { backgroundColor: theme.screenBackground },
-          ]}
-        >
+        <View style={[styles.screen, { backgroundColor: theme.screenBackground }]}>
           {/* App header (match Home) */}
           <View style={styles.headerRow}>
             <Text style={[styles.appTitle, { color: theme.headerText }]}>
@@ -260,12 +291,7 @@ export default function LoginScreen() {
                 disabled={isBusy}
                 activeOpacity={0.8}
               >
-                <Text
-                  style={[
-                    styles.linkTextSmall,
-                    { color: theme.textMuted },
-                  ]}
-                >
+                <Text style={[styles.linkTextSmall, { color: theme.textMuted }]}>
                   Forgot password?
                 </Text>
               </TouchableOpacity>
@@ -275,12 +301,7 @@ export default function LoginScreen() {
                 disabled={isBusy}
                 activeOpacity={0.8}
               >
-                <Text
-                  style={[
-                    styles.linkTextSmall,
-                    { color: theme.textMuted },
-                  ]}
-                >
+                <Text style={[styles.linkTextSmall, { color: theme.textMuted }]}>
                   Create an account
                 </Text>
               </TouchableOpacity>
