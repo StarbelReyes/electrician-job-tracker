@@ -23,6 +23,7 @@ import {
   View,
 } from "react-native";
 import ImageViewing from "react-native-image-viewing";
+import { themes } from "../constants/appTheme";
 import { usePreferences } from "../context/PreferencesContext";
 import { db } from "../firebaseConfig";
 
@@ -83,12 +84,14 @@ const THUMB_SIZE =
  */
 function JobPhotos({
   theme,
+  accentColor,
   photoUris,
   setPhotoUris,
   photoBase64s,
   setPhotoBase64s,
 }: {
   theme: any;
+  accentColor: string;
   photoUris: string[];
   setPhotoUris: React.Dispatch<React.SetStateAction<string[]>>;
   photoBase64s: string[];
@@ -190,13 +193,15 @@ function JobPhotos({
             styles.addPhotoButton,
             {
               backgroundColor: theme.cardBackground,
-              borderColor: theme.cardBorder,
+              borderColor: accentColor,
             },
           ]}
           onPress={() => setIsAddPhotoMenuVisible(true)}
           activeOpacity={0.9}
         >
-          <Text style={[styles.addPhotoButtonText, { color: theme.textPrimary }]}>
+          <Text
+            style={[styles.addPhotoButtonText, { color: theme.textPrimary }]}
+          >
             + Add Photo
           </Text>
         </TouchableOpacity>
@@ -211,7 +216,11 @@ function JobPhotos({
                 activeOpacity={0.9}
                 onPress={() => handleOpenFullImage(index)}
               >
-                <Image source={{ uri }} style={styles.photoThumb} resizeMode="cover" />
+                <Image
+                  source={{ uri }}
+                  style={styles.photoThumb}
+                  resizeMode="cover"
+                />
               </TouchableOpacity>
 
               <TouchableOpacity
@@ -227,7 +236,9 @@ function JobPhotos({
 
       {isAddPhotoMenuVisible && (
         <View style={styles.addPhotoMenuOverlay}>
-          <TouchableWithoutFeedback onPress={() => setIsAddPhotoMenuVisible(false)}>
+          <TouchableWithoutFeedback
+            onPress={() => setIsAddPhotoMenuVisible(false)}
+          >
             <View style={styles.addPhotoMenuBackdrop} />
           </TouchableWithoutFeedback>
 
@@ -237,7 +248,9 @@ function JobPhotos({
               { backgroundColor: theme.cardBackground },
             ]}
           >
-            <Text style={[styles.addPhotoMenuTitle, { color: theme.textPrimary }]}>
+            <Text
+              style={[styles.addPhotoMenuTitle, { color: theme.textPrimary }]}
+            >
               Add Photo
             </Text>
 
@@ -246,7 +259,7 @@ function JobPhotos({
                 styles.addPhotoMenuOption,
                 {
                   backgroundColor: theme.cardBackground,
-                  borderColor: theme.cardBorder,
+                  borderColor: accentColor,
                 },
               ]}
               onPress={() => {
@@ -255,7 +268,12 @@ function JobPhotos({
               }}
               activeOpacity={0.9}
             >
-              <Text style={[styles.addPhotoMenuOptionText, { color: theme.textPrimary }]}>
+              <Text
+                style={[
+                  styles.addPhotoMenuOptionText,
+                  { color: theme.textPrimary },
+                ]}
+              >
                 📸 Take Photo
               </Text>
             </TouchableOpacity>
@@ -265,7 +283,7 @@ function JobPhotos({
                 styles.addPhotoMenuOption,
                 {
                   backgroundColor: theme.cardBackground,
-                  borderColor: theme.cardBorder,
+                  borderColor: accentColor,
                 },
               ]}
               onPress={() => {
@@ -274,7 +292,12 @@ function JobPhotos({
               }}
               activeOpacity={0.9}
             >
-              <Text style={[styles.addPhotoMenuOptionText, { color: theme.textPrimary }]}>
+              <Text
+                style={[
+                  styles.addPhotoMenuOptionText,
+                  { color: theme.textPrimary },
+                ]}
+              >
                 🖼️ Choose from Gallery
               </Text>
             </TouchableOpacity>
@@ -284,7 +307,12 @@ function JobPhotos({
               onPress={() => setIsAddPhotoMenuVisible(false)}
               activeOpacity={0.8}
             >
-              <Text style={[styles.addPhotoMenuCancelText, { color: theme.textMuted }]}>
+              <Text
+                style={[
+                  styles.addPhotoMenuCancelText,
+                  { color: theme.textMuted },
+                ]}
+              >
                 Cancel
               </Text>
             </TouchableOpacity>
@@ -310,8 +338,8 @@ function JobPhotos({
 export default function AddJobScreen() {
   const router = useRouter();
 
-  // ✅ Use global theme (prevents theme “swap flash”)
-  const { theme } = usePreferences();
+  // ✅ Use global theme + accent + isReady (prevents theme “swap flash”)
+  const { isReady, theme, accentColor } = usePreferences();
 
   // ✅ session
   const [session, setSession] = useState<Session | null>(null);
@@ -408,7 +436,8 @@ export default function AddJobScreen() {
   };
 
   const totalAmount =
-    parseNumber(laborHours) * parseNumber(hourlyRate) + parseNumber(materialCost);
+    parseNumber(laborHours) * parseNumber(hourlyRate) +
+    parseNumber(materialCost);
 
   const createJobId = () =>
     `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
@@ -429,16 +458,21 @@ export default function AddJobScreen() {
     const trimmedDescription = description.trim();
 
     if (!trimmedTitle || !trimmedAddress || !trimmedDescription) {
-      Alert.alert("Missing info", "Please fill in Title, Address, and Description.");
+      Alert.alert(
+        "Missing info",
+        "Please fill in Title, Address, and Description."
+      );
       return;
     }
 
     // ---------------- OWNER MODE: Firestore ----------------
     if (isOwner) {
       if (!session?.companyId) {
-        Alert.alert("Company required", "Owner must have a company before creating jobs.", [
-          { text: "OK", onPress: () => router.replace("/create-company" as any) },
-        ]);
+        Alert.alert(
+          "Company required",
+          "Owner must have a company before creating jobs.",
+          [{ text: "OK", onPress: () => router.replace("/create-company" as any) }]
+        );
         return;
       }
 
@@ -528,6 +562,13 @@ export default function AddJobScreen() {
     setIsEditing(false);
   };
 
+  // ✅ Don’t render until prefs are ready (kills initial flash)
+  if (!isReady) {
+    return (
+      <View style={{ flex: 1, backgroundColor: themes.light.screenBackground }} />
+    );
+  }
+
   return (
     <KeyboardAvoidingView
       style={{ flex: 1, backgroundColor: theme.screenBackground }}
@@ -546,7 +587,9 @@ export default function AddJobScreen() {
         <View style={{ flex: 1 }}>
           <View style={styles.headerRow}>
             <View style={{ width: 60 }} />
-            <Text style={[styles.headerTitle, { color: theme.headerText }]}>Add Job</Text>
+            <Text style={[styles.headerTitle, { color: theme.headerText }]}>
+              Add Job
+            </Text>
             <View style={{ width: 60 }} />
           </View>
 
@@ -561,10 +604,19 @@ export default function AddJobScreen() {
             showsVerticalScrollIndicator={false}
             onScrollBeginDrag={dismissKeyboardAndEditing}
           >
-            <TouchableWithoutFeedback onPress={dismissKeyboardAndEditing} accessible={false}>
+            <TouchableWithoutFeedback
+              onPress={dismissKeyboardAndEditing}
+              accessible={false}
+            >
               <View>
-                <View onLayout={(e) => registerSection("title", e.nativeEvent.layout.y)}>
-                  <Text style={[styles.modalLabel, { color: theme.textSecondary }]}>Title</Text>
+                <View
+                  onLayout={(e) =>
+                    registerSection("title", e.nativeEvent.layout.y)
+                  }
+                >
+                  <Text style={[styles.modalLabel, { color: theme.textSecondary }]}>
+                    Title
+                  </Text>
                   <TextInput
                     style={[
                       styles.modalInput,
@@ -587,8 +639,14 @@ export default function AddJobScreen() {
                   />
                 </View>
 
-                <View onLayout={(e) => registerSection("address", e.nativeEvent.layout.y)}>
-                  <Text style={[styles.modalLabel, { color: theme.textSecondary }]}>Address</Text>
+                <View
+                  onLayout={(e) =>
+                    registerSection("address", e.nativeEvent.layout.y)
+                  }
+                >
+                  <Text style={[styles.modalLabel, { color: theme.textSecondary }]}>
+                    Address
+                  </Text>
                   <TextInput
                     style={[
                       styles.modalInput,
@@ -611,7 +669,11 @@ export default function AddJobScreen() {
                   />
                 </View>
 
-                <View onLayout={(e) => registerSection("description", e.nativeEvent.layout.y)}>
+                <View
+                  onLayout={(e) =>
+                    registerSection("description", e.nativeEvent.layout.y)
+                  }
+                >
                   <Text style={[styles.modalLabel, { color: theme.textSecondary }]}>
                     Description / Scope
                   </Text>
@@ -638,7 +700,11 @@ export default function AddJobScreen() {
                   />
                 </View>
 
-                <View onLayout={(e) => registerSection("client", e.nativeEvent.layout.y)}>
+                <View
+                  onLayout={(e) =>
+                    registerSection("client", e.nativeEvent.layout.y)
+                  }
+                >
                   <Text style={[styles.sectionTitle, { color: theme.textSecondary }]}>
                     Client Info
                   </Text>
@@ -718,8 +784,14 @@ export default function AddJobScreen() {
                   />
                 </View>
 
-                <View onLayout={(e) => registerSection("pricing", e.nativeEvent.layout.y)}>
-                  <Text style={[styles.sectionTitle, { color: theme.textSecondary }]}>Pricing</Text>
+                <View
+                  onLayout={(e) =>
+                    registerSection("pricing", e.nativeEvent.layout.y)
+                  }
+                >
+                  <Text style={[styles.sectionTitle, { color: theme.textSecondary }]}>
+                    Pricing
+                  </Text>
 
                   <View
                     style={[
@@ -731,10 +803,20 @@ export default function AddJobScreen() {
                     ]}
                   >
                     <View style={styles.pricingTotalHeader}>
-                      <Text style={[styles.pricingTotalHeaderLabel, { color: theme.textMuted }]}>
+                      <Text
+                        style={[
+                          styles.pricingTotalHeaderLabel,
+                          { color: theme.textMuted },
+                        ]}
+                      >
                         Total
                       </Text>
-                      <Text style={styles.pricingTotalHeaderValue}>
+                      <Text
+                        style={[
+                          styles.pricingTotalHeaderValue,
+                          { color: accentColor },
+                        ]}
+                      >
                         $
                         {totalAmount.toLocaleString("en-US", {
                           minimumFractionDigits: 2,
@@ -830,11 +912,18 @@ export default function AddJobScreen() {
                   </View>
                 </View>
 
-                <View onLayout={(e) => registerSection("photos", e.nativeEvent.layout.y)}>
-                  <Text style={[styles.sectionTitle, { color: theme.textSecondary }]}>Photos</Text>
+                <View
+                  onLayout={(e) =>
+                    registerSection("photos", e.nativeEvent.layout.y)
+                  }
+                >
+                  <Text style={[styles.sectionTitle, { color: theme.textSecondary }]}>
+                    Photos
+                  </Text>
 
                   <JobPhotos
                     theme={theme}
+                    accentColor={accentColor}
                     photoUris={photoUris}
                     setPhotoUris={setPhotoUris}
                     photoBase64s={photoBase64s}
@@ -860,6 +949,13 @@ export default function AddJobScreen() {
                     </TouchableOpacity>
                   </Animated.View>
                 </View>
+
+                {/* optional tiny role hint if you want it */}
+                {/* {isEmployee ? (
+                  <Text style={{ marginTop: 8, color: theme.textMuted, textAlign: "center" }}>
+                    Employees can’t create jobs.
+                  </Text>
+                ) : null} */}
               </View>
             </TouchableWithoutFeedback>
           </ScrollView>
@@ -1070,7 +1166,6 @@ const styles = StyleSheet.create({
   },
   pricingTotalHeaderValue: {
     fontSize: 20,
-    color: "#FCD34D",
     fontFamily: "Athiti-Bold",
   },
   pricingInputsRow: {
