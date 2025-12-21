@@ -3,6 +3,12 @@ import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { LinearGradient } from "expo-linear-gradient";
 import { useFocusEffect, useRouter } from "expo-router";
+import {
+  collection,
+  getDocs,
+  query,
+  where,
+} from "firebase/firestore";
 import React, { FC, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Animated,
@@ -23,6 +29,19 @@ import {
 } from "react-native";
 import { themes } from "../constants/appTheme";
 import { usePreferences } from "../context/PreferencesContext";
+import { db } from "../firebaseConfig";
+
+const USER_STORAGE_KEY = "EJT_USER_SESSION";
+
+type Role = "owner" | "employee" | "independent";
+
+type Session = {
+  uid?: string;
+  email?: string | null;
+  name?: string;
+  role?: Role;
+  companyId?: string | null;
+};
 
 type Job = {
   id: string;
@@ -38,6 +57,9 @@ type Job = {
   laborHours?: number;
   hourlyRate?: number;
   materialCost?: number;
+
+  // ✅ employee assignment field (scope #3)
+  assignedToUid?: string;
 };
 
 type Theme = (typeof themes)["dark"];
@@ -87,6 +109,32 @@ const getStatusStyles = (job: Job, theme: Theme, brand: string): StatusStyles =>
         titleColor: theme.textPrimary,
         textColor: theme.textSecondary,
       };
+
+// Best-effort createdAt normalization (string or Firestore Timestamp-like)
+const normalizeCreatedAt = (value: any): string => {
+  if (!value) return new Date().toISOString();
+  if (typeof value === "string") return value;
+
+  // Firestore Timestamp -> has toDate()
+  if (typeof value?.toDate === "function") {
+    try {
+      return value.toDate().toISOString();
+    } catch {
+      return new Date().toISOString();
+    }
+  }
+
+  // fallback: numeric millis
+  if (typeof value === "number") {
+    try {
+      return new Date(value).toISOString();
+    } catch {
+      return new Date().toISOString();
+    }
+  }
+
+  return new Date().toISOString();
+};
 
 // ------------- MEDIA HEADER COMPONENT -------------
 
@@ -305,6 +353,13 @@ const HomeScreen: FC = () => {
   const [trashJobs, setTrashJobs] = useState<Job[]>([]);
   const [isHydrated, setIsHydrated] = useState(false);
 
+  // ✅ employee mode session info
+  const [session, setSession] = useState<Session | null>(null);
+
+  const isEmployee = session?.role === "employee";
+  const employeeUid = session?.uid ?? null;
+  const employeeCompanyId = session?.companyId ?? null;
+
   const [searchQuery, setSearchQuery] = useState("");
   const [sortOption, setSortOption] = useState<SortOption>("Newest");
   const [isSortMenuVisible, setIsSortMenuVisible] = useState(false);
@@ -401,10 +456,73 @@ const HomeScreen: FC = () => {
     [router]
   );
 
+  // ✅ Load session + then load jobs accordingly (employee => Firestore, others => AsyncStorage)
   useFocusEffect(
     useCallback(() => {
       const loadData = async () => {
         try {
+          const storedSession = await AsyncStorage.getItem(USER_STORAGE_KEY);
+          let parsed: Session | null = null;
+          if (storedSession) {
+            try {
+              parsed = JSON.parse(storedSession);
+            } catch {
+              parsed = null;
+            }
+          }
+          setSession(parsed);
+
+          // --- EMPLOYEE MODE (Scope #3) ---
+          if (parsed?.role === "employee") {
+            // If employee not joined, layout/index should already block, but keep safe here too.
+            if (!parsed.companyId) {
+              setJobs([]);
+              setTrashJobs([]);
+              setIsHydrated(true);
+              router.replace("/join-company" as any);
+              return;
+            }
+            if (!parsed.uid) {
+              setJobs([]);
+              setTrashJobs([]);
+              setIsHydrated(true);
+              router.replace("/login" as any);
+              return;
+            }
+
+            // Load only assigned jobs from Firestore:
+            // companies/{companyId}/jobs where assignedToUid == uid
+            const jobsRef = collection(db, "companies", parsed.companyId, "jobs");
+            const qref = query(jobsRef, where("assignedToUid", "==", parsed.uid));
+            const snap = await getDocs(qref);
+
+            const fetched: Job[] = snap.docs.map((d) => {
+              const data: any = d.data() ?? {};
+              return {
+                id: d.id,
+                title: String(data.title ?? ""),
+                address: String(data.address ?? ""),
+                description: String(data.description ?? ""),
+                createdAt: normalizeCreatedAt(data.createdAt),
+                isDone: Boolean(data.isDone ?? false),
+                clientName: data.clientName ? String(data.clientName) : undefined,
+                clientPhone: data.clientPhone ? String(data.clientPhone) : undefined,
+                clientNotes: data.clientNotes ? String(data.clientNotes) : undefined,
+                photoUris: Array.isArray(data.photoUris) ? data.photoUris : [],
+                laborHours: typeof data.laborHours === "number" ? data.laborHours : 0,
+                hourlyRate: typeof data.hourlyRate === "number" ? data.hourlyRate : 0,
+                materialCost: typeof data.materialCost === "number" ? data.materialCost : 0,
+                assignedToUid: data.assignedToUid ? String(data.assignedToUid) : undefined,
+              };
+            });
+
+            setJobs(fetched);
+            setTrashJobs([]); // employees: foundation only; no trash flow here
+            setIsHydrated(true);
+            return;
+          }
+
+          // --- OWNER / INDEPENDENT (keep existing AsyncStorage behavior) ---
           const [[, jobsJson], [, trashJson], [, sortJson]] = await AsyncStorage.multiGet([
             STORAGE_KEYS.JOBS,
             STORAGE_KEYS.TRASH,
@@ -491,11 +609,13 @@ const HomeScreen: FC = () => {
       };
 
       loadData();
-    }, [])
+    }, [router])
   );
 
+  // ✅ Save to AsyncStorage ONLY for owner/independent (employees are Firestore-based)
   useEffect(() => {
     if (!isHydrated) return;
+    if (isEmployee) return;
 
     const saveData = async () => {
       try {
@@ -510,7 +630,7 @@ const HomeScreen: FC = () => {
     };
 
     saveData();
-  }, [jobs, trashJobs, sortOption, isHydrated]);
+  }, [jobs, trashJobs, sortOption, isHydrated, isEmployee]);
 
   const handleShareJob = useCallback(async (job: Job) => {
     const jobTotal = getJobTotal(job);
@@ -547,6 +667,9 @@ const HomeScreen: FC = () => {
   }, []);
 
   const handleDeleteJob = useCallback((id: string) => {
+    // Employees: foundation only (no local trash behavior)
+    if (isEmployee) return;
+
     setJobs((prev) => {
       const jobToTrash = prev.find((j) => j.id === id);
       if (!jobToTrash) return prev;
@@ -554,7 +677,7 @@ const HomeScreen: FC = () => {
       setTrashJobs((t) => [jobToTrash, ...t]);
       return prev.filter((j) => j.id !== id);
     });
-  }, []);
+  }, [isEmployee]);
 
   // ------------- FOCUSED LIST SCROLL LOGIC -------------
 
@@ -619,7 +742,11 @@ const HomeScreen: FC = () => {
             </View>
 
             <View style={styles.aiHelperRow}>
-              <TouchableOpacity activeOpacity={0.9} style={styles.aiHelperButton} onPress={() => router.push("/ai-helper")}>
+              <TouchableOpacity
+                activeOpacity={0.9}
+                style={styles.aiHelperButton}
+                onPress={() => router.push("/ai-helper")}
+              >
                 <LinearGradient
                   colors={[brand, brand + "CC", brand + "88"]}
                   start={{ x: 0, y: 0 }}
@@ -627,7 +754,9 @@ const HomeScreen: FC = () => {
                   style={styles.aiHelperGradient}
                 >
                   <Ionicons name="sparkles-outline" size={16} color={theme.textPrimary} />
-                  <Text style={[styles.aiHelperText, { color: theme.textPrimary }]}>Ask Traktr AI</Text>
+                  <Text style={[styles.aiHelperText, { color: theme.textPrimary }]}>
+                    Ask Traktr AI
+                  </Text>
                 </LinearGradient>
               </TouchableOpacity>
             </View>
@@ -721,7 +850,11 @@ const HomeScreen: FC = () => {
                     ]}
                   >
                     {sortOptions.map((option) => (
-                      <TouchableOpacity key={option} style={styles.sortOption} onPress={() => handleSelectSort(option)}>
+                      <TouchableOpacity
+                        key={option}
+                        style={styles.sortOption}
+                        onPress={() => handleSelectSort(option)}
+                      >
                         <Text
                           style={[
                             styles.sortOptionText,
@@ -740,7 +873,9 @@ const HomeScreen: FC = () => {
             </View>
 
             <View style={styles.focusHeaderRow}>
-              <Text style={[styles.focusHeaderTitle, { color: theme.textPrimary }]}>Focused jobs</Text>
+              <Text style={[styles.focusHeaderTitle, { color: theme.textPrimary }]}>
+                Focused jobs
+              </Text>
               <Text style={[styles.focusHeaderCount, { color: theme.textMuted }]}>
                 {visibleJobs.length === 0
                   ? "0 / 0"
