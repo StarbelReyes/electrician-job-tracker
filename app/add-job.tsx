@@ -3,6 +3,7 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as ImagePicker from "expo-image-picker";
 import { useRouter } from "expo-router";
+import { addDoc, collection } from "firebase/firestore";
 import React, { useEffect, useRef, useState } from "react";
 import {
   Alert,
@@ -23,6 +24,19 @@ import {
 } from "react-native";
 import ImageViewing from "react-native-image-viewing";
 import { usePreferences } from "../context/PreferencesContext";
+import { db } from "../firebaseConfig";
+
+const USER_STORAGE_KEY = "EJT_USER_SESSION";
+
+type Role = "owner" | "employee" | "independent";
+
+type Session = {
+  uid?: string;
+  email?: string | null;
+  name?: string;
+  role?: Role;
+  companyId?: string | null;
+};
 
 type Job = {
   id: string;
@@ -41,6 +55,9 @@ type Job = {
   laborHours?: number;
   hourlyRate?: number;
   materialCost?: number;
+
+  // ✅ owner/employee cloud field
+  assignedToUid?: string | null;
 };
 
 const STORAGE_KEYS = {
@@ -296,6 +313,28 @@ export default function AddJobScreen() {
   // ✅ Use global theme (prevents theme “swap flash”)
   const { theme } = usePreferences();
 
+  // ✅ session
+  const [session, setSession] = useState<Session | null>(null);
+  const isOwner = session?.role === "owner";
+  const isEmployee = session?.role === "employee";
+  const isIndependent = session?.role === "independent" || !session?.role;
+
+  useEffect(() => {
+    const loadSession = async () => {
+      try {
+        const stored = await AsyncStorage.getItem(USER_STORAGE_KEY);
+        if (!stored) {
+          setSession(null);
+          return;
+        }
+        setSession(JSON.parse(stored));
+      } catch {
+        setSession(null);
+      }
+    };
+    loadSession();
+  }, []);
+
   // Form state
   const [title, setTitle] = useState("");
   const [address, setAddress] = useState("");
@@ -379,6 +418,12 @@ export default function AddJobScreen() {
   };
 
   const handleSaveJob = async () => {
+    // ✅ block employees from creating jobs
+    if (isEmployee) {
+      Alert.alert("Not allowed", "Employees can’t create jobs.");
+      return;
+    }
+
     const trimmedTitle = title.trim();
     const trimmedAddress = address.trim();
     const trimmedDescription = description.trim();
@@ -388,6 +433,58 @@ export default function AddJobScreen() {
       return;
     }
 
+    // ---------------- OWNER MODE: Firestore ----------------
+    if (isOwner) {
+      if (!session?.companyId) {
+        Alert.alert("Company required", "Owner must have a company before creating jobs.", [
+          { text: "OK", onPress: () => router.replace("/create-company" as any) },
+        ]);
+        return;
+      }
+
+      const fireJob = {
+        title: trimmedTitle,
+        address: trimmedAddress,
+        description: trimmedDescription,
+        createdAt: new Date().toISOString(),
+        isDone: false,
+
+        clientName: clientName.trim() || null,
+        clientPhone: clientPhone.trim() || null,
+        clientNotes: clientNotes.trim() || null,
+
+        laborHours: parseNumber(laborHours),
+        hourlyRate: parseNumber(hourlyRate),
+        materialCost: parseNumber(materialCost),
+
+        // ⚠️ foundation: these URIs are device-local. Later we’ll upload to Storage.
+        photoUris: photoUris,
+        // ⚠️ do NOT store base64s in Firestore (doc size risk)
+        photoBase64s: [],
+
+        // ✅ Option B: unassigned by default
+        assignedToUid: null,
+      };
+
+      try {
+        const jobsRef = collection(db, "companies", session.companyId, "jobs");
+        await addDoc(jobsRef, fireJob);
+
+        Alert.alert("Saved", "Job created.", [
+          {
+            text: "OK",
+            onPress: () => router.back(),
+          },
+        ]);
+        return;
+      } catch (e) {
+        console.warn("Failed to create Firestore job:", e);
+        Alert.alert("Error", "Could not create this job. Try again.");
+        return;
+      }
+    }
+
+    // ---------------- INDEPENDENT MODE: AsyncStorage (unchanged) ----------------
     const newJob: Job = {
       id: createJobId(),
       title: trimmedTitle,
