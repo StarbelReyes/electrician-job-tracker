@@ -9,7 +9,7 @@ import * as ImagePicker from "expo-image-picker";
 import * as Print from "expo-print";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import * as Sharing from "expo-sharing";
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
   Animated,
@@ -32,6 +32,12 @@ import ImageViewing from "react-native-image-viewing";
 import { themes } from "../constants/appTheme";
 import { usePreferences } from "../context/PreferencesContext";
 
+// ✅ Firestore for employee assignment (Option B)
+import { collection, doc, getDocs, updateDoc } from "firebase/firestore";
+import { db } from "../firebaseConfig";
+
+const USER_STORAGE_KEY = "EJT_USER_SESSION";
+
 // 👇 Job shape must match home.tsx / add-job.tsx
 type Job = {
   id: string;
@@ -52,6 +58,25 @@ type Job = {
   laborHours?: number;
   hourlyRate?: number;
   materialCost?: number;
+
+  // ✅ assignment (Option B)
+  assignedToUid?: string;
+};
+
+type Role = "owner" | "employee" | "independent";
+type Session = {
+  uid?: string;
+  email?: string | null;
+  name?: string;
+  role?: Role;
+  companyId?: string | null;
+};
+
+type EmployeeRecord = {
+  uid: string;
+  name?: string;
+  email?: string;
+  role?: string;
 };
 
 const STORAGE_KEYS = {
@@ -80,7 +105,7 @@ const STICKY_BAR_HEIGHT = 86;
 // ✅ Match add-job.tsx offset behavior
 const SCROLL_OFFSET = 80;
 
-type ActiveSectionKey = "jobInfo" | "client" | "pricing" | "photos" | null;
+type ActiveSectionKey = "jobInfo" | "client" | "pricing" | "photos" | "assignment" | null;
 
 // 🔹 Small component just for Photos UI (header + button + grid)
 type JobPhotosSectionProps = {
@@ -311,11 +336,21 @@ export default function JobDetailScreen() {
   // ✅ LOCKED theme + accent from PreferencesContext
   const { isReady, theme, accentColor } = usePreferences();
 
+  // ✅ session (to know owner vs employee + company)
+  const [session, setSession] = useState<Session | null>(null);
+  const isOwner = session?.role === "owner";
+  const companyId = session?.companyId ?? null;
+
   // 🔹 Company branding (used in PDFs)
   const [companyName, setCompanyName] = useState("");
   const [companyPhone, setCompanyPhone] = useState("");
   const [companyEmail, setCompanyEmail] = useState("");
   const [companyLicense, setCompanyLicense] = useState("");
+
+  // ✅ assignment data (owner only)
+  const [employees, setEmployees] = useState<EmployeeRecord[]>([]);
+  const [assignedToUid, setAssignedToUid] = useState<string>("");
+  const [isAssignMenuVisible, setIsAssignMenuVisible] = useState(false);
 
   useEffect(() => {
     const loadBranding = async () => {
@@ -342,6 +377,27 @@ export default function JobDetailScreen() {
     };
 
     loadBranding();
+  }, []);
+
+  // ✅ load session once
+  useEffect(() => {
+    const loadSession = async () => {
+      try {
+        const stored = await AsyncStorage.getItem(USER_STORAGE_KEY);
+        if (!stored) {
+          setSession(null);
+          return;
+        }
+        try {
+          setSession(JSON.parse(stored));
+        } catch {
+          setSession(null);
+        }
+      } catch {
+        setSession(null);
+      }
+    };
+    loadSession();
   }, []);
 
   const [job, setJob] = useState<Job | null>(null);
@@ -502,6 +558,9 @@ export default function JobDetailScreen() {
 
           setPhotoUris(found.photoUris || []);
           setPhotoBase64s(found.photoBase64s || []);
+
+          // ✅ assignment (local mirror)
+          setAssignedToUid(found.assignedToUid || "");
         }
       } catch (e) {
         console.warn("Failed to load job:", e);
@@ -512,6 +571,51 @@ export default function JobDetailScreen() {
 
     loadJob();
   }, [id]);
+
+  // ✅ Load employees list (owner only + has companyId)
+  useEffect(() => {
+    const loadEmployees = async () => {
+      if (!isOwner) return;
+      if (!companyId) return;
+
+      try {
+        const ref = collection(db, "companies", companyId, "employees");
+        const snap = await getDocs(ref);
+
+        const list: EmployeeRecord[] = snap.docs.map((d) => {
+          const data: any = d.data() ?? {};
+          const uid = String(data.uid ?? d.id);
+          return {
+            uid,
+            name: data.name ? String(data.name) : undefined,
+            email: data.email ? String(data.email) : undefined,
+            role: data.role ? String(data.role) : undefined,
+          };
+        });
+
+        // Optional: prefer employees first, but keep owner out of list if present
+        const filtered = list.filter((e) => (e.role ? e.role !== "owner" : true));
+
+        setEmployees(filtered);
+      } catch (e) {
+        console.warn("Failed to load employees:", e);
+        setEmployees([]);
+      }
+    };
+
+    loadEmployees();
+  }, [isOwner, companyId]);
+
+  const assignedLabel = useMemo(() => {
+    if (!assignedToUid) return "Unassigned";
+    const found = employees.find((e) => e.uid === assignedToUid);
+    if (!found) return "Assigned";
+    return found.name?.trim()
+      ? found.name.trim()
+      : found.email?.trim()
+      ? found.email.trim()
+      : "Assigned";
+  }, [assignedToUid, employees]);
 
   // ---------- Helpers ----------
   const parseNumber = (value: string) => {
@@ -533,6 +637,52 @@ export default function JobDetailScreen() {
   const withLineBreaks = (value: string) =>
     safeHtml(value).replace(/\n/g, "<br />");
 
+  // ✅ Firestore update: assign/unassign job (Option B)
+  const updateAssignmentFirestore = async (nextUid: string) => {
+    if (!companyId) {
+      Alert.alert("Missing company", "No company ID found for this account.");
+      return;
+    }
+    if (!job?.id) return;
+
+    try {
+      const jobRef = doc(db, "companies", companyId, "jobs", job.id);
+      await updateDoc(jobRef, { assignedToUid: nextUid || null });
+    } catch (e) {
+      console.warn("Failed to update assignment:", e);
+      Alert.alert("Error", "Could not update assignment. Try again.");
+      throw e;
+    }
+  };
+
+  const handleAssignTo = async (nextUid: string) => {
+    if (!job) return;
+
+    // UI edit focus for the card
+    handleFocus("assignment");
+
+    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+    setAssignedToUid(nextUid || "");
+    setIsAssignMenuVisible(false);
+
+    // Keep local job mirror too (helps if you later show it anywhere)
+    const updatedJob: Job = { ...job, assignedToUid: nextUid || undefined };
+    setJob(updatedJob);
+
+    // Save local AsyncStorage copy too (harmless for owner/independent list)
+    try {
+      const jobsJson = await AsyncStorage.getItem(STORAGE_KEYS.JOBS);
+      const jobs: Job[] = jobsJson ? JSON.parse(jobsJson) : [];
+      const next = jobs.map((j) => (j.id === job.id ? updatedJob : j));
+      await persistJobs(next);
+    } catch (e) {
+      console.warn("Failed to persist assignment locally:", e);
+    }
+
+    // Now write Firestore (this is what makes employee home work)
+    await updateAssignmentFirestore(nextUid);
+  };
+
   // ---------- Actions ----------
   const handleSaveJobEdits = async () => {
     if (!job) return;
@@ -551,6 +701,9 @@ export default function JobDetailScreen() {
       materialCost: parseNumber(materialCost),
       photoUris,
       photoBase64s,
+
+      // ✅ keep assignment
+      assignedToUid: assignedToUid || undefined,
     };
 
     try {
@@ -1360,6 +1513,173 @@ export default function JobDetailScreen() {
                 </View>
               </View>
 
+              {/* ✅ OWNER ONLY: ASSIGNMENT CARD (Option B) */}
+              {isOwner && companyId ? (
+                <SectionCard
+                  theme={theme}
+                  accentColor={accentColor}
+                  title="Assignment"
+                  subtitle="Assign this job to an employee"
+                  icon="🧑‍🔧"
+                  isActive={cardIsActive("assignment")}
+                  isDimmed={cardIsDimmed("assignment")}
+                  onLayout={(y) => registerSection("assignment", y)}
+                >
+                  <View style={styles.assignmentRow}>
+                    <Text style={[styles.assignmentLabel, { color: theme.textMuted }]}>
+                      Assigned to
+                    </Text>
+
+                    <TouchableOpacity
+                      style={[
+                        styles.assignmentPicker,
+                        {
+                          backgroundColor: theme.inputBackground,
+                          borderColor: isAssignMenuVisible ? accentColor : theme.inputBorder,
+                        },
+                      ]}
+                      activeOpacity={0.9}
+                      onPress={() => {
+                        handleFocus("assignment");
+                        setIsAssignMenuVisible((p) => !p);
+                      }}
+                    >
+                      <Text style={[styles.assignmentPickerText, { color: theme.textPrimary }]}>
+                        {assignedLabel}
+                      </Text>
+                      <Text style={[styles.assignmentPickerChevron, { color: theme.textMuted }]}>
+                        ▾
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
+
+                  {/* quick actions */}
+                  <View style={styles.assignmentActionsRow}>
+                    <TouchableOpacity
+                      style={[
+                        styles.assignmentSmallButton,
+                        {
+                          backgroundColor: accentColor,
+                          opacity: employees.length ? 1 : 0.6,
+                        },
+                      ]}
+                      activeOpacity={0.9}
+                      onPress={() => {
+                        if (!employees.length) {
+                          Alert.alert(
+                            "No employees",
+                            "No employees found in companies/{companyId}/employees."
+                          );
+                          return;
+                        }
+                        handleFocus("assignment");
+                        setIsAssignMenuVisible(true);
+                      }}
+                    >
+                      <Text style={[styles.assignmentSmallButtonText, { color: "#F9FAFB" }]}>
+                        Choose employee
+                      </Text>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                      style={[
+                        styles.assignmentSmallButton,
+                        {
+                          backgroundColor: theme.secondaryButtonBackground,
+                          borderColor: theme.cardBorder,
+                          borderWidth: 1,
+                          opacity: assignedToUid ? 1 : 0.6,
+                        },
+                      ]}
+                      activeOpacity={0.9}
+                      disabled={!assignedToUid}
+                      onPress={() => {
+                        Alert.alert("Unassign", "Remove assignment from this job?", [
+                          { text: "Cancel", style: "cancel" },
+                          {
+                            text: "Unassign",
+                            style: "destructive",
+                            onPress: async () => {
+                              try {
+                                await handleAssignTo("");
+                              } catch {}
+                            },
+                          },
+                        ]);
+                      }}
+                    >
+                      <Text style={[styles.assignmentSmallButtonText, { color: theme.secondaryButtonText }]}>
+                        Unassign
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
+
+                  {isAssignMenuVisible ? (
+                    <View
+                      style={[
+                        styles.assignmentDropdown,
+                        { backgroundColor: theme.cardSecondaryBackground, borderColor: theme.cardBorder },
+                      ]}
+                    >
+                      <TouchableOpacity
+                        style={styles.assignmentOption}
+                        onPress={async () => {
+                          try {
+                            await handleAssignTo("");
+                          } catch {}
+                        }}
+                      >
+                        <Text style={[styles.assignmentOptionText, { color: theme.textPrimary }]}>
+                          Unassigned
+                        </Text>
+                      </TouchableOpacity>
+
+                      {employees.map((emp) => {
+                        const label =
+                          emp.name?.trim() ||
+                          emp.email?.trim() ||
+                          emp.uid.slice(0, 6) + "…" + emp.uid.slice(-4);
+
+                        const isActive = emp.uid === assignedToUid;
+
+                        return (
+                          <TouchableOpacity
+                            key={emp.uid}
+                            style={[
+                              styles.assignmentOption,
+                              isActive && { backgroundColor: accentColor + "1A" },
+                            ]}
+                            onPress={async () => {
+                              try {
+                                await handleAssignTo(emp.uid);
+                              } catch {}
+                            }}
+                          >
+                            <Text
+                              style={[
+                                styles.assignmentOptionText,
+                                { color: isActive ? accentColor : theme.textPrimary },
+                              ]}
+                            >
+                              {label}
+                            </Text>
+                            {isActive ? (
+                              <Text style={[styles.assignmentOptionCheck, { color: accentColor }]}>
+                                ✓
+                              </Text>
+                            ) : null}
+                          </TouchableOpacity>
+                        );
+                      })}
+                    </View>
+                  ) : null}
+
+                  <Text style={[styles.assignmentHint, { color: theme.textMuted }]}>
+                    Employees will only see jobs assigned to their UID.
+                  </Text>
+                </SectionCard>
+              ) : null}
+
               {/* JOB INFO CARD */}
               <SectionCard
                 theme={theme}
@@ -2030,6 +2350,74 @@ const styles = StyleSheet.create({
     fontFamily: "Athiti-Regular",
   },
   modalMeta: { fontSize: 11, marginTop: 8, fontFamily: "Athiti-Regular" },
+
+  // ✅ Assignment
+  assignmentRow: {
+    gap: 8,
+  },
+  assignmentLabel: {
+    fontSize: 12,
+    fontFamily: "Athiti-SemiBold",
+  },
+  assignmentPicker: {
+    flexDirection: "row",
+    alignItems: "center",
+    borderRadius: 14,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderWidth: 1,
+  },
+  assignmentPickerText: {
+    flex: 1,
+    fontSize: 14,
+    fontFamily: "Athiti-SemiBold",
+  },
+  assignmentPickerChevron: {
+    fontSize: 14,
+    fontFamily: "Athiti-Bold",
+    marginLeft: 8,
+  },
+  assignmentActionsRow: {
+    flexDirection: "row",
+    gap: 10,
+    marginTop: 10,
+  },
+  assignmentSmallButton: {
+    flex: 1,
+    borderRadius: 999,
+    paddingVertical: 10,
+    alignItems: "center",
+  },
+  assignmentSmallButtonText: {
+    fontSize: 13,
+    fontFamily: "Athiti-Bold",
+  },
+  assignmentDropdown: {
+    marginTop: 10,
+    borderRadius: 14,
+    borderWidth: 1,
+    overflow: "hidden",
+  },
+  assignmentOption: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+  },
+  assignmentOptionText: {
+    flex: 1,
+    fontSize: 13,
+    fontFamily: "Athiti-SemiBold",
+  },
+  assignmentOptionCheck: {
+    fontSize: 14,
+    fontFamily: "Athiti-Bold",
+  },
+  assignmentHint: {
+    marginTop: 10,
+    fontSize: 11,
+    fontFamily: "Athiti-Regular",
+  },
 
   // Photos
   photosRow: {
