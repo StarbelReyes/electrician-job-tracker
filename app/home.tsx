@@ -3,12 +3,7 @@ import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { LinearGradient } from "expo-linear-gradient";
 import { useFocusEffect, useRouter } from "expo-router";
-import {
-  collection,
-  getDocs,
-  query,
-  where,
-} from "firebase/firestore";
+import { collection, getDocs, query, where } from "firebase/firestore";
 import React, { FC, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Animated,
@@ -58,8 +53,8 @@ type Job = {
   hourlyRate?: number;
   materialCost?: number;
 
-  // ✅ employee assignment field (scope #3)
-  assignedToUid?: string;
+  // ✅ employee assignment field (scope B)
+  assignedToUid?: string | null;
 };
 
 type Theme = (typeof themes)["dark"];
@@ -74,7 +69,8 @@ const STORAGE_KEYS = {
 };
 
 // Focused carousel sizing
-const CARD_HEIGHT = 180;
+// ✅ FIX: card height was too short, causing bottom row (Open pill + photo chip) to overflow visually outside the card.
+const CARD_HEIGHT = 210;
 const CARD_SPACING = 18;
 const CARD_OUTER_HEIGHT = CARD_HEIGHT + CARD_SPACING;
 
@@ -353,12 +349,22 @@ const HomeScreen: FC = () => {
   const [trashJobs, setTrashJobs] = useState<Job[]>([]);
   const [isHydrated, setIsHydrated] = useState(false);
 
-  // ✅ employee mode session info
+  // ✅ session info
   const [session, setSession] = useState<Session | null>(null);
 
   const isEmployee = session?.role === "employee";
-  const employeeUid = session?.uid ?? null;
-  const employeeCompanyId = session?.companyId ?? null;
+  const isOwner = session?.role === "owner";
+  const isCloudMode = isEmployee || isOwner; // Firestore mode
+  const isIndependent = session?.role === "independent" || !session?.role;
+
+  const screenScale = useRef(new Animated.Value(1.04)).current;
+  useEffect(() => {
+    Animated.timing(screenScale, {
+      toValue: 1,
+      duration: 220,
+      useNativeDriver: true,
+    }).start();
+  }, [screenScale]);
 
   const [searchQuery, setSearchQuery] = useState("");
   const [sortOption, setSortOption] = useState<SortOption>("Newest");
@@ -371,15 +377,6 @@ const HomeScreen: FC = () => {
       setStatusFilter("open");
     }, [])
   );
-
-  const screenScale = useRef(new Animated.Value(1.04)).current;
-  useEffect(() => {
-    Animated.timing(screenScale, {
-      toValue: 1,
-      duration: 220,
-      useNativeDriver: true,
-    }).start();
-  }, [screenScale]);
 
   const handleSelectSort = useCallback((option: SortOption) => {
     setSortOption(option);
@@ -414,7 +411,7 @@ const HomeScreen: FC = () => {
         return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
       }
       if (sortOption === "Oldest") {
-        return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+        return new Date(a.createdAt).getTime() - new Date(a.createdAt).getTime();
       }
       if (sortOption === "A-Z") return a.title.localeCompare(b.title);
       if (sortOption === "Z-A") return b.title.localeCompare(a.title);
@@ -456,11 +453,13 @@ const HomeScreen: FC = () => {
     [router]
   );
 
-  // ✅ Load session + then load jobs accordingly (employee => Firestore, others => AsyncStorage)
+  // ✅ Load session + then load jobs accordingly
   useFocusEffect(
     useCallback(() => {
       const loadData = async () => {
         try {
+          setIsHydrated(false);
+
           const storedSession = await AsyncStorage.getItem(USER_STORAGE_KEY);
           let parsed: Session | null = null;
           if (storedSession) {
@@ -472,9 +471,8 @@ const HomeScreen: FC = () => {
           }
           setSession(parsed);
 
-          // --- EMPLOYEE MODE (Scope #3) ---
+          // --- EMPLOYEE MODE: Firestore (assigned jobs only) ---
           if (parsed?.role === "employee") {
-            // If employee not joined, layout/index should already block, but keep safe here too.
             if (!parsed.companyId) {
               setJobs([]);
               setTrashJobs([]);
@@ -490,8 +488,6 @@ const HomeScreen: FC = () => {
               return;
             }
 
-            // Load only assigned jobs from Firestore:
-            // companies/{companyId}/jobs where assignedToUid == uid
             const jobsRef = collection(db, "companies", parsed.companyId, "jobs");
             const qref = query(jobsRef, where("assignedToUid", "==", parsed.uid));
             const snap = await getDocs(qref);
@@ -517,12 +513,59 @@ const HomeScreen: FC = () => {
             });
 
             setJobs(fetched);
-            setTrashJobs([]); // employees: foundation only; no trash flow here
+            setTrashJobs([]); // employees: no trash here
             setIsHydrated(true);
             return;
           }
 
-          // --- OWNER / INDEPENDENT (keep existing AsyncStorage behavior) ---
+          // --- OWNER MODE: Firestore (all company jobs) ---
+          if (parsed?.role === "owner") {
+            if (!parsed.companyId) {
+              setJobs([]);
+              setTrashJobs([]);
+              setIsHydrated(true);
+              // owner should create a company first
+              router.replace("/create-company" as any);
+              return;
+            }
+            if (!parsed.uid) {
+              setJobs([]);
+              setTrashJobs([]);
+              setIsHydrated(true);
+              router.replace("/login" as any);
+              return;
+            }
+
+            const jobsRef = collection(db, "companies", parsed.companyId, "jobs");
+            const snap = await getDocs(jobsRef);
+
+            const fetched: Job[] = snap.docs.map((d) => {
+              const data: any = d.data() ?? {};
+              return {
+                id: d.id,
+                title: String(data.title ?? ""),
+                address: String(data.address ?? ""),
+                description: String(data.description ?? ""),
+                createdAt: normalizeCreatedAt(data.createdAt),
+                isDone: Boolean(data.isDone ?? false),
+                clientName: data.clientName ? String(data.clientName) : undefined,
+                clientPhone: data.clientPhone ? String(data.clientPhone) : undefined,
+                clientNotes: data.clientNotes ? String(data.clientNotes) : undefined,
+                photoUris: Array.isArray(data.photoUris) ? data.photoUris : [],
+                laborHours: typeof data.laborHours === "number" ? data.laborHours : 0,
+                hourlyRate: typeof data.hourlyRate === "number" ? data.hourlyRate : 0,
+                materialCost: typeof data.materialCost === "number" ? data.materialCost : 0,
+                assignedToUid: data.assignedToUid ? String(data.assignedToUid) : undefined,
+              };
+            });
+
+            setJobs(fetched);
+            setTrashJobs([]); // owner: no local trash (we’ll do Firestore delete later)
+            setIsHydrated(true);
+            return;
+          }
+
+          // --- INDEPENDENT MODE: AsyncStorage (keep existing behavior) ---
           const [[, jobsJson], [, trashJson], [, sortJson]] = await AsyncStorage.multiGet([
             STORAGE_KEYS.JOBS,
             STORAGE_KEYS.TRASH,
@@ -601,9 +644,10 @@ const HomeScreen: FC = () => {
           if (sortJson && sortOptions.includes(sortJson as SortOption)) {
             setSortOption(sortJson as SortOption);
           }
+
+          setIsHydrated(true);
         } catch (err) {
           console.warn("Failed to load saved jobs:", err);
-        } finally {
           setIsHydrated(true);
         }
       };
@@ -612,10 +656,11 @@ const HomeScreen: FC = () => {
     }, [router])
   );
 
-  // ✅ Save to AsyncStorage ONLY for owner/independent (employees are Firestore-based)
+  // ✅ Save to AsyncStorage ONLY for INDEPENDENT mode
   useEffect(() => {
     if (!isHydrated) return;
-    if (isEmployee) return;
+    if (isCloudMode) return; // owner/employee: Firestore
+    if (!isIndependent) return;
 
     const saveData = async () => {
       try {
@@ -630,7 +675,7 @@ const HomeScreen: FC = () => {
     };
 
     saveData();
-  }, [jobs, trashJobs, sortOption, isHydrated, isEmployee]);
+  }, [jobs, trashJobs, sortOption, isHydrated, isCloudMode, isIndependent]);
 
   const handleShareJob = useCallback(async (job: Job) => {
     const jobTotal = getJobTotal(job);
@@ -666,18 +711,21 @@ const HomeScreen: FC = () => {
     }
   }, []);
 
-  const handleDeleteJob = useCallback((id: string) => {
-    // Employees: foundation only (no local trash behavior)
-    if (isEmployee) return;
+  const handleDeleteJob = useCallback(
+    (id: string) => {
+      // ✅ independent-only for now
+      if (isCloudMode) return;
 
-    setJobs((prev) => {
-      const jobToTrash = prev.find((j) => j.id === id);
-      if (!jobToTrash) return prev;
+      setJobs((prev) => {
+        const jobToTrash = prev.find((j) => j.id === id);
+        if (!jobToTrash) return prev;
 
-      setTrashJobs((t) => [jobToTrash, ...t]);
-      return prev.filter((j) => j.id !== id);
-    });
-  }, [isEmployee]);
+        setTrashJobs((t) => [jobToTrash, ...t]);
+        return prev.filter((j) => j.id !== id);
+      });
+    },
+    [isCloudMode]
+  );
 
   // ------------- FOCUSED LIST SCROLL LOGIC -------------
 
@@ -886,7 +934,9 @@ const HomeScreen: FC = () => {
             {!isHydrated ? (
               <Text style={[styles.emptyText, { color: theme.textMuted }]}>Loading…</Text>
             ) : visibleJobs.length === 0 ? (
-              <Text style={[styles.emptyText, { color: theme.textMuted }]}>No jobs found.</Text>
+              <Text style={[styles.emptyText, { color: theme.textMuted }]}>
+                {isEmployee ? "No assigned jobs yet." : "No jobs found."}
+              </Text>
             ) : (
               <Animated.FlatList
                 data={visibleJobs}
@@ -1115,7 +1165,7 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontFamily: "Athiti-Regular",
     marginTop: 1,
-    marginBottom: 10,
+    marginBottom: 8,
   },
 
   focusMetaRow: {
