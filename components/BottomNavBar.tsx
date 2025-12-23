@@ -143,6 +143,9 @@ export default function BottomNavBar({ active }: BottomNavBarProps) {
 
   return (
     <View
+      // ✅ Touch-safety: container will NOT steal touches from screens above it.
+      // Pressables inside still work because children can receive touches.
+      pointerEvents="box-none"
       style={[
         styles.wrap,
         {
@@ -153,7 +156,11 @@ export default function BottomNavBar({ active }: BottomNavBarProps) {
         },
       ]}
     >
-      <View style={styles.inner}>
+      <View
+        // ✅ Explicitly allow touches on the tab row itself
+        pointerEvents="auto"
+        style={styles.inner}
+      >
         <Animated.View
           pointerEvents="none"
           style={[

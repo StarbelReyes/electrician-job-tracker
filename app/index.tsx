@@ -38,7 +38,9 @@ export default function IndexScreen() {
 
     const routeBy = (role?: Role, companyId?: string | null) => {
       const next: Href =
-        role === "employee" && !companyId
+        role === "owner" && !companyId
+          ? ("/create-company" as any)
+          : role === "employee" && !companyId
           ? ("/join-company" as const)
           : ("/home" as const);
 
@@ -46,46 +48,53 @@ export default function IndexScreen() {
       safeReplace(next);
     };
 
+    const buildSessionFromProfile = (uid: string, profile: UserProfile, fallbackEmail: string | null) => {
+      const nextSession: Session = {
+        uid,
+        email: profile.email ?? fallbackEmail ?? null,
+        name: profile.name ?? "",
+        role: (profile.role ?? "independent") as Role,
+        companyId: typeof profile.companyId === "string" ? profile.companyId : null,
+      };
+      return nextSession;
+    };
+
     const checkSession = async () => {
       try {
+        const authed = firebaseAuth.currentUser;
+
+        // If no auth at all -> login
+        if (!authed) {
+          console.log("[INDEX] no auth => /login");
+          safeReplace("/login" as any);
+          return;
+        }
+
+        // Always trust Firestore as source of truth when possible (PERMANENT FIX)
+        const userRef = doc(db, "users", authed.uid);
+        const snap = await getDoc(userRef);
+
+        if (snap.exists()) {
+          const profile = snap.data() as UserProfile;
+          const fresh = buildSessionFromProfile(authed.uid, profile, authed.email ?? null);
+
+          // Store fresh session
+          await AsyncStorage.setItem(USER_STORAGE_KEY, JSON.stringify(fresh));
+          if (!isMounted) return;
+
+          console.log("[INDEX] hydrated/verified session =>", fresh);
+          routeBy(fresh.role, fresh.companyId);
+          return;
+        }
+
+        // If profile missing, fallback to local session (or go home)
         const stored = await AsyncStorage.getItem(USER_STORAGE_KEY);
-        if (!isMounted) return;
-
-        // If no local session → if auth exists, rebuild from Firestore; else login
         if (!stored) {
-          const authed = firebaseAuth.currentUser;
-          if (!authed) {
-            console.log("[INDEX] no session + no auth => /login");
-            safeReplace("/login" as const);
-            return;
-          }
-
-          console.log("[INDEX] no session but auth exists => hydrate from Firestore");
-          const userRef = doc(db, "users", authed.uid);
-          const snap = await getDoc(userRef);
-
-          if (snap.exists()) {
-            const profile = snap.data() as UserProfile;
-            const nextSession: Session = {
-              uid: authed.uid,
-              email: profile.email ?? authed.email ?? null,
-              name: profile.name ?? "",
-              role: (profile.role ?? "independent") as Role,
-              companyId: typeof profile.companyId === "string" ? profile.companyId : null,
-            };
-
-            await AsyncStorage.setItem(USER_STORAGE_KEY, JSON.stringify(nextSession));
-            routeBy(nextSession.role, nextSession.companyId);
-            return;
-          }
-
-          // If profile missing, still let them in (or you can force login)
-          console.log("[INDEX] auth exists but no users/{uid} profile => /home");
+          console.log("[INDEX] auth exists but no users/{uid} profile + no local => /home");
           safeReplace("/home" as const);
           return;
         }
 
-        // Local session exists
         let session: Session | null = null;
         try {
           session = JSON.parse(stored);
@@ -93,44 +102,11 @@ export default function IndexScreen() {
           session = null;
         }
 
-        console.log("[INDEX] local session =>", session);
-
-        // If session has role info, route immediately
-        const role = session?.role;
-        const companyId = session?.companyId ?? null;
-
-        // ✅ If role is missing (old session), recover from Firestore
-        if (!role && session?.uid) {
-          console.log("[INDEX] role missing in local session => recovering from Firestore");
-          const userRef = doc(db, "users", session.uid);
-          const snap = await getDoc(userRef);
-
-          if (snap.exists()) {
-            const profile = snap.data() as UserProfile;
-
-            const fixedRole = (profile.role ?? "independent") as Role;
-            const fixedCompanyId =
-              typeof profile.companyId === "string" ? profile.companyId : null;
-
-            const repaired: Session = {
-              ...session,
-              role: fixedRole,
-              companyId: fixedCompanyId,
-              name: profile.name ?? session.name ?? "",
-              email: profile.email ?? session.email ?? null,
-            };
-
-            await AsyncStorage.setItem(USER_STORAGE_KEY, JSON.stringify(repaired));
-            routeBy(repaired.role, repaired.companyId);
-            return;
-          }
-        }
-
-        // Normal path
-        routeBy(role, companyId);
+        console.log("[INDEX] fallback local session =>", session);
+        routeBy(session?.role, session?.companyId ?? null);
       } catch (err) {
         console.warn("[INDEX] Session check error:", err);
-        safeReplace("/login" as const);
+        safeReplace("/login" as any);
       } finally {
         if (isMounted) setChecking(false);
       }

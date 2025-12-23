@@ -164,15 +164,14 @@ const withLineBreaks = (value: string) =>
   safeHtml(value).replace(/\n/g, "<br />");
 
 const isHttpUrl = (u: string) => /^https?:\/\//i.test(u);
+
 // ✅ Expo ImagePicker compat:
-// Some SDKs only have MediaTypeOptions, newer ones have MediaType.
-// This avoids TS errors + future-proofs the app.
 const IMAGE_MEDIA_TYPES: any =
   (ImagePicker as any).MediaType?.Images ??
   (ImagePicker as any).MediaTypeOptions?.Images ??
   "Images";
+
 // ✅ iOS Photos app often returns ph:// URIs. Convert them into a real file:// URI
-// so fetch(uri).blob() works consistently.
 async function ensureFileUriForUpload(inputUri: string): Promise<string> {
   if (!inputUri) return inputUri;
 
@@ -180,35 +179,26 @@ async function ensureFileUriForUpload(inputUri: string): Promise<string> {
   const isPh = lower.startsWith("ph://");
   const isAssetsLib = lower.startsWith("assets-library://");
 
-  // file:// already fine
   if (!isPh && !isAssetsLib) return inputUri;
 
-  // Convert to a cached JPEG using ImageManipulator (creates file://)
   try {
-    const out = await ImageManipulator.manipulateAsync(
-      inputUri,
-      [], // no transforms, just re-encode
-      { compress: 0.85, format: ImageManipulator.SaveFormat.JPEG }
-    );
-    return out.uri; // file://...
+    const out = await ImageManipulator.manipulateAsync(inputUri, [], {
+      compress: 0.85,
+      format: ImageManipulator.SaveFormat.JPEG,
+    });
+    return out.uri;
   } catch (e) {
     console.warn("ensureFileUriForUpload failed:", e);
-    return inputUri; // fallback (may fail later, but we'll log)
+    return inputUri;
   }
 }
 
 /**
  * =========================================================
- * ✅ PDF PREP HELPERS (2 helper blocks)
- * Turns BOTH:
- * - file://... (local optimistic preview)
- * - ph://... / assets-library://... (iOS)
- * - https://firebasestorage... (cloud URL)
- * into data URLs: data:image/jpeg;base64,...
+ * ✅ PDF PREP HELPERS
  * =========================================================
  */
 
-// ✅ Helper Block #1: mime + base64 -> data URL
 const guessMimeFromUri = (uri: string): string => {
   const clean = (uri || "").split("?")[0].toLowerCase();
   const ext = clean.split(".").pop() || "";
@@ -223,14 +213,12 @@ const guessMimeFromUri = (uri: string): string => {
 const base64ToDataUrl = (base64: string, mime: string) =>
   `data:${mime};base64,${base64}`;
 
-// ✅ Helper Block #2: uri -> base64 -> data URL (local OR remote)
 async function uriToDataUrl(uri: string): Promise<string | null> {
   try {
     if (!uri) return null;
 
     const mime = guessMimeFromUri(uri);
 
-    // iOS Photos URIs -> convert to file:// first
     const lower = uri.toLowerCase();
     if (lower.startsWith("ph://") || lower.startsWith("assets-library://")) {
       const fileUri = await ensureFileUriForUpload(uri);
@@ -240,16 +228,13 @@ async function uriToDataUrl(uri: string): Promise<string | null> {
         });
         return base64ToDataUrl(b64, mime);
       }
-      // If conversion fails, fall through and try original (best effort)
     }
 
-    // Local file
     if (uri.startsWith("file://")) {
       const b64 = await FileSystem.readAsStringAsync(uri, { encoding: "base64" });
       return base64ToDataUrl(b64, mime);
     }
 
-    // Remote URL (Firebase storage etc.)
     if (isHttpUrl(uri)) {
       const FS: any = FileSystem as any;
       const baseDir: string =
@@ -285,7 +270,7 @@ async function uriToDataUrl(uri: string): Promise<string | null> {
   }
 }
 
-// 🔹 Small component just for Photos UI (header + button + grid)
+// 🔹 Photos UI component
 type JobPhotosSectionProps = {
   theme: any;
   accentColor: string;
@@ -323,9 +308,7 @@ function JobPhotosSection({
           onPress={onPressAddPhoto}
           activeOpacity={0.9}
         >
-          <Text
-            style={[styles.addPhotoButtonText, { color: theme.textPrimary }]}
-          >
+          <Text style={[styles.addPhotoButtonText, { color: theme.textPrimary }]}>
             + Add Photo
           </Text>
         </TouchableOpacity>
@@ -340,11 +323,7 @@ function JobPhotosSection({
                 activeOpacity={0.9}
                 onPress={() => onPressThumb(index)}
               >
-                <Image
-                  source={{ uri }}
-                  style={styles.photoThumb}
-                  resizeMode="cover"
-                />
+                <Image source={{ uri }} style={styles.photoThumb} resizeMode="cover" />
               </TouchableOpacity>
 
               <TouchableOpacity
@@ -365,7 +344,7 @@ function JobPhotosSection({
   );
 }
 
-// ---------- Pure layout helpers (no logic changes) ----------
+// ---------- Pure layout helpers ----------
 function SectionCard({
   theme,
   accentColor,
@@ -442,9 +421,7 @@ function SectionCard({
               },
             ]}
           >
-            <Text
-              style={[styles.cardActivePillText, { color: theme.textPrimary }]}
-            >
+            <Text style={[styles.cardActivePillText, { color: theme.textPrimary }]}>
               Editing
             </Text>
           </View>
@@ -489,9 +466,7 @@ function ActionIcon({
   };
 
   return (
-    <Animated.View
-      style={{ transform: [{ scale }], opacity: disabled ? 0.45 : 1 }}
-    >
+    <Animated.View style={{ transform: [{ scale }], opacity: disabled ? 0.45 : 1 }}>
       <TouchableOpacity
         onPress={onPress}
         disabled={!!disabled}
@@ -500,11 +475,7 @@ function ActionIcon({
         onPressOut={onPressOut}
         style={styles.actionIconButton}
       >
-        <Image
-          source={iconSource}
-          style={{ width: size, height: size }}
-          resizeMode="contain"
-        />
+        <Image source={iconSource} style={{ width: size, height: size }} resizeMode="contain" />
       </TouchableOpacity>
     </Animated.View>
   );
@@ -518,24 +489,15 @@ async function uploadJobPhotoToStorage(params: {
 }): Promise<StoredPhoto> {
   const { companyId, jobId, localUri } = params;
 
-  // ✅ Fix iOS Photos app "ph://" URIs
   const uploadableUri = await ensureFileUriForUpload(localUri);
 
-  // Fetch the local file as blob
   const resp = await fetch(uploadableUri);
   const blob = await resp.blob();
 
-  // Try to infer extension
-  const extGuess = (
-    uploadableUri.split("?")[0].split(".").pop() || "jpg"
-  ).toLowerCase();
-  const safeExt = ["jpg", "jpeg", "png", "webp", "heic"].includes(extGuess)
-    ? extGuess
-    : "jpg";
+  const extGuess = (uploadableUri.split("?")[0].split(".").pop() || "jpg").toLowerCase();
+  const safeExt = ["jpg", "jpeg", "png", "webp", "heic"].includes(extGuess) ? extGuess : "jpg";
 
-  const filename = `${Date.now()}-${Math.random()
-    .toString(16)
-    .slice(2)}.${safeExt}`;
+  const filename = `${Date.now()}-${Math.random().toString(16).slice(2)}.${safeExt}`;
   const path = `companies/${companyId}/jobs/${jobId}/${filename}`;
 
   const ref = storageRef(storage, path);
@@ -555,8 +517,6 @@ async function uploadJobPhotoToStorage(params: {
   return { url, path };
 }
 
-// ✅ Download remote URL to base64 (for PDF images in cloud mode)
-// Kept for backward compatibility (not required by the new PDF prep)
 async function downloadUrlToBase64(url: string): Promise<string | null> {
   try {
     const FS: any = FileSystem as any;
@@ -585,7 +545,6 @@ async function downloadUrlToBase64(url: string): Promise<string | null> {
 const normalizeStorageUrl = (u: string) => {
   try {
     const url = new URL(u);
-    // Remove query string differences like ?alt=media&token=...
     return `${url.origin}${url.pathname}`;
   } catch {
     return u;
@@ -596,10 +555,8 @@ export default function JobDetailScreen() {
   const router = useRouter();
   const { id } = useLocalSearchParams<{ id?: string }>();
 
-  // ✅ LOCKED theme + accent from PreferencesContext
   const { isReady, theme, accentColor } = usePreferences();
 
-  // ✅ session (to know owner vs employee + company)
   const [session, setSession] = useState<Session | null>(null);
   const [sessionLoaded, setSessionLoaded] = useState(false);
 
@@ -609,9 +566,6 @@ export default function JobDetailScreen() {
 
   const isCloudMode = (isOwner || isEmployee) && !!companyId;
 
-  // ✅ IMPORTANT FIX:
-  // Never "return;" from inside the component without returning JSX.
-  // We'll guard cloud uploads by checking canUseCloudUploads.
   const user = firebaseAuth.currentUser;
   const canUseCloudUploads = isCloudMode && !!user;
 
@@ -625,24 +579,18 @@ export default function JobDetailScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isCloudMode, user?.uid]);
 
-  // 🔹 Company branding (used in PDFs)
   const [companyName, setCompanyName] = useState("");
   const [companyPhone, setCompanyPhone] = useState("");
   const [companyEmail, setCompanyEmail] = useState("");
   const [companyLicense, setCompanyLicense] = useState("");
 
-  // ✅ assignment data (owner only)
   const [employees, setEmployees] = useState<EmployeeRecord[]>([]);
   const [assignedToUid, setAssignedToUid] = useState<string>("");
   const [isAssignMenuVisible, setIsAssignMenuVisible] = useState(false);
 
-  // ✅ Upload state (cloud photos)
   const [isUploadingPhotos, setIsUploadingPhotos] = useState(false);
-
-  // ✅ Cloud photo files (url + path)
   const [photoFiles, setPhotoFiles] = useState<StoredPhoto[]>([]);
 
-  // ✅ safe back
   const safeBack = () => {
     try {
       // @ts-ignore
@@ -681,7 +629,6 @@ export default function JobDetailScreen() {
     loadBranding();
   }, []);
 
-  // ✅ load session once
   useEffect(() => {
     const loadSession = async () => {
       try {
@@ -709,7 +656,6 @@ export default function JobDetailScreen() {
   const [job, setJob] = useState<Job | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
-  // Editable fields
   const [editTitle, setEditTitle] = useState("");
   const [editAddress, setEditAddress] = useState("");
   const [editDescription, setEditDescription] = useState("");
@@ -722,17 +668,14 @@ export default function JobDetailScreen() {
   const [hourlyRate, setHourlyRate] = useState<string>("");
   const [materialCost, setMaterialCost] = useState<string>("");
 
-  // ✅ UI URIs (independent: local uris, cloud: download URLs)
   const [photoUris, setPhotoUris] = useState<string[]>([]);
   const [photoBase64s, setPhotoBase64s] = useState<string[]>([]);
 
-  // 🔹 Track editing (used for keyboard + sticky behavior)
+  // ✅ Track editing like Add Job
   const [isEditing, setIsEditing] = useState(false);
 
-  // ✅ UI-only: which section is active
   const [activeSection, setActiveSection] = useState<ActiveSectionKey>(null);
 
-  // 🔹 Scroll + keyboard handling
   const scrollRef = useRef<ScrollView | null>(null);
   const sectionPositions = useRef<Record<string, number>>({});
 
@@ -740,11 +683,7 @@ export default function JobDetailScreen() {
     sectionPositions.current[key] = y;
   };
 
-  const scrollToSectionWithRetry = (
-    key: string,
-    triesLeft = 8,
-    delayMs = 40
-  ) => {
+  const scrollToSectionWithRetry = (key: string, triesLeft = 8, delayMs = 40) => {
     const y = sectionPositions.current[key];
 
     if (scrollRef.current && y !== undefined) {
@@ -755,10 +694,15 @@ export default function JobDetailScreen() {
       return;
     }
     if (triesLeft <= 0) return;
-    setTimeout(
-      () => scrollToSectionWithRetry(key, triesLeft - 1, delayMs),
-      delayMs
-    );
+    setTimeout(() => scrollToSectionWithRetry(key, triesLeft - 1, delayMs), delayMs);
+  };
+
+  // ✅ Add Job 1:1
+  const dismissKeyboardAndEditing = () => {
+    Keyboard.dismiss();
+    setIsEditing(false);
+    setActiveSection(null);
+    setIsAssignMenuVisible(false);
   };
 
   const handleFocus = (sectionKey: Exclude<ActiveSectionKey, null>) => {
@@ -771,25 +715,14 @@ export default function JobDetailScreen() {
     });
   };
 
-  const dismissKeyboard = () => {
-    Keyboard.dismiss();
-    setIsEditing(false);
-    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-    setActiveSection(null);
-  };
-
   const hasActive = isEditing && activeSection !== null;
-  const cardIsActive = (k: Exclude<ActiveSectionKey, null>) =>
-    hasActive && activeSection === k;
-  const cardIsDimmed = (k: Exclude<ActiveSectionKey, null>) =>
-    hasActive && activeSection !== k;
+  const cardIsActive = (k: Exclude<ActiveSectionKey, null>) => hasActive && activeSection === k;
+  const cardIsDimmed = (k: Exclude<ActiveSectionKey, null>) => hasActive && activeSection !== k;
 
-  // Photos: full-screen + bottom sheet
   const [isImageOverlayVisible, setIsImageOverlayVisible] = useState(false);
   const [fullImageIndex, setFullImageIndex] = useState(0);
   const [isAddPhotoMenuVisible, setIsAddPhotoMenuVisible] = useState(false);
 
-  // Button animations
   const markDoneScale = useRef(new Animated.Value(1)).current;
   const saveChangesScale = useRef(new Animated.Value(1)).current;
 
@@ -815,7 +748,6 @@ export default function JobDetailScreen() {
   const markDoneAnim = createScaleHandlers(markDoneScale);
   const saveChangesAnim = createScaleHandlers(saveChangesScale);
 
-  // 🔹 Screen zoom
   const screenScale = useRef(new Animated.Value(1.04)).current;
 
   useEffect(() => {
@@ -826,7 +758,6 @@ export default function JobDetailScreen() {
     }).start();
   }, [screenScale]);
 
-  // ---------- Helpers ----------
   const parseNumber = (value: string) => {
     const n = Number(value.replace(/[^0-9.]/g, ""));
     return Number.isNaN(n) ? 0 : n;
@@ -840,7 +771,6 @@ export default function JobDetailScreen() {
     await AsyncStorage.setItem(STORAGE_KEYS.JOBS, JSON.stringify(updatedJobs));
   };
 
-  // ✅ Keep Firestore in sync when cloud photos change
   const persistCloudPhotos = async (nextFiles: StoredPhoto[]) => {
     if (!isCloudMode) return;
     if (!companyId || !job?.id) return;
@@ -854,7 +784,6 @@ export default function JobDetailScreen() {
     });
   };
 
-  // ---------- Load job (Cloud OR Local) ----------
   useEffect(() => {
     if (!id) {
       setIsLoading(false);
@@ -866,7 +795,6 @@ export default function JobDetailScreen() {
       try {
         setIsLoading(true);
 
-        // ✅ CLOUD MODE: Firestore
         if (isCloudMode && companyId) {
           const jobRef = doc(db, "companies", companyId, "jobs", id);
           const snap = await getDoc(jobRef);
@@ -886,9 +814,7 @@ export default function JobDetailScreen() {
                 .filter((p: StoredPhoto) => !!p.url)
             : [];
 
-          const loadedUris: string[] = Array.isArray(data.photoUris)
-            ? data.photoUris
-            : [];
+          const loadedUris: string[] = Array.isArray(data.photoUris) ? data.photoUris : [];
 
           const effectiveFiles: StoredPhoto[] =
             loadedFiles.length > 0
@@ -912,10 +838,8 @@ export default function JobDetailScreen() {
             photoBase64s: [],
 
             laborHours: typeof data.laborHours === "number" ? data.laborHours : 0,
-            hourlyRate:
-              typeof data.hourlyRate === "number" ? data.hourlyRate : 0,
-            materialCost:
-              typeof data.materialCost === "number" ? data.materialCost : 0,
+            hourlyRate: typeof data.hourlyRate === "number" ? data.hourlyRate : 0,
+            materialCost: typeof data.materialCost === "number" ? data.materialCost : 0,
 
             assignedToUid:
               data.assignedToUid === null || data.assignedToUid === undefined
@@ -933,15 +857,9 @@ export default function JobDetailScreen() {
           setEditClientNotes(found.clientNotes || "");
           setIsDone(found.isDone);
 
-          setLaborHours(
-            found.laborHours !== undefined ? String(found.laborHours) : ""
-          );
-          setHourlyRate(
-            found.hourlyRate !== undefined ? String(found.hourlyRate) : ""
-          );
-          setMaterialCost(
-            found.materialCost !== undefined ? String(found.materialCost) : ""
-          );
+          setLaborHours(found.laborHours !== undefined ? String(found.laborHours) : "");
+          setHourlyRate(found.hourlyRate !== undefined ? String(found.hourlyRate) : "");
+          setMaterialCost(found.materialCost !== undefined ? String(found.materialCost) : "");
 
           setPhotoFiles(effectiveFiles);
           setPhotoUris(effectiveFiles.map((f) => f.url));
@@ -951,7 +869,6 @@ export default function JobDetailScreen() {
           return;
         }
 
-        // ✅ INDEPENDENT MODE: AsyncStorage
         const jobsJson = await AsyncStorage.getItem(STORAGE_KEYS.JOBS);
         if (!jobsJson) {
           setJob(null);
@@ -974,15 +891,9 @@ export default function JobDetailScreen() {
         setEditClientNotes(found.clientNotes || "");
         setIsDone(found.isDone);
 
-        setLaborHours(
-          found.laborHours !== undefined ? String(found.laborHours) : ""
-        );
-        setHourlyRate(
-          found.hourlyRate !== undefined ? String(found.hourlyRate) : ""
-        );
-        setMaterialCost(
-          found.materialCost !== undefined ? String(found.materialCost) : ""
-        );
+        setLaborHours(found.laborHours !== undefined ? String(found.laborHours) : "");
+        setHourlyRate(found.hourlyRate !== undefined ? String(found.hourlyRate) : "");
+        setMaterialCost(found.materialCost !== undefined ? String(found.materialCost) : "");
 
         setPhotoUris(found.photoUris || []);
         setPhotoBase64s(found.photoBase64s || []);
@@ -1000,7 +911,6 @@ export default function JobDetailScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id, isCloudMode, companyId, sessionLoaded]);
 
-  // ✅ Load employees list (owner only + has companyId)
   useEffect(() => {
     const loadEmployees = async () => {
       if (!isOwner) return;
@@ -1050,7 +960,6 @@ export default function JobDetailScreen() {
     return `Assigned (${short})`;
   }, [assignedToUid, session?.uid]);
 
-  // ✅ Firestore update helpers
   const getCloudJobRef = () => {
     if (!companyId) return null;
     if (!job?.id) return null;
@@ -1100,7 +1009,6 @@ export default function JobDetailScreen() {
     }
   };
 
-  // ---------- Actions ----------
   const handleSaveJobEdits = async () => {
     if (!job) return;
 
@@ -1117,11 +1025,9 @@ export default function JobDetailScreen() {
       hourlyRate: parseNumber(hourlyRate),
       materialCost: parseNumber(materialCost),
 
-      // ✅ photos
       photoUris: isCloudMode ? photoFiles.map((f) => f.url) : photoUris,
       photoFiles: isCloudMode ? photoFiles : undefined,
 
-      // ✅ cloud never stores base64
       photoBase64s: isCloudMode ? [] : photoBase64s,
 
       assignedToUid: assignedToUid ? assignedToUid : null,
@@ -1130,7 +1036,6 @@ export default function JobDetailScreen() {
     try {
       LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
 
-      // ✅ CLOUD MODE: update Firestore
       if (isCloudMode) {
         const jobRef = getCloudJobRef();
         if (!jobRef) {
@@ -1150,7 +1055,6 @@ export default function JobDetailScreen() {
           hourlyRate: updated.hourlyRate ?? 0,
           materialCost: updated.materialCost ?? 0,
 
-          // ✅ store both
           photoFiles: photoFiles,
           photoUris: photoFiles.map((f) => f.url),
 
@@ -1162,7 +1066,6 @@ export default function JobDetailScreen() {
         return;
       }
 
-      // ✅ INDEPENDENT: AsyncStorage
       const jobsJson = await AsyncStorage.getItem(STORAGE_KEYS.JOBS);
       const jobs: Job[] = jobsJson ? JSON.parse(jobsJson) : [];
       const next = jobs.map((j) => (j.id === job.id ? updated : j));
@@ -1249,9 +1152,8 @@ export default function JobDetailScreen() {
     ]);
   };
 
-  // ---------- Photos ----------
   const requireCloudAuth = () => {
-    if (!isCloudMode) return true; // independent doesn't need auth
+    if (!isCloudMode) return true;
     if (!canUseCloudUploads) {
       Alert.alert(
         "Not logged in",
@@ -1265,10 +1167,7 @@ export default function JobDetailScreen() {
   const handleAddPhotoFromGallery = async () => {
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (status !== "granted") {
-      Alert.alert(
-        "Permission needed",
-        "We need access to your photos to attach pictures to this job."
-      );
+      Alert.alert("Permission needed", "We need access to your photos to attach pictures to this job.");
       return;
     }
 
@@ -1281,7 +1180,6 @@ export default function JobDetailScreen() {
 
     if (result.canceled || !result.assets?.length) return;
 
-    // ✅ INDEPENDENT: keep local uri + base64
     if (!isCloudMode) {
       const newUris: string[] = [];
       const newBase64s: string[] = [];
@@ -1300,7 +1198,6 @@ export default function JobDetailScreen() {
       return;
     }
 
-    // ✅ CLOUD
     if (!requireCloudAuth()) return;
 
     if (!companyId || !job?.id) {
@@ -1311,7 +1208,6 @@ export default function JobDetailScreen() {
     const localUris = result.assets.map((a) => a.uri).filter(Boolean) as string[];
     if (!localUris.length) return;
 
-    // Optimistic: show local previews while uploading
     const baseIndex = photoUris.length;
     LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
     setPhotoUris((prev) => [...prev, ...localUris]);
@@ -1331,7 +1227,6 @@ export default function JobDetailScreen() {
 
         uploaded.push(file);
 
-        // Replace local preview with download URL (by index)
         setPhotoUris((prev) => {
           const next = [...prev];
           const idx = baseIndex + i;
@@ -1340,11 +1235,9 @@ export default function JobDetailScreen() {
         });
       }
 
-      // Merge into cloud photoFiles
       const nextFiles = [...photoFiles, ...uploaded];
       setPhotoFiles(nextFiles);
 
-      // Persist to Firestore immediately
       await persistCloudPhotos(nextFiles);
 
       Alert.alert("Uploaded", "Photos uploaded to cloud storage.");
@@ -1370,10 +1263,7 @@ export default function JobDetailScreen() {
   const handleAddPhotoFromCamera = async () => {
     const { status } = await ImagePicker.requestCameraPermissionsAsync();
     if (status !== "granted") {
-      Alert.alert(
-        "Permission needed",
-        "We need access to your camera to take photos for this job."
-      );
+      Alert.alert("Permission needed", "We need access to your camera to take photos for this job.");
       return;
     }
 
@@ -1387,7 +1277,6 @@ export default function JobDetailScreen() {
     const asset = result.assets?.[0];
     if (!asset?.uri) return;
 
-    // ✅ INDEPENDENT
     if (!isCloudMode) {
       LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
       setPhotoUris((prev) => [...prev, asset.uri]);
@@ -1395,7 +1284,6 @@ export default function JobDetailScreen() {
       return;
     }
 
-    // ✅ CLOUD
     if (!requireCloudAuth()) return;
 
     if (!companyId || !job?.id) {
@@ -1405,7 +1293,6 @@ export default function JobDetailScreen() {
 
     const baseIndex = photoUris.length;
 
-    // optimistic preview
     LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
     setPhotoUris((prev) => [...prev, asset.uri]);
 
@@ -1456,44 +1343,29 @@ export default function JobDetailScreen() {
         text: "Remove",
         style: "destructive",
         onPress: async () => {
-          // ✅ INDEPENDENT: just remove local lists
           if (!isCloudMode) {
             LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
             setPhotoUris((prev) => prev.filter((u) => u !== uriToRemove));
-            setPhotoBase64s((prev) =>
-              index >= 0 ? prev.filter((_, i) => i !== index) : prev
-            );
+            setPhotoBase64s((prev) => (index >= 0 ? prev.filter((_, i) => i !== index) : prev));
             return;
           }
 
-          // ✅ CLOUD: delete from Storage (if we have path) + update Firestore
           try {
             const targetNorm = normalizeStorageUrl(uriToRemove);
-
             const file = photoFiles.find((f) => normalizeStorageUrl(f.url) === targetNorm);
 
-            // Update UI immediately
             LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-            setPhotoUris((prev) =>
-              prev.filter((u) => normalizeStorageUrl(u) !== targetNorm)
-            );
+            setPhotoUris((prev) => prev.filter((u) => normalizeStorageUrl(u) !== targetNorm));
 
-            // Remove from photoFiles in state
-            const nextFiles = photoFiles.filter(
-              (f) => normalizeStorageUrl(f.url) !== targetNorm
-            );
+            const nextFiles = photoFiles.filter((f) => normalizeStorageUrl(f.url) !== targetNorm);
             setPhotoFiles(nextFiles);
 
-            // Persist Firestore right away
             await persistCloudPhotos(nextFiles);
 
-            // Best effort: delete object in Storage
             if (file?.path) {
               await deleteObject(storageRef(storage, file.path));
             } else {
-              console.warn(
-                "Cloud photo removed but no storage path was available (legacy photoUris)."
-              );
+              console.warn("Cloud photo removed but no storage path was available (legacy photoUris).");
             }
 
             Alert.alert("Removed", "Photo removed.");
@@ -1511,31 +1383,12 @@ export default function JobDetailScreen() {
     setIsImageOverlayVisible(true);
   };
 
-  // ✅ Create base64s for PDF (legacy)
-  const getPdfPhotoBase64s = async (): Promise<string[]> => {
-    if (!photoUris.length) return [];
-
-    if (!isCloudMode) {
-      return photoBase64s.length ? photoBase64s : job?.photoBase64s || [];
-    }
-
-    const urls = photoFiles.map((f) => f.url).filter((u) => isHttpUrl(u));
-
-    const bases: string[] = [];
-    for (const url of urls) {
-      const b64 = await downloadUrlToBase64(url);
-      if (b64) bases.push(b64);
-    }
-    return bases;
-  };
-
   const guardShareWhileUploading = () => {
     if (!isCloudMode) return false;
     if (isUploadingPhotos) {
       Alert.alert("Uploading…", "Wait until photo uploads finish, then try sharing again.");
       return true;
     }
-    // If any previews are still local, block share (avoids missing images)
     const hasLocalPreview = photoUris.some((u) => u && !isHttpUrl(u));
     if (hasLocalPreview) {
       Alert.alert("Uploading…", "Some photos are still syncing. Give it a moment, then share again.");
@@ -1544,7 +1397,6 @@ export default function JobDetailScreen() {
     return false;
   };
 
-  // ---------- Share full report ----------
   const handleShareFullReport = async () => {
     if (!job) return;
     if (guardShareWhileUploading()) return;
@@ -1565,37 +1417,22 @@ export default function JobDetailScreen() {
       const hasBranding = brandName || brandPhone || brandEmail || brandLicense;
 
       const companyHeaderLines: string[] = [];
-      if (brandName)
-        companyHeaderLines.push(`<div class="company-name">${safeHtml(brandName)}</div>`);
-      if (brandPhone)
-        companyHeaderLines.push(`<div class="company-line">${safeHtml(brandPhone)}</div>`);
-      if (brandEmail)
-        companyHeaderLines.push(`<div class="company-line">${safeHtml(brandEmail)}</div>`);
-      if (brandLicense)
-        companyHeaderLines.push(`<div class="company-line">${safeHtml(brandLicense)}</div>`);
+      if (brandName) companyHeaderLines.push(`<div class="company-name">${safeHtml(brandName)}</div>`);
+      if (brandPhone) companyHeaderLines.push(`<div class="company-line">${safeHtml(brandPhone)}</div>`);
+      if (brandEmail) companyHeaderLines.push(`<div class="company-line">${safeHtml(brandEmail)}</div>`);
+      if (brandLicense) companyHeaderLines.push(`<div class="company-line">${safeHtml(brandLicense)}</div>`);
 
       const companyHeaderHtml = hasBranding
         ? `<div class="company-block">${companyHeaderLines.join("")}</div>`
         : "";
 
-      /**
-       * ✅ UPDATED PHOTO SECTION (PDF PREP ONLY)
-       * Build data URLs from BOTH:
-       * - file:// optimistic previews
-       * - https:// firebasestorage urls
-       * - ph:// etc (iOS)
-       */
       const dataUrls: string[] = [];
-
-      // Prefer what's currently on screen (includes local optimistic previews)
       const sources = (photoUris || []).filter(Boolean);
-
       for (const src of sources) {
         const dataUrl = await uriToDataUrl(src);
         if (dataUrl) dataUrls.push(dataUrl);
       }
 
-      // Independent fallback: if we couldn't build from URIs but we have stored base64s
       if (!dataUrls.length && !isCloudMode) {
         const bases = photoBase64s.length ? photoBase64s : job?.photoBase64s || [];
         for (const b64 of bases) {
@@ -1772,7 +1609,6 @@ export default function JobDetailScreen() {
     }
   };
 
-  // ---------- Share client report ----------
   const handleShareClientReport = async () => {
     if (!job) return;
     if (guardShareWhileUploading()) return;
@@ -1794,14 +1630,10 @@ export default function JobDetailScreen() {
       const hasBranding = brandName || brandPhone || brandEmail || brandLicense;
 
       const companyHeaderLines: string[] = [];
-      if (brandName)
-        companyHeaderLines.push(`<div class="company-name">${safeHtml(brandName)}</div>`);
-      if (brandPhone)
-        companyHeaderLines.push(`<div class="company-line">${safeHtml(brandPhone)}</div>`);
-      if (brandEmail)
-        companyHeaderLines.push(`<div class="company-line">${safeHtml(brandEmail)}</div>`);
-      if (brandLicense)
-        companyHeaderLines.push(`<div class="company-line">${safeHtml(brandLicense)}</div>`);
+      if (brandName) companyHeaderLines.push(`<div class="company-name">${safeHtml(brandName)}</div>`);
+      if (brandPhone) companyHeaderLines.push(`<div class="company-line">${safeHtml(brandPhone)}</div>`);
+      if (brandEmail) companyHeaderLines.push(`<div class="company-line">${safeHtml(brandEmail)}</div>`);
+      if (brandLicense) companyHeaderLines.push(`<div class="company-line">${safeHtml(brandLicense)}</div>`);
 
       const companyHeaderHtml = hasBranding
         ? `<div class="company-block">${companyHeaderLines.join("")}</div>`
@@ -1823,8 +1655,8 @@ export default function JobDetailScreen() {
               .status-pill { border-radius: 999px; padding: 4px 10px; font-size: 11px; border: 1px solid ${
                 isDone ? "#16a34a" : openColor
               }; color: ${isDone ? "#15803d" : openColor}; background: ${
-        isDone ? "#dcfce7" : "#ffffff"
-      }; }
+                isDone ? "#dcfce7" : "#ffffff"
+              }; }
               .right-header { text-align: right; }
               .company-block { font-size: 11px; color: #4b5563; margin-bottom: 6px; }
               .company-name { font-weight: 600; font-size: 13px; color: #111827; }
@@ -1861,25 +1693,19 @@ export default function JobDetailScreen() {
                 <div class="value">${safeHtml(editAddress || job.address)}</div>
 
                 <div class="label">Description / Scope</div>
-                <div class="value">${withLineBreaks(
-                  editDescription || job.description
-                )}</div>
+                <div class="value">${withLineBreaks(editDescription || job.description)}</div>
               </div>
 
               <div class="section">
                 <h2>Client Info</h2>
                 <div class="label">Client Name</div>
                 <div class="value">${
-                  editClientName.trim()
-                    ? safeHtml(editClientName.trim())
-                    : "Not set"
+                  editClientName.trim() ? safeHtml(editClientName.trim()) : "Not set"
                 }</div>
 
                 <div class="label">Client Phone</div>
                 <div class="value">${
-                  editClientPhone.trim()
-                    ? safeHtml(editClientPhone.trim())
-                    : "Not set"
+                  editClientPhone.trim() ? safeHtml(editClientPhone.trim()) : "Not set"
                 }</div>
               </div>
 
@@ -1943,12 +1769,10 @@ export default function JobDetailScreen() {
     ]);
   };
 
-  // ✅ Don’t render until prefs are ready
   if (!isReady) {
     return <View style={{ flex: 1, backgroundColor: themes.graphite.screenBackground }} />;
   }
 
-  // ---------- Render states ----------
   if (isLoading) {
     return (
       <View style={[styles.loadingScreen, { backgroundColor: theme.screenBackground }]}>
@@ -2011,17 +1835,17 @@ export default function JobDetailScreen() {
         )}
 
         <ScrollView
+          ref={scrollRef}
+          style={{ flex: 1, backgroundColor: theme.screenBackground }}
           contentContainerStyle={[
             styles.detailsScroll,
-            { paddingBottom: isEditing ? 18 : STICKY_BAR_HEIGHT + 26 },
+            { paddingBottom: isEditing ? 8 : 24 },
           ]}
-          showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="always"
-          keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
-          onScrollBeginDrag={dismissKeyboard}
-          ref={scrollRef}
+          showsVerticalScrollIndicator={false}
+          onScrollBeginDrag={dismissKeyboardAndEditing}
         >
-          <TouchableWithoutFeedback onPress={dismissKeyboard} accessible={false}>
+          <TouchableWithoutFeedback onPress={dismissKeyboardAndEditing} accessible={false}>
             <View>
               {/* HERO HEADER */}
               <View style={styles.heroWrap}>
@@ -2067,9 +1891,7 @@ export default function JobDetailScreen() {
                         styles.statusPill,
                         {
                           borderColor: isDone ? "#16a34a" : accentColor,
-                          backgroundColor: isDone
-                            ? "rgba(22,163,74,0.10)"
-                            : accentColor + "1A",
+                          backgroundColor: isDone ? "rgba(22,163,74,0.10)" : accentColor + "1A",
                         },
                       ]}
                     >
@@ -2205,6 +2027,7 @@ export default function JobDetailScreen() {
                       ]}
                       activeOpacity={0.9}
                       onPress={() => {
+                        setIsEditing(true);
                         handleFocus("assignment");
                         setIsAssignMenuVisible((p) => !p);
                       }}
@@ -2236,6 +2059,7 @@ export default function JobDetailScreen() {
                           );
                           return;
                         }
+                        setIsEditing(true);
                         handleFocus("assignment");
                         setIsAssignMenuVisible(true);
                       }}
@@ -2287,7 +2111,10 @@ export default function JobDetailScreen() {
                     <View
                       style={[
                         styles.assignmentDropdown,
-                        { backgroundColor: theme.cardSecondaryBackground, borderColor: theme.cardBorder },
+                        {
+                          backgroundColor: theme.cardSecondaryBackground,
+                          borderColor: theme.cardBorder,
+                        },
                       ]}
                     >
                       <TouchableOpacity
@@ -2309,14 +2136,14 @@ export default function JobDetailScreen() {
                           emp.email?.trim() ||
                           emp.uid.slice(0, 6) + "…" + emp.uid.slice(-4);
 
-                        const isActive = emp.uid === assignedToUid;
+                        const isActiveOpt = emp.uid === assignedToUid;
 
                         return (
                           <TouchableOpacity
                             key={emp.uid}
                             style={[
                               styles.assignmentOption,
-                              isActive && { backgroundColor: accentColor + "1A" },
+                              isActiveOpt && { backgroundColor: accentColor + "1A" },
                             ]}
                             onPress={async () => {
                               try {
@@ -2327,12 +2154,12 @@ export default function JobDetailScreen() {
                             <Text
                               style={[
                                 styles.assignmentOptionText,
-                                { color: isActive ? accentColor : theme.textPrimary },
+                                { color: isActiveOpt ? accentColor : theme.textPrimary },
                               ]}
                             >
                               {label}
                             </Text>
-                            {isActive ? (
+                            {isActiveOpt ? (
                               <Text style={[styles.assignmentOptionCheck, { color: accentColor }]}>
                                 ✓
                               </Text>
@@ -2379,7 +2206,10 @@ export default function JobDetailScreen() {
                   value={editTitle}
                   onChangeText={setEditTitle}
                   placeholderTextColor={theme.textMuted}
-                  onFocus={() => handleFocus("jobInfo")}
+                  onFocus={() => {
+                    setIsEditing(true);
+                    handleFocus("jobInfo");
+                  }}
                   onBlur={() => setIsEditing(false)}
                 />
 
@@ -2397,7 +2227,10 @@ export default function JobDetailScreen() {
                   value={editAddress}
                   onChangeText={setEditAddress}
                   placeholderTextColor={theme.textMuted}
-                  onFocus={() => handleFocus("jobInfo")}
+                  onFocus={() => {
+                    setIsEditing(true);
+                    handleFocus("jobInfo");
+                  }}
                   onBlur={() => setIsEditing(false)}
                 />
 
@@ -2418,7 +2251,10 @@ export default function JobDetailScreen() {
                   onChangeText={setEditDescription}
                   multiline
                   placeholderTextColor={theme.textMuted}
-                  onFocus={() => handleFocus("jobInfo")}
+                  onFocus={() => {
+                    setIsEditing(true);
+                    handleFocus("jobInfo");
+                  }}
                   onBlur={() => setIsEditing(false)}
                 />
               </SectionCard>
@@ -2449,7 +2285,10 @@ export default function JobDetailScreen() {
                   onChangeText={setEditClientName}
                   placeholder="Client name..."
                   placeholderTextColor={theme.textMuted}
-                  onFocus={() => handleFocus("client")}
+                  onFocus={() => {
+                    setIsEditing(true);
+                    handleFocus("client");
+                  }}
                   onBlur={() => setIsEditing(false)}
                 />
 
@@ -2469,7 +2308,10 @@ export default function JobDetailScreen() {
                   placeholder="Phone number..."
                   placeholderTextColor={theme.textMuted}
                   keyboardType="phone-pad"
-                  onFocus={() => handleFocus("client")}
+                  onFocus={() => {
+                    setIsEditing(true);
+                    handleFocus("client");
+                  }}
                   onBlur={() => setIsEditing(false)}
                 />
 
@@ -2489,7 +2331,10 @@ export default function JobDetailScreen() {
                   placeholder="Gate codes, timing, special info..."
                   placeholderTextColor={theme.textMuted}
                   multiline
-                  onFocus={() => handleFocus("client")}
+                  onFocus={() => {
+                    setIsEditing(true);
+                    handleFocus("client");
+                  }}
                   onBlur={() => setIsEditing(false)}
                 />
               </SectionCard>
@@ -2544,7 +2389,10 @@ export default function JobDetailScreen() {
                         keyboardType="numeric"
                         placeholder="e.g. 4"
                         placeholderTextColor={theme.textMuted}
-                        onFocus={() => handleFocus("pricing")}
+                        onFocus={() => {
+                          setIsEditing(true);
+                          handleFocus("pricing");
+                        }}
                         onBlur={() => setIsEditing(false)}
                       />
                     </View>
@@ -2569,7 +2417,10 @@ export default function JobDetailScreen() {
                         keyboardType="numeric"
                         placeholder="e.g. 125"
                         placeholderTextColor={theme.textMuted}
-                        onFocus={() => handleFocus("pricing")}
+                        onFocus={() => {
+                          setIsEditing(true);
+                          handleFocus("pricing");
+                        }}
                         onBlur={() => setIsEditing(false)}
                       />
                     </View>
@@ -2595,7 +2446,10 @@ export default function JobDetailScreen() {
                       keyboardType="numeric"
                       placeholder="e.g. 300"
                       placeholderTextColor={theme.textMuted}
-                      onFocus={() => handleFocus("pricing")}
+                      onFocus={() => {
+                        setIsEditing(true);
+                        handleFocus("pricing");
+                      }}
                       onBlur={() => setIsEditing(false)}
                     />
                   </View>
@@ -2643,11 +2497,14 @@ export default function JobDetailScreen() {
                   Created: {new Date(job.createdAt).toLocaleString()}
                 </Text>
               </SectionCard>
+
+              {/* ✅ keep content from hiding behind sticky bar when NOT editing */}
+              {!isEditing ? <View style={{ height: STICKY_BAR_HEIGHT + 26 }} /> : null}
             </View>
           </TouchableWithoutFeedback>
         </ScrollView>
 
-        {/* ✅ STICKY ACTION BAR — HIDE WHILE EDITING */}
+        {/* ✅ STICKY ACTION BAR — HIDE WHILE EDITING (Add Job behavior) */}
         {!isEditing && (
           <View
             style={[
@@ -2803,7 +2660,6 @@ const styles = StyleSheet.create({
 
   detailsScroll: { flexGrow: 1, paddingHorizontal: 18 },
 
-  // HERO
   heroWrap: { marginBottom: 14 },
   heroBg: { height: 132, borderRadius: 22, overflow: "hidden", borderWidth: 1 },
   heroOverlay: {
@@ -2849,7 +2705,6 @@ const styles = StyleSheet.create({
     borderRadius: 999,
   },
 
-  // CARDS
   card: { borderRadius: 18, borderWidth: 1, padding: 14, marginBottom: 12 },
   cardActiveShadow: {
     shadowColor: "#000",
@@ -2910,7 +2765,6 @@ const styles = StyleSheet.create({
   },
   modalMeta: { fontSize: 11, marginTop: 8, fontFamily: "Athiti-Regular" },
 
-  // Assignment
   assignmentRow: { gap: 8 },
   assignmentLabel: { fontSize: 12, fontFamily: "Athiti-SemiBold" },
   assignmentPicker: {
@@ -2955,7 +2809,6 @@ const styles = StyleSheet.create({
   assignmentOptionCheck: { fontSize: 14, fontFamily: "Athiti-Bold" },
   assignmentHint: { marginTop: 10, fontSize: 11, fontFamily: "Athiti-Regular" },
 
-  // Photos
   photosRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -2999,7 +2852,6 @@ const styles = StyleSheet.create({
     fontFamily: "Athiti-Bold",
   },
 
-  // Pricing
   pricingCard: {
     borderRadius: 18,
     padding: 14,
@@ -3026,7 +2878,6 @@ const styles = StyleSheet.create({
   pricingInput: { marginBottom: 8 },
   pricingSingleRow: { marginTop: 6, marginBottom: 4 },
 
-  // Buttons
   modalDeleteButton: {
     marginTop: 10,
     borderRadius: 999,
@@ -3036,7 +2887,6 @@ const styles = StyleSheet.create({
   },
   modalDeleteText: { fontSize: 13, fontFamily: "Athiti-Bold" },
 
-  // Sticky bar
   stickyBar: {
     position: "absolute",
     left: 0,
@@ -3056,7 +2906,6 @@ const styles = StyleSheet.create({
   },
   stickyButtonText: { fontSize: 14, fontFamily: "Athiti-Bold" },
 
-  // Add Photo bottom sheet
   addPhotoMenuOverlay: {
     position: "absolute",
     left: 0,

@@ -3,6 +3,16 @@ import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as Clipboard from "expo-clipboard";
 import { useRouter } from "expo-router";
+import {
+  collection,
+  doc,
+  getDoc,
+  getDocs,
+  query,
+  serverTimestamp,
+  setDoc,
+  where,
+} from "firebase/firestore";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   Alert,
@@ -12,6 +22,7 @@ import {
   Linking,
   Platform,
   ScrollView,
+  Share,
   StyleSheet,
   Text,
   TextInput,
@@ -20,6 +31,7 @@ import {
   View,
 } from "react-native";
 import { usePreferences } from "../context/PreferencesContext";
+import { db } from "../firebaseConfig";
 
 const USER_STORAGE_KEY = "EJT_USER_SESSION";
 
@@ -35,12 +47,49 @@ const STORAGE_KEYS = {
   COMPANY_LICENSE: "EJT_COMPANY_LICENSE",
 };
 
+type Role = "owner" | "employee" | "independent";
+type Session = {
+  uid?: string;
+  email?: string | null;
+  name?: string;
+  role?: Role;
+  companyId?: string | null;
+  joinCode?: string | null;
+};
+
+function makeJoinCode() {
+  const digits = Math.floor(1000 + Math.random() * 9000);
+  return `TRAKTR-${digits}`;
+}
+
+async function generateUniqueJoinCode(): Promise<string> {
+  for (let i = 0; i < 10; i++) {
+    const code = makeJoinCode();
+    const qref = query(collection(db, "companies"), where("joinCode", "==", code));
+    const snap = await getDocs(qref);
+    if (snap.empty) return code;
+  }
+  return `TRAKTR-${Math.floor(100000 + Math.random() * 900000)}`;
+}
+
 export default function SettingsScreen() {
   const router = useRouter();
   const { theme } = usePreferences();
 
   // 🔒 Brand from locked theme
   const brand = theme.primaryButtonBackground;
+
+  // SESSION
+  const [session, setSession] = useState<Session | null>(null);
+
+  // COMPANY JOIN CODE (owner)
+  const [joinCode, setJoinCode] = useState<string | null>(null);
+  const [joinCodeLoading, setJoinCodeLoading] = useState(false);
+
+  const isOwner = session?.role === "owner";
+  const companyId = session?.companyId ?? null;
+  const canShowJoinCode = !!companyId; // any member with a companyId sees it
+
 
   // JOB DEFAULTS
   const [defaultHourlyRate, setDefaultHourlyRate] = useState("");
@@ -86,6 +135,23 @@ export default function SettingsScreen() {
     }
   };
 
+  const loadSession = useCallback(async () => {
+    try {
+      const stored = await AsyncStorage.getItem(USER_STORAGE_KEY);
+      if (!stored) {
+        setSession(null);
+        return;
+      }
+      try {
+        setSession(JSON.parse(stored));
+      } catch {
+        setSession(null);
+      }
+    } catch {
+      setSession(null);
+    }
+  }, []);
+
   const loadSettings = useCallback(async () => {
     try {
       const [
@@ -122,9 +188,37 @@ export default function SettingsScreen() {
     }
   }, []);
 
+  const loadJoinCodeFromFirestore = useCallback(async () => {
+    if (!companyId || !isOwner) {
+      setJoinCode(null);
+      return;
+    }
+    setJoinCodeLoading(true);
+    try {
+      const companyRef = doc(db, "companies", companyId);
+      const snap = await getDoc(companyRef);
+      if (!snap.exists()) {
+        setJoinCode(null);
+        return;
+      }
+      const data = snap.data() as any;
+      setJoinCode(data?.joinCode ?? null);
+    } catch (err) {
+      console.warn("Failed to load join code:", err);
+      setJoinCode(null);
+    } finally {
+      setJoinCodeLoading(false);
+    }
+  }, [companyId, isOwner]);
+
   useEffect(() => {
+    loadSession();
     loadSettings();
-  }, [loadSettings]);
+  }, [loadSession, loadSettings]);
+
+  useEffect(() => {
+    loadJoinCodeFromFirestore();
+  }, [loadJoinCodeFromFirestore]);
 
   const saveJobDefaults = async (hourly: string, client: string, notes: string) => {
     try {
@@ -214,7 +308,7 @@ export default function SettingsScreen() {
         return;
       }
 
-      const jobCount = parsed.length ?? 0;
+      const jobCount = (parsed as any[])?.length ?? 0;
 
       Alert.alert(
         "Confirm restore",
@@ -259,7 +353,12 @@ export default function SettingsScreen() {
   }, [defaultHourlyRate, defaultClientName, defaultNotesTemplate]);
 
   useEffect(() => {
-    saveBranding(companyName.trim(), companyPhone.trim(), companyEmail.trim(), companyLicense.trim());
+    saveBranding(
+      companyName.trim(),
+      companyPhone.trim(),
+      companyEmail.trim(),
+      companyLicense.trim()
+    );
   }, [companyName, companyPhone, companyEmail, companyLicense]);
 
   const handleSendFeedback = () => {
@@ -300,6 +399,58 @@ export default function SettingsScreen() {
   const dismissKeyboardAndEditing = () => {
     Keyboard.dismiss();
     setIsEditing(false);
+  };
+
+  const handleCopyJoinCode = async () => {
+    if (!joinCode) return;
+    await Clipboard.setStringAsync(joinCode);
+    Alert.alert("Copied ✅", "Join code copied to clipboard.");
+  };
+
+  const handleShareJoinCode = async () => {
+    if (!joinCode) return;
+    try {
+      await Share.share({
+        message: `Join my company on Traktr.\n\nJoin code: ${joinCode}`,
+      });
+    } catch {}
+  };
+
+  const handleGenerateJoinCode = async () => {
+    if (!companyId || !isOwner) return;
+
+    setJoinCodeLoading(true);
+    try {
+      const companyRef = doc(db, "companies", companyId);
+
+      const newCode = await generateUniqueJoinCode();
+
+      await setDoc(
+        companyRef,
+        { joinCode: newCode, updatedAt: serverTimestamp() },
+        { merge: true }
+      );
+
+      setJoinCode(newCode);
+
+      // also store in local session (optional UX)
+      const stored = await AsyncStorage.getItem(USER_STORAGE_KEY);
+      if (stored) {
+        try {
+          const parsed = JSON.parse(stored) as Session;
+          const next: Session = { ...(parsed ?? {}), joinCode: newCode };
+          await AsyncStorage.setItem(USER_STORAGE_KEY, JSON.stringify(next));
+          setSession(next);
+        } catch {}
+      }
+
+      Alert.alert("Join code created ✅", `New join code: ${newCode}`);
+    } catch (err) {
+      console.warn("Generate join code failed:", err);
+      Alert.alert("Error", "Could not generate join code. Try again.");
+    } finally {
+      setJoinCodeLoading(false);
+    }
   };
 
   return (
@@ -349,13 +500,162 @@ export default function SettingsScreen() {
           <ScrollView
             ref={scrollRef}
             style={{ flex: 1, backgroundColor: theme.screenBackground }}
-            contentContainerStyle={[styles.scrollContent, { paddingBottom: isEditing ? 8 : 24 }]}
+            contentContainerStyle={[
+              styles.scrollContent,
+              { paddingBottom: isEditing ? 8 : 24 },
+            ]}
             showsVerticalScrollIndicator={false}
             keyboardShouldPersistTaps="always"
             onScrollBeginDrag={dismissKeyboardAndEditing}
           >
-            <TouchableWithoutFeedback onPress={dismissKeyboardAndEditing} accessible={false}>
+            <TouchableWithoutFeedback
+              onPress={dismissKeyboardAndEditing}
+              accessible={false}
+            >
               <View>
+                {/* ✅ COMPANY INVITES (OWNER ONLY) */}
+                {canShowJoinCode ? (
+                  <View
+                    style={[
+                      styles.sectionCard,
+                      {
+                        backgroundColor: theme.cardBackground + "F2",
+                        borderColor: theme.cardBorder + "55",
+                        borderTopColor: brand + "AA",
+                        borderTopWidth: 2,
+                      },
+                    ]}
+                    onLayout={(e) =>
+                      registerSection("companyInvites", e.nativeEvent.layout.y)
+                    }
+                  >
+                    <View style={styles.sectionHeaderRow}>
+                      <View
+                        style={[
+                          styles.sectionIconBadge,
+                          {
+                            borderColor: brand + "80",
+                            backgroundColor: brand + "1A",
+                          },
+                        ]}
+                      >
+                        <Ionicons name="key-outline" size={16} color={brand} />
+                      </View>
+                      <Text style={[styles.sectionTitle, { color: brand }]}>
+                        Company Invites
+                      </Text>
+                    </View>
+
+                    <Text style={[styles.sectionSubtitle, { color: theme.textMuted }]}>
+                      Share this join code with employees so they can join your company.
+                    </Text>
+
+                    <View style={styles.inviteRow}>
+                      <View style={{ flex: 1 }}>
+                        <Text style={[styles.fieldLabel, { color: theme.textSecondary }]}>
+                          Join code
+                        </Text>
+                        <Text
+                          style={[
+                            styles.joinCodeText,
+                            { color: theme.textPrimary },
+                          ]}
+                          selectable
+                        >
+                          {joinCodeLoading
+                            ? "Loading…"
+                            : joinCode
+                            ? joinCode
+                            : "No join code set"}
+                        </Text>
+                        <Text style={[styles.fieldHelp, { color: theme.textMuted }]}>
+                          Employees enter this in “Join a company”.
+                        </Text>
+                      </View>
+                    </View>
+
+                    <View style={styles.inviteActionsRow}>
+                      <TouchableOpacity
+                        style={[
+                          styles.pillBtn,
+                          {
+                            backgroundColor: brand + "22",
+                            borderColor: brand + "AA",
+                            opacity: joinCode && !joinCodeLoading ? 1 : 0.5,
+                          },
+                        ]}
+                        onPress={handleCopyJoinCode}
+                        activeOpacity={0.85}
+                        disabled={!joinCode || joinCodeLoading}
+                      >
+                        <Ionicons name="copy-outline" size={16} color={brand} />
+                        <Text style={[styles.pillBtnText, { color: brand }]}>Copy</Text>
+                      </TouchableOpacity>
+
+                      <TouchableOpacity
+                        style={[
+                          styles.pillBtn,
+                          {
+                            backgroundColor: brand + "22",
+                            borderColor: brand + "AA",
+                            opacity: joinCode && !joinCodeLoading ? 1 : 0.5,
+                          },
+                        ]}
+                        onPress={handleShareJoinCode}
+                        activeOpacity={0.85}
+                        disabled={!joinCode || joinCodeLoading}
+                      >
+                        <Ionicons name="share-social-outline" size={16} color={brand} />
+                        <Text style={[styles.pillBtnText, { color: brand }]}>Share</Text>
+                      </TouchableOpacity>
+
+                      {!joinCode && isOwner ? (
+  <TouchableOpacity
+    style={[
+      styles.pillBtn,
+      {
+        backgroundColor: brand + "22",
+        borderColor: brand + "AA",
+        opacity: joinCodeLoading ? 0.6 : 1,
+      },
+    ]}
+    onPress={handleGenerateJoinCode}
+    activeOpacity={0.85}
+    disabled={joinCodeLoading}
+  >
+    <Ionicons name="sparkles-outline" size={16} color={brand} />
+    <Text style={[styles.pillBtnText, { color: brand }]}>Fix</Text>
+  </TouchableOpacity>
+) : null}
+
+
+                      <TouchableOpacity
+                        style={[
+                          styles.pillBtn,
+                          {
+                            backgroundColor: theme.inputBackground + "55",
+                            borderColor: theme.cardBorder + "55",
+                            opacity: joinCodeLoading ? 0.6 : 1,
+                          },
+                        ]}
+                        onPress={loadJoinCodeFromFirestore}
+                        activeOpacity={0.85}
+                        disabled={joinCodeLoading}
+                      >
+                        <Ionicons name="refresh-outline" size={16} color={theme.textMuted} />
+                        <Text style={[styles.pillBtnText, { color: theme.textMuted }]}>
+                          Refresh
+                        </Text>
+                      </TouchableOpacity>
+                    </View>
+
+                    <Text style={[styles.inviteHint, { color: theme.textMuted }]}>
+                      Tip: If you ever change your code in the future, old employees won’t be removed —
+                      they’ll still be in your company. This is only for joining.
+                    </Text>
+                  </View>
+                ) : null}
+
                 {/* JOB DEFAULTS */}
                 <View
                   style={[
@@ -367,7 +667,9 @@ export default function SettingsScreen() {
                       borderTopWidth: 2,
                     },
                   ]}
-                  onLayout={(e) => registerSection("jobDefaults", e.nativeEvent.layout.y)}
+                  onLayout={(e) =>
+                    registerSection("jobDefaults", e.nativeEvent.layout.y)
+                  }
                 >
                   <View style={styles.sectionHeaderRow}>
                     <View
@@ -378,7 +680,9 @@ export default function SettingsScreen() {
                     >
                       <Ionicons name="clipboard-outline" size={16} color={brand} />
                     </View>
-                    <Text style={[styles.sectionTitle, { color: brand }]}>Job Defaults</Text>
+                    <Text style={[styles.sectionTitle, { color: brand }]}>
+                      Job Defaults
+                    </Text>
                   </View>
                   <Text style={[styles.sectionSubtitle, { color: theme.textMuted }]}>
                     Pre-fill new jobs with your common values.
@@ -467,7 +771,9 @@ export default function SettingsScreen() {
                       borderTopWidth: 2,
                     },
                   ]}
-                  onLayout={(e) => registerSection("branding", e.nativeEvent.layout.y)}
+                  onLayout={(e) =>
+                    registerSection("branding", e.nativeEvent.layout.y)
+                  }
                 >
                   <View style={styles.sectionHeaderRow}>
                     <View
@@ -478,14 +784,18 @@ export default function SettingsScreen() {
                     >
                       <Ionicons name="briefcase-outline" size={16} color={brand} />
                     </View>
-                    <Text style={[styles.sectionTitle, { color: brand }]}>Company / Branding</Text>
+                    <Text style={[styles.sectionTitle, { color: brand }]}>
+                      Company / Branding
+                    </Text>
                   </View>
                   <Text style={[styles.sectionSubtitle, { color: theme.textMuted }]}>
                     Shown on PDF reports for clients and your boss.
                   </Text>
 
                   <View style={styles.fieldBlock}>
-                    <Text style={[styles.fieldLabel, { color: theme.textSecondary }]}>Company name</Text>
+                    <Text style={[styles.fieldLabel, { color: theme.textSecondary }]}>
+                      Company name
+                    </Text>
                     <TextInput
                       style={[
                         styles.fieldInput,
@@ -505,7 +815,9 @@ export default function SettingsScreen() {
                   </View>
 
                   <View style={styles.fieldBlock}>
-                    <Text style={[styles.fieldLabel, { color: theme.textSecondary }]}>Company phone</Text>
+                    <Text style={[styles.fieldLabel, { color: theme.textSecondary }]}>
+                      Company phone
+                    </Text>
                     <TextInput
                       style={[
                         styles.fieldInput,
@@ -526,7 +838,9 @@ export default function SettingsScreen() {
                   </View>
 
                   <View style={styles.fieldBlock}>
-                    <Text style={[styles.fieldLabel, { color: theme.textSecondary }]}>Company email</Text>
+                    <Text style={[styles.fieldLabel, { color: theme.textSecondary }]}>
+                      Company email
+                    </Text>
                     <TextInput
                       style={[
                         styles.fieldInput,
@@ -719,9 +1033,15 @@ export default function SettingsScreen() {
                     <Text style={[styles.sectionTitle, { color: brand }]}>About Traktr</Text>
                   </View>
 
-                  <TouchableOpacity style={styles.aboutRow} onPress={() => router.push("/app-info")} activeOpacity={0.8}>
+                  <TouchableOpacity
+                    style={styles.aboutRow}
+                    onPress={() => router.push("/app-info")}
+                    activeOpacity={0.8}
+                  >
                     <View style={{ flex: 1 }}>
-                      <Text style={[styles.rowTitle, { color: theme.textPrimary }]}>About this app</Text>
+                      <Text style={[styles.rowTitle, { color: theme.textPrimary }]}>
+                        About this app
+                      </Text>
                       <Text style={[styles.rowSubtitle, { color: theme.textMuted }]}>
                         See version, purpose, and future plans.
                       </Text>
@@ -729,9 +1049,15 @@ export default function SettingsScreen() {
                     <Text style={[styles.rowValue, { color: brand }]}>Details</Text>
                   </TouchableOpacity>
 
-                  <TouchableOpacity style={styles.aboutRow} onPress={handleSendFeedback} activeOpacity={0.8}>
+                  <TouchableOpacity
+                    style={styles.aboutRow}
+                    onPress={handleSendFeedback}
+                    activeOpacity={0.8}
+                  >
                     <View style={{ flex: 1 }}>
-                      <Text style={[styles.rowTitle, { color: theme.textPrimary }]}>Feedback</Text>
+                      <Text style={[styles.rowTitle, { color: theme.textPrimary }]}>
+                        Feedback
+                      </Text>
                       <Text style={[styles.rowSubtitle, { color: theme.textMuted }]}>
                         Share ideas or report issues.
                       </Text>
@@ -871,4 +1197,25 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   logoutText: { fontSize: 14, fontFamily: "Athiti-Bold" },
+
+  // ✅ Invite UI
+  inviteRow: { flexDirection: "row", alignItems: "flex-start", marginTop: 8 },
+  inviteActionsRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 10,
+    marginTop: 10,
+  },
+  pillBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+    borderRadius: 999,
+    borderWidth: 1,
+  },
+  pillBtnText: { fontSize: 12, fontFamily: "Athiti-SemiBold" },
+  joinCodeText: { fontSize: 18, fontFamily: "Athiti-Bold", letterSpacing: 1.2 },
+  inviteHint: { marginTop: 10, fontSize: 10.5, fontFamily: "Athiti-Regular", lineHeight: 14 },
 });

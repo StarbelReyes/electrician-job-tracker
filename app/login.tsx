@@ -12,6 +12,7 @@ import {
   KeyboardAvoidingView,
   LayoutAnimation,
   Platform,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -119,7 +120,7 @@ export default function LoginScreen() {
 
       const user = cred.user;
 
-      // ✅ Fetch Firestore profile (source of truth for role + company)
+      // Fetch Firestore profile (source of truth for role + company)
       let profile: UserProfile | null = null;
       try {
         const userRef = doc(db, "users", user.uid);
@@ -147,7 +148,6 @@ export default function LoginScreen() {
       };
 
       console.log("[LOGIN] saving session =>", session);
-
 
       LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
       await AsyncStorage.setItem(USER_STORAGE_KEY, JSON.stringify(session));
@@ -181,160 +181,162 @@ export default function LoginScreen() {
 
   const isBusy = loading;
 
-  const dismissKeyboard = () => {
-    Keyboard.dismiss();
-  };
-
   return (
     <KeyboardAvoidingView
       behavior={Platform.OS === "ios" ? "padding" : "height"}
       style={{ flex: 1, backgroundColor: theme.screenBackground }}
       keyboardVerticalOffset={0}
     >
-      <TouchableWithoutFeedback onPress={dismissKeyboard} accessible={false}>
-        <View style={[styles.screen, { backgroundColor: theme.screenBackground }]}>
-          {/* App header (match Home) */}
-          <View style={styles.headerRow}>
-            <Text style={[styles.appTitle, { color: theme.headerText }]}>
-              THE TRAKTR APP
-            </Text>
-          </View>
-
-          {/* Auth card */}
-          <View
-            style={[
-              styles.card,
-              {
-                backgroundColor: theme.cardBackground + "F2",
-                borderColor: theme.cardBorder + "77",
-              },
+      <TouchableWithoutFeedback onPress={Keyboard.dismiss} accessible={false}>
+        <View style={{ flex: 1, backgroundColor: theme.screenBackground }}>
+          <ScrollView
+            style={{ flex: 1 }}
+            contentContainerStyle={[
+              styles.screen,
+              { backgroundColor: theme.screenBackground },
             ]}
+            keyboardShouldPersistTaps="handled"
           >
-            <Text style={[styles.cardTitle, { color: theme.textPrimary }]}>
-              Welcome back
-            </Text>
-            <Text style={[styles.cardSubtitle, { color: theme.textMuted }]}>
-              Log in to keep tracking your jobs, notes, and photos.
-            </Text>
+            <View style={styles.headerRow}>
+              <Text style={[styles.appTitle, { color: theme.headerText }]}>
+                THE TRAKTR APP
+              </Text>
+            </View>
 
-            {/* Email */}
             <View
               style={[
-                styles.inputShell,
+                styles.card,
                 {
-                  backgroundColor: theme.inputBackground + "F2",
-                  borderColor: theme.inputBorder,
+                  backgroundColor: theme.cardBackground + "F2",
+                  borderColor: theme.cardBorder + "77",
                 },
               ]}
             >
-              <Ionicons
-                name="mail-outline"
-                size={18}
-                color={theme.textMuted}
-                style={{ marginRight: 8 }}
-              />
-              <TextInput
-                style={[styles.input, { color: theme.inputText }]}
-                placeholder="Email"
-                placeholderTextColor={theme.textMuted}
-                value={email}
-                onChangeText={setEmail}
-                autoCapitalize="none"
-                keyboardType="email-address"
-                returnKeyType="next"
-              />
-            </View>
+              <Text style={[styles.cardTitle, { color: theme.textPrimary }]}>
+                Welcome back
+              </Text>
+              <Text style={[styles.cardSubtitle, { color: theme.textMuted }]}>
+                Log in to keep tracking your jobs, notes, and photos.
+              </Text>
 
-            {/* Password */}
-            <View
-              style={[
-                styles.inputShell,
-                {
-                  backgroundColor: theme.inputBackground + "F2",
-                  borderColor: theme.inputBorder,
-                },
-              ]}
-            >
-              <Ionicons
-                name="lock-closed-outline"
-                size={18}
-                color={theme.textMuted}
-                style={{ marginRight: 8 }}
-              />
-              <TextInput
-                style={[styles.input, { color: theme.inputText }]}
-                placeholder="Password"
-                placeholderTextColor={theme.textMuted}
-                secureTextEntry={!showPassword}
-                value={password}
-                onChangeText={setPassword}
-                returnKeyType="done"
-                onSubmitEditing={handleLoginPress}
-              />
-              <TouchableOpacity
-                style={styles.eyeButton}
-                onPress={() => setShowPassword((prev) => !prev)}
-                activeOpacity={0.7}
-              >
-                <Ionicons
-                  name={showPassword ? "eye-off-outline" : "eye-outline"}
-                  size={20}
-                  color={theme.textMuted}
-                />
-              </TouchableOpacity>
-            </View>
-
-            {/* Forgot / Create links (grouped for clarity) */}
-            <View style={styles.linksRow}>
-              <TouchableOpacity
-                onPress={() => router.push("/forgot-password")}
-                disabled={isBusy}
-                activeOpacity={0.8}
-              >
-                <Text style={[styles.linkTextSmall, { color: theme.textMuted }]}>
-                  Forgot password?
-                </Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                onPress={() => router.push("/signup")}
-                disabled={isBusy}
-                activeOpacity={0.8}
-              >
-                <Text style={[styles.linkTextSmall, { color: theme.textMuted }]}>
-                  Create an account
-                </Text>
-              </TouchableOpacity>
-            </View>
-
-            {/* Login button */}
-            <Animated.View style={{ transform: [{ scale: buttonScale }] }}>
-              <TouchableOpacity
+              <View
                 style={[
-                  styles.primaryButton,
+                  styles.inputShell,
                   {
-                    backgroundColor: accentColor,
-                    opacity: isBusy ? 0.7 : 1,
-                    shadowColor: accentColor,
+                    backgroundColor: theme.inputBackground + "F2",
+                    borderColor: theme.inputBorder,
                   },
                 ]}
-                onPress={handleLoginPress}
-                onPressIn={() => animate(0.96)}
-                onPressOut={() => animate(1)}
-                activeOpacity={0.9}
-                disabled={isBusy}
               >
-                <Text
-                  style={[
-                    styles.primaryButtonText,
-                    { color: theme.primaryButtonText },
-                  ]}
+                <Ionicons
+                  name="mail-outline"
+                  size={18}
+                  color={theme.textMuted}
+                  style={{ marginRight: 8 }}
+                />
+                <TextInput
+                  style={[styles.input, { color: theme.inputText }]}
+                  placeholder="Email"
+                  placeholderTextColor={theme.textMuted}
+                  value={email}
+                  onChangeText={setEmail}
+                  autoCapitalize="none"
+                  keyboardType="email-address"
+                  returnKeyType="next"
+                  editable={!isBusy}
+                />
+              </View>
+
+              <View
+                style={[
+                  styles.inputShell,
+                  {
+                    backgroundColor: theme.inputBackground + "F2",
+                    borderColor: theme.inputBorder,
+                  },
+                ]}
+              >
+                <Ionicons
+                  name="lock-closed-outline"
+                  size={18}
+                  color={theme.textMuted}
+                  style={{ marginRight: 8 }}
+                />
+                <TextInput
+                  style={[styles.input, { color: theme.inputText }]}
+                  placeholder="Password"
+                  placeholderTextColor={theme.textMuted}
+                  secureTextEntry={!showPassword}
+                  value={password}
+                  onChangeText={setPassword}
+                  returnKeyType="done"
+                  onSubmitEditing={handleLoginPress}
+                  editable={!isBusy}
+                />
+                <TouchableOpacity
+                  style={styles.eyeButton}
+                  onPress={() => setShowPassword((prev) => !prev)}
+                  activeOpacity={0.7}
+                  disabled={isBusy}
                 >
-                  {loading ? "Logging in..." : "Continue"}
-                </Text>
-              </TouchableOpacity>
-            </Animated.View>
-          </View>
+                  <Ionicons
+                    name={showPassword ? "eye-off-outline" : "eye-outline"}
+                    size={20}
+                    color={theme.textMuted}
+                  />
+                </TouchableOpacity>
+              </View>
+
+              <View style={styles.linksRow}>
+                <TouchableOpacity
+                  onPress={() => router.push("/forgot-password")}
+                  disabled={isBusy}
+                  activeOpacity={0.8}
+                >
+                  <Text style={[styles.linkTextSmall, { color: theme.textMuted }]}>
+                    Forgot password?
+                  </Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  onPress={() => router.push("/signup")}
+                  disabled={isBusy}
+                  activeOpacity={0.8}
+                >
+                  <Text style={[styles.linkTextSmall, { color: theme.textMuted }]}>
+                    Create an account
+                  </Text>
+                </TouchableOpacity>
+              </View>
+
+              <Animated.View style={{ transform: [{ scale: buttonScale }] }}>
+                <TouchableOpacity
+                  style={[
+                    styles.primaryButton,
+                    {
+                      backgroundColor: accentColor,
+                      opacity: isBusy ? 0.7 : 1,
+                      shadowColor: accentColor,
+                    },
+                  ]}
+                  onPress={handleLoginPress}
+                  onPressIn={() => animate(0.96)}
+                  onPressOut={() => animate(1)}
+                  activeOpacity={0.9}
+                  disabled={isBusy}
+                >
+                  <Text
+                    style={[
+                      styles.primaryButtonText,
+                      { color: theme.primaryButtonText },
+                    ]}
+                  >
+                    {loading ? "Logging in..." : "Continue"}
+                  </Text>
+                </TouchableOpacity>
+              </Animated.View>
+            </View>
+          </ScrollView>
         </View>
       </TouchableWithoutFeedback>
     </KeyboardAvoidingView>
@@ -343,11 +345,10 @@ export default function LoginScreen() {
 
 const styles = StyleSheet.create({
   screen: {
-    flex: 1,
+    flexGrow: 1,
     paddingTop: 48,
     paddingHorizontal: 18,
   },
-
   headerRow: {
     marginBottom: 12,
   },
@@ -355,7 +356,6 @@ const styles = StyleSheet.create({
     fontSize: 22,
     fontWeight: "700",
   },
-
   card: {
     borderRadius: 22,
     borderWidth: 1,
@@ -376,7 +376,6 @@ const styles = StyleSheet.create({
     fontSize: 12,
     marginBottom: 16,
   },
-
   inputShell: {
     flexDirection: "row",
     alignItems: "center",
@@ -394,7 +393,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 6,
     paddingVertical: 4,
   },
-
   linksRow: {
     flexDirection: "row",
     justifyContent: "space-between",
@@ -407,7 +405,6 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     textDecorationLine: "underline",
   },
-
   primaryButton: {
     borderRadius: 999,
     paddingVertical: 14,
