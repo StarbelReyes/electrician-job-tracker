@@ -2,16 +2,7 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useRouter } from "expo-router";
 import { onAuthStateChanged } from "firebase/auth";
-import {
-  collection,
-  doc,
-  getDocs,
-  query,
-  serverTimestamp,
-  setDoc,
-  updateDoc,
-  where,
-} from "firebase/firestore";
+import { doc, getDoc, serverTimestamp, setDoc } from "firebase/firestore";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
@@ -68,7 +59,6 @@ export default function JoinCompanyScreen() {
     const unsub = onAuthStateChanged(firebaseAuth, (user) => {
       setUid(user?.uid ?? null);
       setAuthReady(true);
-      // ✅ No auto-redirect here (avoid loops)
     });
     return () => unsub();
   }, []);
@@ -93,51 +83,65 @@ export default function JoinCompanyScreen() {
   };
 
   const handleJoin = async () => {
-    if (!uid) {
+    const authedUid = uid ?? firebaseAuth.currentUser?.uid ?? null;
+
+    if (!authedUid) {
       Alert.alert("Not logged in", "Please log in first.");
       router.replace("/login");
       return;
     }
 
     const code = normalizeJoinCode(joinCode);
-    if (!code)
+    if (!code) {
       return Alert.alert("Missing code", "Enter your company join code.");
+    }
     if (loading) return;
 
     setLoading(true);
 
     try {
-      const qref = query(
-        collection(db, "companies"),
-        where("joinCode", "==", code)
-      );
-      const snap = await getDocs(qref);
+      // ✅ 1) Read joinCodes/{CODE} mapping
+      const joinRef = doc(db, "joinCodes", code);
+      const joinSnap = await getDoc(joinRef);
 
-      if (snap.empty) {
+      if (!joinSnap.exists()) {
         setLoading(false);
-        return Alert.alert(
-          "Not found",
-          "That join code was not found. Check the code and try again."
-        );
+        return Alert.alert("Not found", "That join code was not found. Check the code and try again.");
       }
 
-      const companyDoc = snap.docs[0];
-      const companyId = companyDoc.id;
-      const companyName = (companyDoc.data() as any)?.name ?? "Company";
+      const joinData = joinSnap.data() as any;
+      const companyId = joinData?.companyId as string | undefined;
+      const companyName = (joinData?.companyName as string | undefined) ?? "Company";
 
-      // companies/{companyId}/employees/{uid}
-      const employeeRef = doc(db, "companies", companyId, "employees", uid);
-      await setDoc(employeeRef, { joinedAt: serverTimestamp() }, { merge: true });
+      if (!companyId) {
+        setLoading(false);
+        return Alert.alert("Invalid code", "This join code is missing a company link.");
+      }
 
+      // ✅ 2) Create membership doc
+      const employeeRef = doc(db, "companies", companyId, "employees", authedUid);
+      await setDoc(
+        employeeRef,
+        {
+          joinedAt: serverTimestamp(),
+          joinCodeUsed: code,
+        },
+        { merge: false }
+      );
 
-      // users/{uid}
-      const userRef = doc(db, "users", uid);
-      await updateDoc(userRef, {
-        companyId,
-        updatedAt: serverTimestamp(),
-      });
+      // ✅ 3) Upsert users/{uid}
+      const userRef = doc(db, "users", authedUid);
+      await setDoc(
+        userRef,
+        {
+          companyId,
+          role: "employee",
+          updatedAt: serverTimestamp(),
+        },
+        { merge: true }
+      );
 
-      // update local session
+      // ✅ 4) Update AsyncStorage session
       const stored = await AsyncStorage.getItem(USER_STORAGE_KEY);
       let session: Session | null = null;
       if (stored) {
@@ -149,8 +153,8 @@ export default function JoinCompanyScreen() {
       }
 
       const nextSession: Session = {
-        ...(session ?? {}),
-        uid,
+        ...(session ?? { uid: authedUid }),
+        uid: authedUid,
         companyId,
         role: "employee",
       };
@@ -165,19 +169,15 @@ export default function JoinCompanyScreen() {
     } catch (err) {
       console.warn("Join company error:", err);
       setLoading(false);
-      Alert.alert("Error", "Could not join the company. Please try again.");
+      Alert.alert(
+        "Could not join",
+        "That join code may have expired. Ask your owner for the latest join code and try again."
+      );
     }
   };
 
   if (!isReady || !authReady) {
-    return (
-      <View
-        style={{
-          flex: 1,
-          backgroundColor: theme?.screenBackground ?? "#0F1115",
-        }}
-      />
-    );
+    return <View style={{ flex: 1, backgroundColor: theme?.screenBackground ?? "#0F1115" }} />;
   }
 
   return (
@@ -189,17 +189,12 @@ export default function JoinCompanyScreen() {
       <View style={{ flex: 1, backgroundColor: theme.screenBackground }}>
         <ScrollView
           style={{ flex: 1 }}
-          contentContainerStyle={[
-            styles.screen,
-            { backgroundColor: theme.screenBackground },
-          ]}
+          contentContainerStyle={[styles.screen, { backgroundColor: theme.screenBackground }]}
           keyboardShouldPersistTaps="always"
           keyboardDismissMode="on-drag"
         >
           <View style={styles.headerRow}>
-            <Text style={[styles.appTitle, { color: theme.headerText }]}>
-              THE TRAKTR APP
-            </Text>
+            <Text style={[styles.appTitle, { color: theme.headerText }]}>THE TRAKTR APP</Text>
           </View>
 
           <View
@@ -211,16 +206,12 @@ export default function JoinCompanyScreen() {
               },
             ]}
           >
-            <Text style={[styles.cardTitle, { color: theme.textPrimary }]}>
-              Join a company
-            </Text>
+            <Text style={[styles.cardTitle, { color: theme.textPrimary }]}>Join a company</Text>
             <Text style={[styles.cardSubtitle, { color: theme.textMuted }]}>
               Enter the join code your owner gave you (example: TRAKTR-5821).
             </Text>
 
-            <Text style={[styles.label, { color: theme.textMuted }]}>
-              Join code
-            </Text>
+            <Text style={[styles.label, { color: theme.textMuted }]}>Join code</Text>
             <View
               style={[
                 styles.inputShell,
@@ -258,18 +249,12 @@ export default function JoinCompanyScreen() {
                 activeOpacity={0.9}
                 disabled={!canSubmit}
               >
-                <Text
-                  style={[
-                    styles.primaryButtonText,
-                    { color: theme.primaryButtonText },
-                  ]}
-                >
+                <Text style={[styles.primaryButtonText, { color: theme.primaryButtonText }]}>
                   {loading ? "Joining..." : "Join company"}
                 </Text>
               </TouchableOpacity>
             </Animated.View>
 
-            {/* ✅ Help action */}
             <TouchableOpacity
               onPress={handleHelp}
               activeOpacity={0.85}
@@ -282,21 +267,16 @@ export default function JoinCompanyScreen() {
                 },
               ]}
             >
-              <Text style={[styles.helpText, { color: theme.textMuted }]}>
-                Need help? I don’t have a join code
-              </Text>
+              <Text style={[styles.helpText, { color: theme.textMuted }]}>Need help? I don’t have a join code</Text>
             </TouchableOpacity>
 
-            {/* ✅ Back to Login (always available) */}
             <TouchableOpacity
               onPress={() => router.replace("/login")}
               activeOpacity={0.85}
               disabled={loading}
               style={styles.backToLoginButton}
             >
-              <Text style={[styles.backToLoginText, { color: theme.textMuted }]}>
-                Back to login
-              </Text>
+              <Text style={[styles.backToLoginText, { color: theme.textMuted }]}>Back to login</Text>
             </TouchableOpacity>
           </View>
         </ScrollView>
@@ -306,18 +286,9 @@ export default function JoinCompanyScreen() {
 }
 
 const styles = StyleSheet.create({
-  screen: {
-    flexGrow: 1,
-    paddingTop: 48,
-    paddingHorizontal: 18,
-  },
-  headerRow: {
-    marginBottom: 12,
-  },
-  appTitle: {
-    fontSize: 22,
-    fontWeight: "700",
-  },
+  screen: { flexGrow: 1, paddingTop: 48, paddingHorizontal: 18 },
+  headerRow: { marginBottom: 12 },
+  appTitle: { fontSize: 22, fontWeight: "700" },
   card: {
     borderRadius: 22,
     borderWidth: 1,
@@ -329,20 +300,9 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 8 },
     elevation: 8,
   },
-  cardTitle: {
-    fontSize: 20,
-    fontWeight: "800",
-    marginBottom: 4,
-  },
-  cardSubtitle: {
-    fontSize: 12,
-    marginBottom: 16,
-  },
-  label: {
-    fontSize: 12,
-    fontWeight: "700",
-    marginBottom: 6,
-  },
+  cardTitle: { fontSize: 20, fontWeight: "800", marginBottom: 4 },
+  cardSubtitle: { fontSize: 12, marginBottom: 16 },
+  label: { fontSize: 12, fontWeight: "700", marginBottom: 6 },
   inputShell: {
     flexDirection: "row",
     alignItems: "center",
@@ -352,10 +312,7 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     marginBottom: 12,
   },
-  input: {
-    flex: 1,
-    fontSize: 14,
-  },
+  input: { flex: 1, fontSize: 14 },
   primaryButton: {
     marginTop: 4,
     borderRadius: 999,
@@ -367,11 +324,7 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 6 },
     elevation: 3,
   },
-  primaryButtonText: {
-    fontSize: 15,
-    fontWeight: "700",
-  },
-
+  primaryButtonText: { fontSize: 15, fontWeight: "700" },
   helpButton: {
     marginTop: 10,
     borderRadius: 14,
@@ -381,21 +334,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  helpText: {
-    fontSize: 13,
-    fontWeight: "700",
-    textDecorationLine: "underline",
-  },
-
-  backToLoginButton: {
-    marginTop: 10,
-    alignItems: "center",
-    justifyContent: "center",
-    paddingVertical: 10,
-  },
-  backToLoginText: {
-    fontSize: 13,
-    fontWeight: "700",
-    textDecorationLine: "underline",
-  },
+  helpText: { fontSize: 13, fontWeight: "700", textDecorationLine: "underline" },
+  backToLoginButton: { marginTop: 10, alignItems: "center", justifyContent: "center", paddingVertical: 10 },
+  backToLoginText: { fontSize: 13, fontWeight: "700", textDecorationLine: "underline" },
 });
