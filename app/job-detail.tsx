@@ -518,13 +518,17 @@ async function uploadJobPhotoToStorage(params: {
 }
 
 const normalizeStorageUrl = (u: string) => {
+  if (!u) return u;
+
   try {
-    const url = new URL(u);
-    return `${url.origin}${url.pathname}`;
+    // Strip query params safely (Firebase adds ?alt=media&token=...)
+    const qIndex = u.indexOf("?");
+    return qIndex === -1 ? u : u.slice(0, qIndex);
   } catch {
     return u;
   }
 };
+
 
 export default function JobDetailScreen() {
   const router = useRouter();
