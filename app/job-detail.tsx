@@ -36,7 +36,17 @@ import { usePreferences } from "../context/PreferencesContext";
 import { firebaseAuth } from "../firebaseConfig";
 
 // ✅ Firestore
-import { collection, doc, getDoc, getDocs, limit, orderBy, query, updateDoc } from "firebase/firestore";
+import {
+  collection,
+  doc,
+  getDoc,
+  getDocs,
+  limit,
+  orderBy,
+  query,
+  updateDoc,
+  where,
+} from "firebase/firestore";
 import { db, storage } from "../firebaseConfig";
 
 // ✅ Storage
@@ -79,8 +89,9 @@ type Job = {
   hourlyRate?: number;
   materialCost?: number;
 
-  // ✅ assignment (Option B)
-  assignedToUid?: string | null;
+  // ✅ assignment
+  assignedToUid?: string | null; // legacy single (keep for older screens/queries)
+  assignedToUids?: string[]; // ✅ NEW multi-assign
 };
 
 type Role = "owner" | "employee" | "independent";
@@ -94,9 +105,10 @@ type Session = {
 
 type EmployeeRecord = {
   uid: string;
-  name?: string;
-  email?: string;
-  role?: string;
+  displayName?: string | null;
+  email?: string | null;
+  photoURL?: string | null;
+  role?: string | null;
 };
 
 type WorkTicketListItem = {
@@ -109,8 +121,6 @@ type WorkTicketListItem = {
   laborHours?: number;
   workPerformed?: string;
 };
-
-
 
 const STORAGE_KEYS = {
   JOBS: "EJT_JOBS",
@@ -136,13 +146,7 @@ const THUMB_SIZE =
 const STICKY_BAR_HEIGHT = 86;
 const SCROLL_OFFSET = 80;
 
-type ActiveSectionKey =
-  | "jobInfo"
-  | "client"
-  | "pricing"
-  | "photos"
-  | "assignment"
-  | null;
+type ActiveSectionKey = "jobInfo" | "client" | "pricing" | "photos" | "assignment" | null;
 
 // ---------------- HELPERS ----------------
 
@@ -173,8 +177,7 @@ const normalizeCreatedAt = (value: any): string => {
 const safeHtml = (value: string) =>
   value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
-const withLineBreaks = (value: string) =>
-  safeHtml(value).replace(/\n/g, "<br />");
+const withLineBreaks = (value: string) => safeHtml(value).replace(/\n/g, "<br />");
 
 const isHttpUrl = (u: string) => /^https?:\/\//i.test(u);
 
@@ -223,8 +226,7 @@ const guessMimeFromUri = (uri: string): string => {
   return "image/jpeg";
 };
 
-const base64ToDataUrl = (base64: string, mime: string) =>
-  `data:${mime};base64,${base64}`;
+const base64ToDataUrl = (base64: string, mime: string) => `data:${mime};base64,${base64}`;
 
 async function uriToDataUrl(uri: string): Promise<string | null> {
   try {
@@ -305,9 +307,7 @@ function JobPhotosSection({
 }: JobPhotosSectionProps) {
   return (
     <View>
-      <Text style={[styles.sectionTitle, { color: theme.textSecondary }]}>
-        Photos
-      </Text>
+      <Text style={[styles.sectionTitle, { color: theme.textSecondary }]}>Photos</Text>
 
       <View style={styles.photosRow}>
         <TouchableOpacity
@@ -321,9 +321,7 @@ function JobPhotosSection({
           onPress={onPressAddPhoto}
           activeOpacity={0.9}
         >
-          <Text style={[styles.addPhotoButtonText, { color: theme.textPrimary }]}>
-            + Add Photo
-          </Text>
+          <Text style={[styles.addPhotoButtonText, { color: theme.textPrimary }]}>+ Add Photo</Text>
         </TouchableOpacity>
       </View>
 
@@ -340,10 +338,7 @@ function JobPhotosSection({
               </TouchableOpacity>
 
               <TouchableOpacity
-                style={[
-                  styles.photoRemoveButton,
-                  disableRemove ? { opacity: 0.5 } : null,
-                ]}
+                style={[styles.photoRemoveButton, disableRemove ? { opacity: 0.5 } : null]}
                 disabled={!!disableRemove}
                 onPress={() => onRemovePhoto(uri)}
               >
@@ -403,22 +398,16 @@ function SectionCard({
             },
           ]}
         >
-          <Text style={[styles.cardIconText, { color: theme.textPrimary }]}>
-            {icon ?? "•"}
-          </Text>
+          <Text style={[styles.cardIconText, { color: theme.textPrimary }]}>{icon ?? "•"}</Text>
         </View>
 
         <View style={{ flex: 1 }}>
-          <Text style={[styles.cardTitle, { color: theme.textSecondary }]}>
-            {title}
-          </Text>
+          <Text style={[styles.cardTitle, { color: theme.textSecondary }]}>{title}</Text>
 
           {!!subtitle && (
             <View style={{ height: 16 }}>
               {isActive ? (
-                <Text style={[styles.cardSubtitle, { color: theme.textMuted }]}>
-                  {subtitle}
-                </Text>
+                <Text style={[styles.cardSubtitle, { color: theme.textMuted }]}>{subtitle}</Text>
               ) : null}
             </View>
           )}
@@ -434,9 +423,7 @@ function SectionCard({
               },
             ]}
           >
-            <Text style={[styles.cardActivePillText, { color: theme.textPrimary }]}>
-              Editing
-            </Text>
+            <Text style={[styles.cardActivePillText, { color: theme.textPrimary }]}>Editing</Text>
           </View>
         ) : null}
       </View>
@@ -570,7 +557,11 @@ export default function JobDetailScreen() {
   const [companyLicense, setCompanyLicense] = useState("");
 
   const [employees, setEmployees] = useState<EmployeeRecord[]>([]);
-  const [assignedToUid, setAssignedToUid] = useState<string>("");
+
+  // ✅ MULTI ASSIGN
+  const [assignedToUids, setAssignedToUids] = useState<string[]>([]);
+  const primaryAssignedUid = assignedToUids[0] || "";
+
   const [isAssignMenuVisible, setIsAssignMenuVisible] = useState(false);
 
   const [isUploadingPhotos, setIsUploadingPhotos] = useState(false);
@@ -617,17 +608,13 @@ export default function JobDetailScreen() {
       if (isEmployee) return;
 
       try {
-        const [
-          savedCompanyName,
-          savedCompanyPhone,
-          savedCompanyEmail,
-          savedCompanyLicense,
-        ] = await Promise.all([
-          AsyncStorage.getItem(BRANDING_KEYS.COMPANY_NAME),
-          AsyncStorage.getItem(BRANDING_KEYS.COMPANY_PHONE),
-          AsyncStorage.getItem(BRANDING_KEYS.COMPANY_EMAIL),
-          AsyncStorage.getItem(BRANDING_KEYS.COMPANY_LICENSE),
-        ]);
+        const [savedCompanyName, savedCompanyPhone, savedCompanyEmail, savedCompanyLicense] =
+          await Promise.all([
+            AsyncStorage.getItem(BRANDING_KEYS.COMPANY_NAME),
+            AsyncStorage.getItem(BRANDING_KEYS.COMPANY_PHONE),
+            AsyncStorage.getItem(BRANDING_KEYS.COMPANY_EMAIL),
+            AsyncStorage.getItem(BRANDING_KEYS.COMPANY_LICENSE),
+          ]);
 
         if (savedCompanyName) setCompanyName(savedCompanyName);
         if (savedCompanyPhone) setCompanyPhone(savedCompanyPhone);
@@ -645,8 +632,7 @@ export default function JobDetailScreen() {
   const [isLoading, setIsLoading] = useState(true);
 
   const [workTickets, setWorkTickets] = useState<WorkTicketListItem[]>([]);
-const [loadingTickets, setLoadingTickets] = useState(false);
-
+  const [loadingTickets, setLoadingTickets] = useState(false);
 
   const [editTitle, setEditTitle] = useState("");
   const [editAddress, setEditAddress] = useState("");
@@ -758,8 +744,7 @@ const [loadingTickets, setLoadingTickets] = useState(false);
   };
 
   const totalAmount =
-    parseNumber(laborHours) * parseNumber(hourlyRate) +
-    parseNumber(materialCost);
+    parseNumber(laborHours) * parseNumber(hourlyRate) + parseNumber(materialCost);
 
   const persistJobs = async (updatedJobs: Job[]) => {
     await AsyncStorage.setItem(STORAGE_KEYS.JOBS, JSON.stringify(updatedJobs));
@@ -815,6 +800,19 @@ const [loadingTickets, setLoadingTickets] = useState(false);
               ? loadedFiles
               : loadedUris.map((u) => ({ url: String(u), path: "" }));
 
+          // ✅ MULTI ASSIGN LOAD (supports new + legacy)
+          const loadedAssignedToUids: string[] = Array.isArray(data.assignedToUids)
+            ? data.assignedToUids.map((x: any) => String(x)).filter(Boolean)
+            : [];
+
+          const legacyUid =
+            data.assignedToUid === null || data.assignedToUid === undefined
+              ? ""
+              : String(data.assignedToUid);
+
+          const effectiveAssignedToUids =
+            loadedAssignedToUids.length > 0 ? loadedAssignedToUids : legacyUid ? [legacyUid] : [];
+
           const found: Job = {
             id: snap.id,
             title: String(data.title ?? ""),
@@ -835,10 +833,8 @@ const [loadingTickets, setLoadingTickets] = useState(false);
             hourlyRate: typeof data.hourlyRate === "number" ? data.hourlyRate : 0,
             materialCost: typeof data.materialCost === "number" ? data.materialCost : 0,
 
-            assignedToUid:
-              data.assignedToUid === null || data.assignedToUid === undefined
-                ? null
-                : String(data.assignedToUid),
+            assignedToUid: effectiveAssignedToUids[0] || null,
+            assignedToUids: effectiveAssignedToUids,
           };
 
           setJob(found);
@@ -859,10 +855,11 @@ const [loadingTickets, setLoadingTickets] = useState(false);
           setPhotoUris(effectiveFiles.map((f) => f.url));
           setPhotoBase64s([]);
 
-          setAssignedToUid(found.assignedToUid || "");
+          setAssignedToUids(found.assignedToUids || (found.assignedToUid ? [found.assignedToUid] : []));
           return;
         }
 
+        // ✅ LOCAL MODE
         const jobsJson = await AsyncStorage.getItem(STORAGE_KEYS.JOBS);
         if (!jobsJson) {
           setJob(null);
@@ -892,7 +889,15 @@ const [loadingTickets, setLoadingTickets] = useState(false);
         setPhotoUris(found.photoUris || []);
         setPhotoBase64s(found.photoBase64s || []);
 
-        setAssignedToUid(found.assignedToUid || "");
+        // ✅ LOCAL: new + legacy
+        const localAssigned =
+          Array.isArray(found.assignedToUids) && found.assignedToUids.length
+            ? found.assignedToUids
+            : found.assignedToUid
+            ? [found.assignedToUid]
+            : [];
+
+        setAssignedToUids(localAssigned.filter(Boolean) as string[]);
       } catch (e) {
         console.warn("Failed to load job:", e);
         setJob(null);
@@ -905,29 +910,77 @@ const [loadingTickets, setLoadingTickets] = useState(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id, isCloudMode, companyId, sessionLoaded]);
 
-  // ✅ Owner only: load employees to assign
+  // ✅ Owner only: load employees to assign (supports BOTH schemas)
+  // - NEW schema: users (companyId + role=employee)
+  // - OLD schema: companies/{companyId}/employees
   useEffect(() => {
     const loadEmployees = async () => {
       if (!isOwner) return;
       if (!companyId) return;
 
       try {
-        const ref = collection(db, "companies", companyId, "employees");
-        const snap = await getDocs(ref);
+        const byUid = new Map<string, { uid: string; displayName: string; email: string; photoURL?: string }>();
 
-        const list: EmployeeRecord[] = snap.docs.map((d) => {
-          const data: any = d.data() ?? {};
-          const uid = String(data.uid ?? d.id);
-          return {
-            uid,
-            name: data.name ? String(data.name) : undefined,
-            email: data.email ? String(data.email) : undefined,
-            role: data.role ? String(data.role) : undefined,
-          };
-        });
+        // 1) OLD: companies/{companyId}/employees
+        try {
+          const empRef = collection(db, "companies", companyId, "employees");
+          const empSnap = await getDocs(empRef);
 
-        const filtered = list.filter((e) => (e.role ? e.role !== "owner" : true));
-        setEmployees(filtered);
+          empSnap.docs.forEach((d) => {
+            const data: any = d.data() ?? {};
+            const uid = String(data.uid || d.id).trim();
+            if (!uid) return;
+
+            const name = String(data.name || data.displayName || "").trim();
+            const email = String(data.email || "").trim();
+            const photoURL = String(data.photoURL || "").trim();
+
+            byUid.set(uid, { uid, displayName: name, email, photoURL: photoURL || undefined });
+          });
+        } catch (e) {
+          console.warn("Failed to load companies/{companyId}/employees:", e);
+        }
+
+        // 2) NEW: users where companyId == X AND role == employee
+        try {
+          const usersRef = collection(db, "users");
+          const qy = query(usersRef, where("companyId", "==", companyId), where("role", "==", "employee"));
+          const userSnap = await getDocs(qy);
+
+          userSnap.docs.forEach((d) => {
+            const data: any = d.data() ?? {};
+            const uid = String(data.uid || d.id).trim();
+            if (!uid) return;
+
+            const name = String(data.name || data.displayName || "").trim();
+            const email = String(data.email || "").trim();
+            const photoURL = String(data.photoURL || "").trim();
+
+            const existing = byUid.get(uid);
+            if (!existing) byUid.set(uid, { uid, displayName: name, email, photoURL: photoURL || undefined });
+            else {
+              byUid.set(uid, {
+                uid,
+                displayName: existing.displayName || name,
+                email: existing.email || email,
+                photoURL: existing.photoURL || (photoURL || undefined),
+              });
+            }
+          });
+        } catch (e) {
+          console.warn("Failed to load users employees:", e);
+        }
+
+        const list = Array.from(byUid.values())
+          .sort((a, b) => (a.displayName || a.email || a.uid).localeCompare(b.displayName || b.email || b.uid))
+          .map((x) => ({
+            uid: x.uid,
+            displayName: x.displayName,
+            email: x.email,
+            photoURL: x.photoURL || null,
+          }));
+
+        setEmployees(list);
       } catch (e) {
         console.warn("Failed to load employees:", e);
         setEmployees([]);
@@ -943,14 +996,14 @@ const [loadingTickets, setLoadingTickets] = useState(false);
       if (!isCloudMode) return;
       if (!companyId) return;
       if (!job?.id) return;
-  
+
       try {
         setLoadingTickets(true);
-  
+
         const col = collection(db, "companies", companyId, "jobs", job.id, "workTickets");
         const qy = query(col, orderBy("createdAt", "desc"), limit(20));
         const snap = await getDocs(qy);
-  
+
         const items: WorkTicketListItem[] = snap.docs.map((d) => {
           const t: any = d.data() ?? {};
           return {
@@ -964,7 +1017,7 @@ const [loadingTickets, setLoadingTickets] = useState(false);
             workPerformed: t.workPerformed ? String(t.workPerformed) : "",
           };
         });
-  
+
         setWorkTickets(items);
       } catch (e) {
         console.warn("Failed to load work tickets:", e);
@@ -973,28 +1026,31 @@ const [loadingTickets, setLoadingTickets] = useState(false);
         setLoadingTickets(false);
       }
     };
-  
+
     loadTickets();
   }, [isOwner, isCloudMode, companyId, job?.id]);
-  
 
+  // ✅ MULTI label
   const assignedLabel = useMemo(() => {
-    if (!assignedToUid) return "Unassigned";
-    const found = employees.find((e) => e.uid === assignedToUid);
-    if (!found) return "Assigned";
-    return found.name?.trim()
-      ? found.name.trim()
-      : found.email?.trim()
-      ? found.email.trim()
-      : "Assigned";
-  }, [assignedToUid, employees]);
+    if (!assignedToUids.length) return "Unassigned";
+
+    const names = assignedToUids
+      .map((uid) => employees.find((e) => e.uid === uid))
+      .filter(Boolean)
+      .map((e: any) => String(e.displayName || e.name || e.email || "Employee").trim())
+      .filter(Boolean);
+
+    if (!names.length) return `Assigned (${assignedToUids.length})`;
+    if (names.length === 1) return names[0];
+    return `${names[0]} + ${names.length - 1} more`;
+  }, [assignedToUids, employees]);
 
   const employeeAssignedLabel = useMemo(() => {
-    if (!assignedToUid) return "Unassigned";
-    if (session?.uid && assignedToUid === session.uid) return "You";
-    const short = assignedToUid.slice(0, 6) + "…" + assignedToUid.slice(-4);
-    return `Assigned (${short})`;
-  }, [assignedToUid, session?.uid]);
+    if (!assignedToUids.length) return "Unassigned";
+    if (session?.uid && assignedToUids.includes(session.uid)) return "You (Assigned)";
+    const short = assignedToUids[0].slice(0, 6) + "…" + assignedToUids[0].slice(-4);
+    return assignedToUids.length === 1 ? `Assigned (${short})` : `Assigned (${assignedToUids.length})`;
+  }, [assignedToUids, session?.uid]);
 
   const getCloudJobRef = () => {
     if (!companyId) return null;
@@ -1002,15 +1058,21 @@ const [loadingTickets, setLoadingTickets] = useState(false);
     return doc(db, "companies", companyId, "jobs", job.id);
   };
 
-  const updateAssignmentFirestore = async (nextUid: string) => {
+  // ✅ MULTI write (also writes legacy single)
+  const updateAssignmentFirestore = async (nextUids: string[]) => {
     const jobRef = getCloudJobRef();
     if (!jobRef) {
       Alert.alert("Missing company/job", "Could not locate the job in cloud.");
       return;
     }
 
+    const clean = (nextUids || []).map(String).filter(Boolean);
+
     try {
-      await updateDoc(jobRef, { assignedToUid: nextUid || null });
+      await updateDoc(jobRef, {
+        assignedToUids: clean,
+        assignedToUid: clean[0] || null, // legacy compatibility
+      });
     } catch (e) {
       console.warn("Failed to update assignment:", e);
       Alert.alert("Error", "Could not update assignment. Try again.");
@@ -1018,20 +1080,25 @@ const [loadingTickets, setLoadingTickets] = useState(false);
     }
   };
 
-  const handleAssignTo = async (nextUid: string) => {
+  const applyAssignment = async (nextUids: string[]) => {
     if (!job) return;
 
     handleFocus("assignment");
 
     LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-    setAssignedToUid(nextUid || "");
+    setAssignedToUids(nextUids);
     setIsAssignMenuVisible(false);
 
-    const updatedJob: Job = { ...job, assignedToUid: nextUid ? nextUid : null };
+    const updatedJob: Job = {
+      ...job,
+      assignedToUids: nextUids,
+      assignedToUid: nextUids[0] || null,
+    };
+
     setJob(updatedJob);
 
     if (isCloudMode) {
-      await updateAssignmentFirestore(nextUid);
+      await updateAssignmentFirestore(nextUids);
       return;
     }
 
@@ -1043,6 +1110,22 @@ const [loadingTickets, setLoadingTickets] = useState(false);
     } catch (e) {
       console.warn("Failed to persist assignment locally:", e);
     }
+  };
+
+  const toggleAssignUid = async (uid: string) => {
+    const cleanUid = String(uid || "").trim();
+
+    // uid="" means clear all
+    if (!cleanUid) {
+      await applyAssignment([]);
+      return;
+    }
+
+    const next = assignedToUids.includes(cleanUid)
+      ? assignedToUids.filter((x) => x !== cleanUid)
+      : [...assignedToUids, cleanUid];
+
+    await applyAssignment(next);
   };
 
   const handleSaveJobEdits = async () => {
@@ -1071,7 +1154,9 @@ const [loadingTickets, setLoadingTickets] = useState(false);
 
       photoBase64s: isCloudMode ? [] : photoBase64s,
 
-      assignedToUid: assignedToUid ? assignedToUid : null,
+      // ✅ multi + legacy
+      assignedToUids: assignedToUids,
+      assignedToUid: assignedToUids[0] ? assignedToUids[0] : null,
     };
 
     try {
@@ -1099,7 +1184,9 @@ const [loadingTickets, setLoadingTickets] = useState(false);
           photoFiles: photoFiles,
           photoUris: photoFiles.map((f) => f.url),
 
-          assignedToUid: updated.assignedToUid || null,
+          // ✅ multi + legacy
+          assignedToUids: assignedToUids,
+          assignedToUid: assignedToUids[0] || null,
         });
 
         setJob(updated);
@@ -1432,7 +1519,9 @@ const [loadingTickets, setLoadingTickets] = useState(false);
             if (file?.path) {
               await deleteObject(storageRef(storage, file.path));
             } else {
-              console.warn("Cloud photo removed but no storage path was available (legacy photoUris).");
+              console.warn(
+                "Cloud photo removed but no storage path was available (legacy photoUris)."
+              );
             }
 
             Alert.alert("Removed", "Photo removed.");
@@ -1466,6 +1555,7 @@ const [loadingTickets, setLoadingTickets] = useState(false);
     return false;
   };
 
+  // ✅ PDF share functions unchanged (you already have them working)
   const handleShareFullReport = async () => {
     if (!job) return;
     if (guardShareWhileUploading()) return;
@@ -1478,7 +1568,6 @@ const [loadingTickets, setLoadingTickets] = useState(false);
       const createdAt = new Date(job.createdAt).toLocaleString();
       const statusLabel = isDone ? "Done" : "Open";
 
-      // ✅ Employee: branding keys are never loaded (stay empty)
       const brandName = companyName.trim();
       const brandPhone = companyPhone.trim();
       const brandEmail = companyEmail.trim();
@@ -1659,9 +1748,9 @@ const [loadingTickets, setLoadingTickets] = useState(false);
   };
 
   const handleShareClientReport = async () => {
-    // ✅ unchanged logic; employee branding remains empty automatically
     if (!job) return;
     if (guardShareWhileUploading()) return;
+
     try {
       const laborNum = parseNumber(laborHours);
       const rateNum = parseNumber(hourlyRate);
@@ -1747,14 +1836,10 @@ const [loadingTickets, setLoadingTickets] = useState(false);
               <div class="section">
                 <h2>Client Info</h2>
                 <div class="label">Client Name</div>
-                <div class="value">${
-                  editClientName.trim() ? safeHtml(editClientName.trim()) : "Not set"
-                }</div>
+                <div class="value">${editClientName.trim() ? safeHtml(editClientName.trim()) : "Not set"}</div>
 
                 <div class="label">Client Phone</div>
-                <div class="value">${
-                  editClientPhone.trim() ? safeHtml(editClientPhone.trim()) : "Not set"
-                }</div>
+                <div class="value">${editClientPhone.trim() ? safeHtml(editClientPhone.trim()) : "Not set"}</div>
               </div>
 
               <div class="section">
@@ -1886,10 +1971,7 @@ const [loadingTickets, setLoadingTickets] = useState(false);
         <ScrollView
           ref={scrollRef}
           style={{ flex: 1, backgroundColor: theme.screenBackground }}
-          contentContainerStyle={[
-            styles.detailsScroll,
-            { paddingBottom: isEditing ? 8 : 24 },
-          ]}
+          contentContainerStyle={[styles.detailsScroll, { paddingBottom: isEditing ? 8 : 24 }]}
           keyboardShouldPersistTaps="always"
           showsVerticalScrollIndicator={false}
           onScrollBeginDrag={dismissKeyboardAndEditing}
@@ -1928,10 +2010,7 @@ const [loadingTickets, setLoadingTickets] = useState(false);
                       {editTitle || job.title}
                     </Text>
 
-                    <Text
-                      numberOfLines={2}
-                      style={[styles.heroSubtitle, { color: theme.textSecondary }]}
-                    >
+                    <Text numberOfLines={2} style={[styles.heroSubtitle, { color: theme.textSecondary }]}>
                       {editAddress || job.address}
                     </Text>
 
@@ -2023,9 +2102,7 @@ const [loadingTickets, setLoadingTickets] = useState(false);
                   onLayout={(y) => registerSection("assignment", y)}
                 >
                   <View style={styles.assignmentRow}>
-                    <Text style={[styles.assignmentLabel, { color: theme.textMuted }]}>
-                      Assigned to
-                    </Text>
+                    <Text style={[styles.assignmentLabel, { color: theme.textMuted }]}>Assigned to</Text>
 
                     <View
                       style={[
@@ -2066,47 +2143,132 @@ const [loadingTickets, setLoadingTickets] = useState(false);
                 </SectionCard>
               ) : null}
 
-              {/* ✅ OWNER ONLY: ASSIGNMENT CARD */}
+              {/* ✅ OWNER ONLY: MULTI-ASSIGNMENT CARD */}
               {isOwner && isCloudMode ? (
                 <SectionCard
                   theme={theme}
                   accentColor={accentColor}
                   title="Assignment"
-                  subtitle="Assign this job to an employee"
+                  subtitle="Assign this job to one or more employees"
                   icon="🧑‍🔧"
                   isActive={cardIsActive("assignment")}
                   isDimmed={cardIsDimmed("assignment")}
                   onLayout={(y) => registerSection("assignment", y)}
                 >
-                  <View style={styles.assignmentRow}>
-                    <Text style={[styles.assignmentLabel, { color: theme.textMuted }]}>
-                      Assigned to
-                    </Text>
+                  {/* Top row */}
+                  <View style={styles.assignmentTopRow}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={[styles.assignmentLabel, { color: theme.textMuted }]}>Assigned</Text>
 
-                    <TouchableOpacity
-                      style={[
-                        styles.assignmentPicker,
-                        {
-                          backgroundColor: theme.inputBackground,
-                          borderColor: isAssignMenuVisible ? accentColor : theme.inputBorder,
-                        },
-                      ]}
-                      activeOpacity={0.9}
-                      onPress={() => {
-                        setIsEditing(true);
-                        handleFocus("assignment");
-                        setIsAssignMenuVisible((p) => !p);
-                      }}
-                    >
-                      <Text style={[styles.assignmentPickerText, { color: theme.textPrimary }]}>
-                        {assignedLabel}
-                      </Text>
-                      <Text style={[styles.assignmentPickerChevron, { color: theme.textMuted }]}>
-                        ▾
-                      </Text>
-                    </TouchableOpacity>
+                      <View
+                        style={[
+                          styles.assignedPill,
+                          {
+                            borderColor: assignedToUids.length ? "#16a34a" : theme.cardBorder,
+                            backgroundColor: assignedToUids.length
+                              ? "rgba(22,163,74,0.12)"
+                              : theme.cardSecondaryBackground,
+                          },
+                        ]}
+                      >
+                        <Text
+                          style={[
+                            styles.assignedPillText,
+                            { color: assignedToUids.length ? "#22c55e" : theme.textMuted },
+                          ]}
+                        >
+                          {assignedToUids.length ? `${assignedToUids.length} ASSIGNED` : "UNASSIGNED"}
+                        </Text>
+                      </View>
+                    </View>
+
+                    {/* Avatar preview: primary (first assigned) */}
+                    <View style={styles.assignedPreview}>
+                      {(() => {
+                        if (!primaryAssignedUid) {
+                          return (
+                            <View
+                              style={[
+                                styles.avatarCircle,
+                                {
+                                  backgroundColor: theme.cardSecondaryBackground,
+                                  borderColor: theme.cardBorder,
+                                },
+                              ]}
+                            >
+                              <Text style={[styles.avatarInitials, { color: theme.textMuted }]}>—</Text>
+                            </View>
+                          );
+                        }
+
+                        const found = employees.find((e) => e.uid === primaryAssignedUid);
+                        const display =
+                          (found as any)?.displayName ||
+                          (found as any)?.name ||
+                          (found as any)?.email ||
+                          "Employee";
+
+                        const name = String(display).trim();
+                        const initials = name
+                          .split(" ")
+                          .filter(Boolean)
+                          .slice(0, 2)
+                          .map((p) => p[0]?.toUpperCase())
+                          .join("");
+
+                        const photoURL =
+                          (found as any)?.photoURL && String((found as any).photoURL).trim()
+                            ? String((found as any).photoURL).trim()
+                            : null;
+
+                        if (photoURL) {
+                          return (
+                            <View style={[styles.avatarCircle, { borderColor: accentColor }]}>
+                              <Image source={{ uri: photoURL }} style={styles.avatarImage} />
+                            </View>
+                          );
+                        }
+
+                        return (
+                          <View
+                            style={[
+                              styles.avatarCircle,
+                              { backgroundColor: accentColor + "22", borderColor: accentColor },
+                            ]}
+                          >
+                            <Text style={[styles.avatarInitials, { color: theme.textPrimary }]}>
+                              {initials || "E"}
+                            </Text>
+                          </View>
+                        );
+                      })()}
+                    </View>
                   </View>
 
+                  {/* Picker (opens dropdown) */}
+                  <TouchableOpacity
+                    style={[
+                      styles.assignmentPicker,
+                      {
+                        backgroundColor: theme.inputBackground,
+                        borderColor: isAssignMenuVisible ? accentColor : theme.inputBorder,
+                        marginTop: 10,
+                      },
+                    ]}
+                    activeOpacity={0.9}
+                    onPress={() => {
+                      setIsEditing(true);
+                      handleFocus("assignment");
+                      setIsAssignMenuVisible((p) => !p);
+                    }}
+                  >
+                    <Text style={[styles.assignmentPickerText, { color: theme.textPrimary }]}>
+                      {assignedLabel}
+                    </Text>
+                    <Text style={[styles.assignmentPickerChevron, { color: theme.textMuted }]}>▾</Text>
+                  </TouchableOpacity>
+
+                  {/* Actions */}
                   <View style={styles.assignmentActionsRow}>
                     <TouchableOpacity
                       style={[
@@ -2119,10 +2281,7 @@ const [loadingTickets, setLoadingTickets] = useState(false);
                       activeOpacity={0.9}
                       onPress={() => {
                         if (!employees.length) {
-                          Alert.alert(
-                            "No employees",
-                            "No employees found in companies/{companyId}/employees."
-                          );
+                          Alert.alert("No employees", "No employees found in users for this company.");
                           return;
                         }
                         setIsEditing(true);
@@ -2131,7 +2290,7 @@ const [loadingTickets, setLoadingTickets] = useState(false);
                       }}
                     >
                       <Text style={[styles.assignmentSmallButtonText, { color: "#F9FAFB" }]}>
-                        Choose employee
+                        Choose employees
                       </Text>
                     </TouchableOpacity>
 
@@ -2142,37 +2301,33 @@ const [loadingTickets, setLoadingTickets] = useState(false);
                           backgroundColor: theme.secondaryButtonBackground,
                           borderColor: theme.cardBorder,
                           borderWidth: 1,
-                          opacity: assignedToUid ? 1 : 0.6,
+                          opacity: assignedToUids.length ? 1 : 0.6,
                         },
                       ]}
                       activeOpacity={0.9}
-                      disabled={!assignedToUid}
+                      disabled={!assignedToUids.length}
                       onPress={() => {
-                        Alert.alert("Unassign", "Remove assignment from this job?", [
+                        Alert.alert("Unassign", "Remove ALL assignments from this job?", [
                           { text: "Cancel", style: "cancel" },
                           {
                             text: "Unassign",
                             style: "destructive",
                             onPress: async () => {
                               try {
-                                await handleAssignTo("");
+                                await toggleAssignUid("");
                               } catch {}
                             },
                           },
                         ]);
                       }}
                     >
-                      <Text
-                        style={[
-                          styles.assignmentSmallButtonText,
-                          { color: theme.secondaryButtonText },
-                        ]}
-                      >
-                        Unassign
+                      <Text style={[styles.assignmentSmallButtonText, { color: theme.secondaryButtonText }]}>
+                        Unassign all
                       </Text>
                     </TouchableOpacity>
                   </View>
 
+                  {/* Dropdown: tap toggles selection */}
                   {isAssignMenuVisible ? (
                     <View
                       style={[
@@ -2183,52 +2338,80 @@ const [loadingTickets, setLoadingTickets] = useState(false);
                         },
                       ]}
                     >
-                      <TouchableOpacity
-                        style={styles.assignmentOption}
-                        onPress={async () => {
-                          try {
-                            await handleAssignTo("");
-                          } catch {}
-                        }}
-                      >
-                        <Text style={[styles.assignmentOptionText, { color: theme.textPrimary }]}>
-                          Unassigned
-                        </Text>
-                      </TouchableOpacity>
-
                       {employees.map((emp) => {
-                        const label =
-                          emp.name?.trim() ||
-                          emp.email?.trim() ||
-                          emp.uid.slice(0, 6) + "…" + emp.uid.slice(-4);
+                        const display =
+                          (emp as any)?.displayName ||
+                          (emp as any)?.name ||
+                          (emp as any)?.email ||
+                          "Employee";
 
-                        const isActiveOpt = emp.uid === assignedToUid;
+                        const name = String(display).trim();
+
+                        const initials = name
+                          .split(" ")
+                          .filter(Boolean)
+                          .slice(0, 2)
+                          .map((p) => p[0]?.toUpperCase())
+                          .join("");
+
+                        const photoURL =
+                          (emp as any)?.photoURL && String((emp as any).photoURL).trim()
+                            ? String((emp as any).photoURL).trim()
+                            : null;
+
+                        const isActiveOpt = assignedToUids.includes(emp.uid);
 
                         return (
                           <TouchableOpacity
                             key={emp.uid}
                             style={[
-                              styles.assignmentOption,
+                              styles.assignmentOptionAvatarRow,
                               isActiveOpt && { backgroundColor: accentColor + "1A" },
                             ]}
                             onPress={async () => {
                               try {
-                                await handleAssignTo(emp.uid);
+                                await toggleAssignUid(emp.uid);
                               } catch {}
                             }}
+                            activeOpacity={0.9}
                           >
+                            {photoURL ? (
+                              <View
+                                style={[
+                                  styles.avatarCircleSmall,
+                                  { borderColor: isActiveOpt ? accentColor : theme.cardBorder },
+                                ]}
+                              >
+                                <Image source={{ uri: photoURL }} style={styles.avatarImage} />
+                              </View>
+                            ) : (
+                              <View
+                                style={[
+                                  styles.avatarCircleSmall,
+                                  {
+                                    backgroundColor: accentColor + "22",
+                                    borderColor: isActiveOpt ? accentColor : theme.cardBorder,
+                                  },
+                                ]}
+                              >
+                                <Text style={[styles.avatarInitialsSmall, { color: theme.textPrimary }]}>
+                                  {initials || "E"}
+                                </Text>
+                              </View>
+                            )}
+
                             <Text
                               style={[
                                 styles.assignmentOptionText,
                                 { color: isActiveOpt ? accentColor : theme.textPrimary },
                               ]}
+                              numberOfLines={1}
                             >
-                              {label}
+                              {name}
                             </Text>
+
                             {isActiveOpt ? (
-                              <Text style={[styles.assignmentOptionCheck, { color: accentColor }]}>
-                                ✓
-                              </Text>
+                              <Text style={[styles.assignmentOptionCheck, { color: accentColor }]}>✓</Text>
                             ) : null}
                           </TouchableOpacity>
                         );
@@ -2237,106 +2420,114 @@ const [loadingTickets, setLoadingTickets] = useState(false);
                   ) : null}
 
                   <Text style={[styles.assignmentHint, { color: theme.textMuted }]}>
-                    Employees will only see jobs assigned to their UID.
+                    Employees will only see jobs assigned to their UID (array-contains).
                   </Text>
                 </SectionCard>
               ) : null}
 
-{isOwner && isCloudMode ? (
-  <SectionCard
-    theme={theme}
-    accentColor={accentColor}
-    title="Work Tickets"
-    subtitle="Tickets submitted by employees"
-    icon="🧰"
-    isActive={false}
-    isDimmed={false}
-  >
-    <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
-      <Text style={{ color: theme.textMuted, fontFamily: "Athiti-SemiBold", fontSize: 12 }}>
-        Latest tickets
-      </Text>
-
-      <TouchableOpacity
-        style={{
-          paddingVertical: 8,
-          paddingHorizontal: 12,
-          borderRadius: 999,
-          backgroundColor: accentColor,
-        }}
-        activeOpacity={0.9}
-        onPress={() => router.push("/work-tickets-inbox" as any)}
-      >
-        <Text style={{ color: "#F9FAFB", fontFamily: "Athiti-Bold", fontSize: 12 }}>
-          Open Inbox
-        </Text>
-      </TouchableOpacity>
-    </View>
-
-    {loadingTickets ? (
-      <Text style={{ marginTop: 10, color: theme.textMuted, fontFamily: "Athiti-SemiBold" }}>
-        Loading tickets…
-      </Text>
-    ) : workTickets.length === 0 ? (
-      <Text style={{ marginTop: 10, color: theme.textMuted, fontFamily: "Athiti-SemiBold" }}>
-        No tickets yet.
-      </Text>
-    ) : (
-      <View style={{ marginTop: 12, gap: 10 }}>
-        {workTickets.map((t) => {
-          const who =
-            (t.createdByName && String(t.createdByName).trim()) ||
-            (t.createdByEmail && String(t.createdByEmail).trim()) ||
-            (t.createdByUid ? String(t.createdByUid).slice(0, 6) + "…" : "Employee");
-
-          const preview = (t.workPerformed || "").trim().slice(0, 90);
-
-          return (
-            <TouchableOpacity
-              key={t.id}
-              activeOpacity={0.9}
-              onPress={() =>
-                router.push({
-                  pathname: "/work-ticket-view",
-                  params: { jobId: job.id, ticketId: t.id },
-                } as any)
-              }
-              style={{
-                borderWidth: 1,
-                borderColor: theme.cardBorder,
-                backgroundColor: theme.cardSecondaryBackground,
-                borderRadius: 14,
-                padding: 12,
-              }}
-            >
-              <View style={{ flexDirection: "row", justifyContent: "space-between", gap: 10 }}>
-                <Text
-                  style={{ color: theme.textPrimary, fontFamily: "Athiti-Bold", flex: 1 }}
-                  numberOfLines={1}
+              {/* ✅ OWNER WORK TICKETS */}
+              {isOwner && isCloudMode ? (
+                <SectionCard
+                  theme={theme}
+                  accentColor={accentColor}
+                  title="Work Tickets"
+                  subtitle="Tickets submitted by employees"
+                  icon="🧰"
+                  isActive={false}
+                  isDimmed={false}
                 >
-                  {who}
-                </Text>
-                <Text style={{ color: theme.textMuted, fontFamily: "Athiti-SemiBold", fontSize: 12 }}>
-                  {t.dayKey || ""}
-                </Text>
-              </View>
+                  <View
+                    style={{
+                      flexDirection: "row",
+                      justifyContent: "space-between",
+                      alignItems: "center",
+                      gap: 10,
+                    }}
+                  >
+                    <Text style={{ color: theme.textMuted, fontFamily: "Athiti-SemiBold", fontSize: 12 }}>
+                      Latest tickets
+                    </Text>
 
-              <Text style={{ color: theme.textMuted, marginTop: 4, fontFamily: "Athiti-SemiBold" }}>
-                {t.laborHours ?? 0}h
-              </Text>
+                    <TouchableOpacity
+                      style={{
+                        paddingVertical: 8,
+                        paddingHorizontal: 12,
+                        borderRadius: 999,
+                        backgroundColor: accentColor,
+                      }}
+                      activeOpacity={0.9}
+                      onPress={() => router.push("/work-tickets-inbox" as any)}
+                    >
+                      <Text style={{ color: "#F9FAFB", fontFamily: "Athiti-Bold", fontSize: 12 }}>
+                        Open Inbox
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
 
-              {!!preview && (
-                <Text style={{ color: theme.textPrimary, marginTop: 8 }} numberOfLines={2}>
-                  {preview}
-                </Text>
-              )}
-            </TouchableOpacity>
-          );
-        })}
-      </View>
-    )}
-  </SectionCard>
-) : null}
+                  {loadingTickets ? (
+                    <Text style={{ marginTop: 10, color: theme.textMuted, fontFamily: "Athiti-SemiBold" }}>
+                      Loading tickets…
+                    </Text>
+                  ) : workTickets.length === 0 ? (
+                    <Text style={{ marginTop: 10, color: theme.textMuted, fontFamily: "Athiti-SemiBold" }}>
+                      No tickets yet.
+                    </Text>
+                  ) : (
+                    <View style={{ marginTop: 12, gap: 10 }}>
+                      {workTickets.map((t) => {
+                        const who =
+                          (t.createdByName && String(t.createdByName).trim()) ||
+                          (t.createdByEmail && String(t.createdByEmail).trim()) ||
+                          (t.createdByUid ? String(t.createdByUid).slice(0, 6) + "…" : "Employee");
+
+                        const preview = (t.workPerformed || "").trim().slice(0, 90);
+
+                        return (
+                          <TouchableOpacity
+                            key={t.id}
+                            activeOpacity={0.9}
+                            onPress={() =>
+                              router.push({
+                                pathname: "/work-ticket-view",
+                                params: { jobId: job.id, ticketId: t.id },
+                              } as any)
+                            }
+                            style={{
+                              borderWidth: 1,
+                              borderColor: theme.cardBorder,
+                              backgroundColor: theme.cardSecondaryBackground,
+                              borderRadius: 14,
+                              padding: 12,
+                            }}
+                          >
+                            <View style={{ flexDirection: "row", justifyContent: "space-between", gap: 10 }}>
+                              <Text
+                                style={{ color: theme.textPrimary, fontFamily: "Athiti-Bold", flex: 1 }}
+                                numberOfLines={1}
+                              >
+                                {who}
+                              </Text>
+                              <Text style={{ color: theme.textMuted, fontFamily: "Athiti-SemiBold", fontSize: 12 }}>
+                                {t.dayKey || ""}
+                              </Text>
+                            </View>
+
+                            <Text style={{ color: theme.textMuted, marginTop: 4, fontFamily: "Athiti-SemiBold" }}>
+                              {t.laborHours ?? 0}h
+                            </Text>
+
+                            {!!preview && (
+                              <Text style={{ color: theme.textPrimary, marginTop: 8 }} numberOfLines={2}>
+                                {preview}
+                              </Text>
+                            )}
+                          </TouchableOpacity>
+                        );
+                      })}
+                    </View>
+                  )}
+                </SectionCard>
+              ) : null}
 
 
               {/* JOB INFO */}
@@ -2944,8 +3135,7 @@ const legacyStyles = StyleSheet.create({
   pricingSingleRow: { marginTop: 10 },
 
   // assignment
-  assignmentRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 10 },
-  assignmentLabel: { fontSize: 12, fontFamily: "Athiti-SemiBold" },
+  assignmentRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 10 },  assignmentLabel: { fontSize: 12, fontFamily: "Athiti-SemiBold" },
   assignmentPicker: {
     flex: 1,
     flexDirection: "row",
@@ -3352,4 +3542,75 @@ const styles = StyleSheet.create({
     textAlign: "center",
     fontFamily: "Athiti-Regular",
   },
+  // ✅ ADD THESE (Assignment UI v2)
+assignmentTopRow: {
+  flexDirection: "row",
+  alignItems: "center",
+  justifyContent: "space-between",
+  gap: 12,
+},
+
+assignedPill: {
+  marginTop: 6,
+  alignSelf: "flex-start",
+  paddingVertical: 4,
+  paddingHorizontal: 10,
+  borderRadius: 999,
+  borderWidth: 1,
+},
+
+assignedPillText: {
+  fontSize: 11,
+  fontFamily: "Athiti-Bold",
+  letterSpacing: 0.4,
+},
+
+assignedPreview: {
+  alignItems: "flex-end",
+  justifyContent: "center",
+},
+
+avatarCircle: {
+  width: 44,
+  height: 44,
+  borderRadius: 999,
+  borderWidth: 1,
+  alignItems: "center",
+  justifyContent: "center",
+  overflow: "hidden",
+},
+
+avatarCircleSmall: {
+  width: 34,
+  height: 34,
+  borderRadius: 999,
+  borderWidth: 1,
+  alignItems: "center",
+  justifyContent: "center",
+  overflow: "hidden",
+  marginRight: 10,
+},
+
+avatarImage: {
+  width: "100%",
+  height: "100%",
+},
+
+avatarInitials: {
+  fontSize: 14,
+  fontFamily: "Athiti-Bold",
+},
+
+avatarInitialsSmall: {
+  fontSize: 12,
+  fontFamily: "Athiti-Bold",
+},
+
+assignmentOptionAvatarRow: {
+  flexDirection: "row",
+  alignItems: "center",
+  paddingVertical: 10,
+  paddingHorizontal: 12,
+},
+
 });
