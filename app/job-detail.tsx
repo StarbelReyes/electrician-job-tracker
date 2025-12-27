@@ -36,7 +36,7 @@ import { usePreferences } from "../context/PreferencesContext";
 import { firebaseAuth } from "../firebaseConfig";
 
 // ✅ Firestore
-import { collection, doc, getDoc, getDocs, updateDoc } from "firebase/firestore";
+import { collection, doc, getDoc, getDocs, limit, orderBy, query, updateDoc } from "firebase/firestore";
 import { db, storage } from "../firebaseConfig";
 
 // ✅ Storage
@@ -98,6 +98,19 @@ type EmployeeRecord = {
   email?: string;
   role?: string;
 };
+
+type WorkTicketListItem = {
+  id: string;
+  createdAt: any;
+  dayKey?: string;
+  createdByName?: string | null;
+  createdByEmail?: string | null;
+  createdByUid?: string | null;
+  laborHours?: number;
+  workPerformed?: string;
+};
+
+
 
 const STORAGE_KEYS = {
   JOBS: "EJT_JOBS",
@@ -631,6 +644,10 @@ export default function JobDetailScreen() {
   const [job, setJob] = useState<Job | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
+  const [workTickets, setWorkTickets] = useState<WorkTicketListItem[]>([]);
+const [loadingTickets, setLoadingTickets] = useState(false);
+
+
   const [editTitle, setEditTitle] = useState("");
   const [editAddress, setEditAddress] = useState("");
   const [editDescription, setEditDescription] = useState("");
@@ -919,6 +936,47 @@ export default function JobDetailScreen() {
 
     loadEmployees();
   }, [isOwner, companyId]);
+
+  useEffect(() => {
+    const loadTickets = async () => {
+      if (!isOwner) return;
+      if (!isCloudMode) return;
+      if (!companyId) return;
+      if (!job?.id) return;
+  
+      try {
+        setLoadingTickets(true);
+  
+        const col = collection(db, "companies", companyId, "jobs", job.id, "workTickets");
+        const qy = query(col, orderBy("createdAt", "desc"), limit(20));
+        const snap = await getDocs(qy);
+  
+        const items: WorkTicketListItem[] = snap.docs.map((d) => {
+          const t: any = d.data() ?? {};
+          return {
+            id: d.id,
+            createdAt: t.createdAt,
+            dayKey: t.dayKey ? String(t.dayKey) : "",
+            createdByName: t.createdByName ?? null,
+            createdByEmail: t.createdByEmail ?? null,
+            createdByUid: t.createdByUid ?? null,
+            laborHours: typeof t.laborHours === "number" ? t.laborHours : 0,
+            workPerformed: t.workPerformed ? String(t.workPerformed) : "",
+          };
+        });
+  
+        setWorkTickets(items);
+      } catch (e) {
+        console.warn("Failed to load work tickets:", e);
+        setWorkTickets([]);
+      } finally {
+        setLoadingTickets(false);
+      }
+    };
+  
+    loadTickets();
+  }, [isOwner, isCloudMode, companyId, job?.id]);
+  
 
   const assignedLabel = useMemo(() => {
     if (!assignedToUid) return "Unassigned";
@@ -2183,6 +2241,103 @@ export default function JobDetailScreen() {
                   </Text>
                 </SectionCard>
               ) : null}
+
+{isOwner && isCloudMode ? (
+  <SectionCard
+    theme={theme}
+    accentColor={accentColor}
+    title="Work Tickets"
+    subtitle="Tickets submitted by employees"
+    icon="🧰"
+    isActive={false}
+    isDimmed={false}
+  >
+    <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
+      <Text style={{ color: theme.textMuted, fontFamily: "Athiti-SemiBold", fontSize: 12 }}>
+        Latest tickets
+      </Text>
+
+      <TouchableOpacity
+        style={{
+          paddingVertical: 8,
+          paddingHorizontal: 12,
+          borderRadius: 999,
+          backgroundColor: accentColor,
+        }}
+        activeOpacity={0.9}
+        onPress={() => router.push("/work-tickets-inbox" as any)}
+      >
+        <Text style={{ color: "#F9FAFB", fontFamily: "Athiti-Bold", fontSize: 12 }}>
+          Open Inbox
+        </Text>
+      </TouchableOpacity>
+    </View>
+
+    {loadingTickets ? (
+      <Text style={{ marginTop: 10, color: theme.textMuted, fontFamily: "Athiti-SemiBold" }}>
+        Loading tickets…
+      </Text>
+    ) : workTickets.length === 0 ? (
+      <Text style={{ marginTop: 10, color: theme.textMuted, fontFamily: "Athiti-SemiBold" }}>
+        No tickets yet.
+      </Text>
+    ) : (
+      <View style={{ marginTop: 12, gap: 10 }}>
+        {workTickets.map((t) => {
+          const who =
+            (t.createdByName && String(t.createdByName).trim()) ||
+            (t.createdByEmail && String(t.createdByEmail).trim()) ||
+            (t.createdByUid ? String(t.createdByUid).slice(0, 6) + "…" : "Employee");
+
+          const preview = (t.workPerformed || "").trim().slice(0, 90);
+
+          return (
+            <TouchableOpacity
+              key={t.id}
+              activeOpacity={0.9}
+              onPress={() =>
+                router.push({
+                  pathname: "/work-ticket-view",
+                  params: { jobId: job.id, ticketId: t.id },
+                } as any)
+              }
+              style={{
+                borderWidth: 1,
+                borderColor: theme.cardBorder,
+                backgroundColor: theme.cardSecondaryBackground,
+                borderRadius: 14,
+                padding: 12,
+              }}
+            >
+              <View style={{ flexDirection: "row", justifyContent: "space-between", gap: 10 }}>
+                <Text
+                  style={{ color: theme.textPrimary, fontFamily: "Athiti-Bold", flex: 1 }}
+                  numberOfLines={1}
+                >
+                  {who}
+                </Text>
+                <Text style={{ color: theme.textMuted, fontFamily: "Athiti-SemiBold", fontSize: 12 }}>
+                  {t.dayKey || ""}
+                </Text>
+              </View>
+
+              <Text style={{ color: theme.textMuted, marginTop: 4, fontFamily: "Athiti-SemiBold" }}>
+                {t.laborHours ?? 0}h
+              </Text>
+
+              {!!preview && (
+                <Text style={{ color: theme.textPrimary, marginTop: 8 }} numberOfLines={2}>
+                  {preview}
+                </Text>
+              )}
+            </TouchableOpacity>
+          );
+        })}
+      </View>
+    )}
+  </SectionCard>
+) : null}
+
 
               {/* JOB INFO */}
               <SectionCard

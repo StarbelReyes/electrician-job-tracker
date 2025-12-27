@@ -1,13 +1,7 @@
 // app/work-ticket-create.tsx
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import {
-    addDoc,
-    collection,
-    doc,
-    getDoc,
-    serverTimestamp,
-} from "firebase/firestore";
+import { doc, getDoc, serverTimestamp, setDoc } from "firebase/firestore";
 import React, { useEffect, useMemo, useState } from "react";
 import {
     Alert,
@@ -44,6 +38,41 @@ type Job = {
   assignedToUid?: string | null;
 };
 
+type WorkTicketPayload = {
+  jobId: string;
+  jobTitle: string;
+  jobAddress: string;
+
+  workPerformed: string;
+  laborHours: number;
+  materialsUsed: string;
+
+  createdByUid: string | null;
+  createdByName: string | null;
+  createdByEmail: string | null;
+  createdByRole: string | null;
+
+  createdAt: any;
+
+  // ✅ for 1-per-day enforcement
+  dayKey: string;
+
+  isFinal: true;
+
+  // optional future flags
+  isReviewed?: boolean;
+  reviewedAt?: any;
+  reviewedByUid?: string | null;
+};
+
+// ✅ YYYY-MM-DD in local time
+function getLocalDayKey(d = new Date()): string {
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd}`;
+}
+
 export default function WorkTicketCreateScreen() {
   const router = useRouter();
   const params = useLocalSearchParams<{ jobId?: string }>();
@@ -64,9 +93,10 @@ export default function WorkTicketCreateScreen() {
   const [laborHours, setLaborHours] = useState("");
   const [materialsUsed, setMaterialsUsed] = useState("");
 
-  const dismissKeyboard = () => {
-    Keyboard.dismiss();
-  };
+  // ✅ NEW: disable submit if ticket already exists for today
+  const [alreadySubmitted, setAlreadySubmitted] = useState(false);
+
+  const dismissKeyboard = () => Keyboard.dismiss();
 
   const safeBack = () => {
     try {
@@ -106,13 +136,9 @@ export default function WorkTicketCreateScreen() {
     const loadJob = async () => {
       try {
         setLoadingJob(true);
+        setAlreadySubmitted(false); // reset on reload
 
-        if (!jobId) {
-          setJob(null);
-          return;
-        }
-
-        if (!companyId) {
+        if (!jobId || !companyId) {
           setJob(null);
           return;
         }
@@ -138,24 +164,47 @@ export default function WorkTicketCreateScreen() {
         };
 
         setJob(found);
+
+        // ✅ pre-check: already submitted today for this job
+        const uid = session?.uid ?? null;
+        if (uid && session?.role === "employee") {
+          const dayKey = getLocalDayKey(new Date());
+          const ticketId = `${dayKey}_${uid}`;
+          const ticketRef = doc(
+            db,
+            "companies",
+            companyId,
+            "jobs",
+            found.id,
+            "workTickets",
+            ticketId
+          );
+          const existsSnap = await getDoc(ticketRef);
+          setAlreadySubmitted(existsSnap.exists());
+        } else {
+          setAlreadySubmitted(false);
+        }
       } catch (e) {
         console.warn("Failed to load job:", e);
         setJob(null);
+        setAlreadySubmitted(false);
       } finally {
         setLoadingJob(false);
       }
     };
 
     loadJob();
-  }, [sessionLoaded, companyId, jobId]);
+    // include uid/role so pre-check runs when session is loaded/changes
+  }, [sessionLoaded, companyId, jobId, session?.uid, session?.role]);
 
   const canSubmit = useMemo(() => {
     if (!isEmployee) return false;
     if (!companyId) return false;
     if (!job) return false;
+    if (alreadySubmitted) return false;
     if (!workPerformed.trim()) return false;
     return true;
-  }, [isEmployee, companyId, job, workPerformed]);
+  }, [isEmployee, companyId, job, alreadySubmitted, workPerformed]);
 
   const parseNumber = (v: string) => {
     const n = Number(String(v).replace(/[^0-9.]/g, ""));
@@ -170,50 +219,79 @@ export default function WorkTicketCreateScreen() {
       return;
     }
     if (!companyId) {
-      Alert.alert(
-        "Missing company",
-        "Your session has no companyId. The employee must join a company first."
-      );
+      Alert.alert("Missing company", "Employee must join a company first.");
       return;
     }
     if (!job) {
       Alert.alert("Job not found", "This job could not be loaded.");
       return;
     }
+    if (alreadySubmitted) {
+      Alert.alert(
+        "Already submitted",
+        "You already submitted a work ticket for this job today."
+      );
+      return;
+    }
+
+    const uid = session?.uid ?? null;
+    if (!uid) {
+      Alert.alert("Missing session", "Missing employee uid in session.");
+      return;
+    }
+
+    // ✅ 1-per-day: doc id is dayKey_uid
+    const dayKey = getLocalDayKey(new Date());
+    const ticketId = `${dayKey}_${uid}`;
 
     try {
-      const ticketsCol = collection(
+      const ticketRef = doc(
         db,
         "companies",
         companyId,
         "jobs",
         job.id,
-        "workTickets"
+        "workTickets",
+        ticketId
       );
 
-      const payload = {
+      // ✅ fast client-side check (rules also enforce)
+      const existing = await getDoc(ticketRef);
+      if (existing.exists()) {
+        setAlreadySubmitted(true);
+        Alert.alert(
+          "Already submitted",
+          "You already submitted a work ticket for this job today."
+        );
+        return;
+      }
+
+      const payload: WorkTicketPayload = {
         jobId: job.id,
         jobTitle: job.title,
         jobAddress: job.address,
 
-        // ticket content
         workPerformed: workPerformed.trim(),
         laborHours: parseNumber(laborHours),
         materialsUsed: materialsUsed.trim(),
 
-        // created by
-        createdByUid: session?.uid ?? null,
+        createdByUid: uid,
         createdByName: session?.name ?? null,
         createdByEmail: session?.email ?? null,
         createdByRole: session?.role ?? null,
 
         createdAt: serverTimestamp(),
 
-        // immutable flag
+        dayKey,
+
         isFinal: true,
+        isReviewed: false,
       };
 
-      await addDoc(ticketsCol, payload);
+      // ✅ create fixed id doc (prevents duplicates)
+      await setDoc(ticketRef, payload, { merge: false });
+
+      setAlreadySubmitted(true);
 
       Alert.alert("Submitted", "Work ticket submitted. It cannot be edited.", [
         { text: "OK", onPress: safeBack },
@@ -316,6 +394,7 @@ export default function WorkTicketCreateScreen() {
                     backgroundColor: theme.inputBackground,
                     borderColor: theme.inputBorder,
                     color: theme.inputText,
+                    opacity: alreadySubmitted ? 0.6 : 1,
                   },
                 ]}
                 value={workPerformed}
@@ -323,6 +402,7 @@ export default function WorkTicketCreateScreen() {
                 placeholder="Describe what you did today…"
                 placeholderTextColor={theme.textMuted}
                 multiline
+                editable={!alreadySubmitted}
               />
 
               <Text style={[styles.label, { color: theme.textSecondary }]}>Labor hours</Text>
@@ -333,6 +413,7 @@ export default function WorkTicketCreateScreen() {
                     backgroundColor: theme.inputBackground,
                     borderColor: theme.inputBorder,
                     color: theme.inputText,
+                    opacity: alreadySubmitted ? 0.6 : 1,
                   },
                 ]}
                 value={laborHours}
@@ -340,6 +421,7 @@ export default function WorkTicketCreateScreen() {
                 placeholder="e.g. 4"
                 placeholderTextColor={theme.textMuted}
                 keyboardType="numeric"
+                editable={!alreadySubmitted}
               />
 
               <Text style={[styles.label, { color: theme.textSecondary }]}>
@@ -352,17 +434,25 @@ export default function WorkTicketCreateScreen() {
                     backgroundColor: theme.inputBackground,
                     borderColor: theme.inputBorder,
                     color: theme.inputText,
+                    opacity: alreadySubmitted ? 0.6 : 1,
                   },
                 ]}
                 value={materialsUsed}
                 onChangeText={setMaterialsUsed}
                 placeholder="e.g. 3/4 EMT, straps, connectors…"
                 placeholderTextColor={theme.textMuted}
+                editable={!alreadySubmitted}
               />
 
               <Text style={[styles.hint, { color: theme.textMuted }]}>
-                Submitting is final. Work tickets are immutable after submit.
+                Submitting is final. Only one ticket per day per job is allowed.
               </Text>
+
+              {alreadySubmitted && (
+                <Text style={[styles.hint, { color: theme.textMuted }]}>
+                  You already submitted today’s ticket for this job.
+                </Text>
+              )}
 
               <TouchableOpacity
                 style={[
@@ -373,7 +463,9 @@ export default function WorkTicketCreateScreen() {
                 onPress={submitTicket}
                 activeOpacity={0.9}
               >
-                <Text style={styles.submitText}>Submit Work Ticket</Text>
+                <Text style={styles.submitText}>
+                  {alreadySubmitted ? "Ticket Submitted" : "Submit Work Ticket"}
+                </Text>
               </TouchableOpacity>
 
               <TouchableOpacity style={styles.cancel} onPress={safeBack} activeOpacity={0.8}>

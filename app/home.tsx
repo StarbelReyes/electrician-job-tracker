@@ -343,12 +343,6 @@ const HomeScreen: FC = () => {
   const { isReady, theme, accentColor } = usePreferences();
   const brand = accentColor;
 
-  const [isEditing, setIsEditing] = useState(false);
-
-  const [jobs, setJobs] = useState<Job[]>([]);
-  const [trashJobs, setTrashJobs] = useState<Job[]>([]);
-  const [isHydrated, setIsHydrated] = useState(false);
-
   // ✅ session info
   const [session, setSession] = useState<Session | null>(null);
 
@@ -356,6 +350,18 @@ const HomeScreen: FC = () => {
   const isOwner = session?.role === "owner";
   const isCloudMode = isEmployee || isOwner; // Firestore mode
   const isIndependent = session?.role === "independent" || !session?.role;
+
+  // ✅ owner-only entry point to Work Tickets inbox
+  const goToWorkTicketsInbox = useCallback(() => {
+    // exact path:
+    router.push("/work-tickets");
+  }, [router]);
+
+  const [isEditing, setIsEditing] = useState(false);
+
+  const [jobs, setJobs] = useState<Job[]>([]);
+  const [trashJobs, setTrashJobs] = useState<Job[]>([]);
+  const [isHydrated, setIsHydrated] = useState(false);
 
   const screenScale = useRef(new Animated.Value(1.04)).current;
   useEffect(() => {
@@ -787,6 +793,22 @@ const HomeScreen: FC = () => {
           >
             <View style={styles.headerRow}>
               <Text style={[styles.header, { color: theme.headerText }]}>THE TRAKTR APP</Text>
+
+              {isOwner && (
+                <TouchableOpacity
+                  activeOpacity={0.9}
+                  style={[
+                    styles.workTicketsBtn,
+                    { backgroundColor: theme.cardBackground + "F2", borderColor: theme.cardBorder },
+                  ]}
+                  onPress={goToWorkTicketsInbox}
+                >
+                  <Ionicons name="clipboard-outline" size={16} color={theme.textPrimary} />
+                  <Text style={[styles.workTicketsBtnText, { color: theme.textPrimary }]}>
+                    Work Tickets
+                  </Text>
+                </TouchableOpacity>
+              )}
             </View>
 
             <View style={styles.aiHelperRow}>
@@ -972,10 +994,29 @@ const styles = StyleSheet.create({
 
   headerRow: {
     marginBottom: 8,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
   },
   header: {
     fontSize: 22,
     fontFamily: "Athiti-Bold",
+    letterSpacing: 0.2,
+  },
+
+  // ✅ NEW: owner-only button styles
+  workTicketsBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 999,
+    borderWidth: 1,
+  },
+  workTicketsBtnText: {
+    fontSize: 12,
+    fontFamily: "Athiti-SemiBold",
     letterSpacing: 0.2,
   },
 
