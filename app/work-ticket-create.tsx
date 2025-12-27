@@ -1,10 +1,17 @@
 // app/work-ticket-create.tsx
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { addDoc, collection, doc, getDoc, serverTimestamp } from "firebase/firestore";
+import {
+    addDoc,
+    collection,
+    doc,
+    getDoc,
+    serverTimestamp,
+} from "firebase/firestore";
 import React, { useEffect, useMemo, useState } from "react";
 import {
     Alert,
+    Keyboard,
     KeyboardAvoidingView,
     Platform,
     ScrollView,
@@ -12,6 +19,7 @@ import {
     Text,
     TextInput,
     TouchableOpacity,
+    TouchableWithoutFeedback,
     View,
 } from "react-native";
 import { usePreferences } from "../context/PreferencesContext";
@@ -55,6 +63,10 @@ export default function WorkTicketCreateScreen() {
   const [workPerformed, setWorkPerformed] = useState("");
   const [laborHours, setLaborHours] = useState("");
   const [materialsUsed, setMaterialsUsed] = useState("");
+
+  const dismissKeyboard = () => {
+    Keyboard.dismiss();
+  };
 
   const safeBack = () => {
     try {
@@ -101,7 +113,6 @@ export default function WorkTicketCreateScreen() {
         }
 
         if (!companyId) {
-          // This is the #1 reason you see "Job not found"
           setJob(null);
           return;
         }
@@ -152,6 +163,8 @@ export default function WorkTicketCreateScreen() {
   };
 
   const submitTicket = async () => {
+    dismissKeyboard();
+
     if (!isEmployee) {
       Alert.alert("Not allowed", "Only employees can create work tickets.");
       return;
@@ -169,7 +182,14 @@ export default function WorkTicketCreateScreen() {
     }
 
     try {
-      const ticketsCol = collection(db, "companies", companyId, "jobs", job.id, "workTickets");
+      const ticketsCol = collection(
+        db,
+        "companies",
+        companyId,
+        "jobs",
+        job.id,
+        "workTickets"
+      );
 
       const payload = {
         jobId: job.id,
@@ -189,7 +209,7 @@ export default function WorkTicketCreateScreen() {
 
         createdAt: serverTimestamp(),
 
-        // immutable flag (useful for UI + rules later)
+        // immutable flag
         isFinal: true,
       };
 
@@ -208,7 +228,6 @@ export default function WorkTicketCreateScreen() {
     return <View style={{ flex: 1, backgroundColor: "#0b0f1a" }} />;
   }
 
-  // Hard guard: employee only
   if (sessionLoaded && !isEmployee) {
     return (
       <View style={[styles.center, { backgroundColor: theme.screenBackground }]}>
@@ -234,7 +253,6 @@ export default function WorkTicketCreateScreen() {
     );
   }
 
-  // If job missing, show the *real* reason
   if (!job) {
     const reason =
       !jobId
@@ -263,97 +281,108 @@ export default function WorkTicketCreateScreen() {
       behavior={Platform.OS === "ios" ? "padding" : "height"}
       keyboardVerticalOffset={0}
     >
-      <ScrollView
-        style={{ flex: 1 }}
-        contentContainerStyle={[styles.wrap, { paddingBottom: 28 }]}
-        keyboardShouldPersistTaps="always"
-      >
-        <View
-          style={[
-            styles.card,
-            { backgroundColor: theme.cardBackground, borderColor: theme.cardBorder },
-          ]}
-        >
-          <Text style={[styles.header, { color: theme.textPrimary }]}>Create Work Ticket</Text>
-
-          <Text style={[styles.meta, { color: theme.textMuted }]}>Job</Text>
-          <Text style={[styles.jobTitle, { color: theme.textPrimary }]} numberOfLines={1}>
-            {job.title}
-          </Text>
-          <Text style={[styles.jobAddress, { color: theme.textSecondary }]} numberOfLines={2}>
-            {job.address}
-          </Text>
-
-          <View style={styles.sep} />
-
-          <Text style={[styles.label, { color: theme.textSecondary }]}>Work performed *</Text>
-          <TextInput
-            style={[
-              styles.inputMulti,
-              {
-                backgroundColor: theme.inputBackground,
-                borderColor: theme.inputBorder,
-                color: theme.inputText,
-              },
-            ]}
-            value={workPerformed}
-            onChangeText={setWorkPerformed}
-            placeholder="Describe what you did today…"
-            placeholderTextColor={theme.textMuted}
-            multiline
-          />
-
-          <Text style={[styles.label, { color: theme.textSecondary }]}>Labor hours</Text>
-          <TextInput
-            style={[
-              styles.input,
-              {
-                backgroundColor: theme.inputBackground,
-                borderColor: theme.inputBorder,
-                color: theme.inputText,
-              },
-            ]}
-            value={laborHours}
-            onChangeText={setLaborHours}
-            placeholder="e.g. 4"
-            placeholderTextColor={theme.textMuted}
-            keyboardType="numeric"
-          />
-
-          <Text style={[styles.label, { color: theme.textSecondary }]}>Supplies / Resources</Text>
-          <TextInput
-            style={[
-              styles.input,
-              {
-                backgroundColor: theme.inputBackground,
-                borderColor: theme.inputBorder,
-                color: theme.inputText,
-              },
-            ]}
-            value={materialsUsed}
-            onChangeText={setMaterialsUsed}
-            placeholder="e.g. 3/4 EMT, straps, connectors…"
-            placeholderTextColor={theme.textMuted}
-          />
-
-          <Text style={[styles.hint, { color: theme.textMuted }]}>
-            Submitting is final. Work tickets are immutable after submit.
-          </Text>
-
-          <TouchableOpacity
-            style={[styles.submit, { backgroundColor: accentColor, opacity: canSubmit ? 1 : 0.55 }]}
-            disabled={!canSubmit}
-            onPress={submitTicket}
-            activeOpacity={0.9}
+      <TouchableWithoutFeedback onPress={dismissKeyboard} accessible={false}>
+        <View style={{ flex: 1 }}>
+          <ScrollView
+            style={{ flex: 1 }}
+            contentContainerStyle={[styles.wrap, { paddingBottom: 28 }]}
+            keyboardShouldPersistTaps="handled"
           >
-            <Text style={styles.submitText}>Submit Work Ticket</Text>
-          </TouchableOpacity>
+            <View
+              style={[
+                styles.card,
+                { backgroundColor: theme.cardBackground, borderColor: theme.cardBorder },
+              ]}
+            >
+              <Text style={[styles.header, { color: theme.textPrimary }]}>
+                Create Work Ticket
+              </Text>
 
-          <TouchableOpacity style={styles.cancel} onPress={safeBack} activeOpacity={0.8}>
-            <Text style={[styles.cancelText, { color: theme.textMuted }]}>Cancel</Text>
-          </TouchableOpacity>
+              <Text style={[styles.meta, { color: theme.textMuted }]}>Job</Text>
+              <Text style={[styles.jobTitle, { color: theme.textPrimary }]} numberOfLines={1}>
+                {job.title}
+              </Text>
+              <Text style={[styles.jobAddress, { color: theme.textSecondary }]} numberOfLines={2}>
+                {job.address}
+              </Text>
+
+              <View style={styles.sep} />
+
+              <Text style={[styles.label, { color: theme.textSecondary }]}>Work performed *</Text>
+              <TextInput
+                style={[
+                  styles.inputMulti,
+                  {
+                    backgroundColor: theme.inputBackground,
+                    borderColor: theme.inputBorder,
+                    color: theme.inputText,
+                  },
+                ]}
+                value={workPerformed}
+                onChangeText={setWorkPerformed}
+                placeholder="Describe what you did today…"
+                placeholderTextColor={theme.textMuted}
+                multiline
+              />
+
+              <Text style={[styles.label, { color: theme.textSecondary }]}>Labor hours</Text>
+              <TextInput
+                style={[
+                  styles.input,
+                  {
+                    backgroundColor: theme.inputBackground,
+                    borderColor: theme.inputBorder,
+                    color: theme.inputText,
+                  },
+                ]}
+                value={laborHours}
+                onChangeText={setLaborHours}
+                placeholder="e.g. 4"
+                placeholderTextColor={theme.textMuted}
+                keyboardType="numeric"
+              />
+
+              <Text style={[styles.label, { color: theme.textSecondary }]}>
+                Supplies / Resources
+              </Text>
+              <TextInput
+                style={[
+                  styles.input,
+                  {
+                    backgroundColor: theme.inputBackground,
+                    borderColor: theme.inputBorder,
+                    color: theme.inputText,
+                  },
+                ]}
+                value={materialsUsed}
+                onChangeText={setMaterialsUsed}
+                placeholder="e.g. 3/4 EMT, straps, connectors…"
+                placeholderTextColor={theme.textMuted}
+              />
+
+              <Text style={[styles.hint, { color: theme.textMuted }]}>
+                Submitting is final. Work tickets are immutable after submit.
+              </Text>
+
+              <TouchableOpacity
+                style={[
+                  styles.submit,
+                  { backgroundColor: accentColor, opacity: canSubmit ? 1 : 0.55 },
+                ]}
+                disabled={!canSubmit}
+                onPress={submitTicket}
+                activeOpacity={0.9}
+              >
+                <Text style={styles.submitText}>Submit Work Ticket</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity style={styles.cancel} onPress={safeBack} activeOpacity={0.8}>
+                <Text style={[styles.cancelText, { color: theme.textMuted }]}>Cancel</Text>
+              </TouchableOpacity>
+            </View>
+          </ScrollView>
         </View>
-      </ScrollView>
+      </TouchableWithoutFeedback>
     </KeyboardAvoidingView>
   );
 }
@@ -365,7 +394,8 @@ const styles = StyleSheet.create({
     paddingVertical: 32,
     flexGrow: 1,
     justifyContent: "center",
-  }, card: {
+  },
+  card: {
     borderWidth: 1,
     borderRadius: 18,
     padding: 16,
@@ -378,7 +408,13 @@ const styles = StyleSheet.create({
   jobAddress: { fontSize: 13, marginTop: 2 },
   sep: { height: 1, marginVertical: 14, backgroundColor: "rgba(148,163,184,0.25)" },
   label: { fontSize: 13, marginTop: 12, marginBottom: 6, fontWeight: "600" },
-  input: { borderWidth: 1, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 10, fontSize: 14 },
+  input: {
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 14,
+  },
   inputMulti: {
     borderWidth: 1,
     borderRadius: 12,
