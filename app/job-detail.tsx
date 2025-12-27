@@ -517,31 +517,6 @@ async function uploadJobPhotoToStorage(params: {
   return { url, path };
 }
 
-async function downloadUrlToBase64(url: string): Promise<string | null> {
-  try {
-    const FS: any = FileSystem as any;
-
-    const baseDir: string =
-      (FS.cacheDirectory as string) || (FS.documentDirectory as string) || "";
-
-    const tmpPath = `${baseDir}job-photo-${Date.now()}-${Math.random()
-      .toString(16)
-      .slice(2)}.img`;
-
-    const dl = await FS.downloadAsync(url, tmpPath);
-
-    const base64: string = await FileSystem.readAsStringAsync(dl.uri, {
-      encoding: "base64",
-    });
-
-    FS.deleteAsync(dl.uri, { idempotent: true }).catch(() => {});
-    return base64;
-  } catch (e) {
-    console.warn("downloadUrlToBase64 failed:", e);
-    return null;
-  }
-}
-
 const normalizeStorageUrl = (u: string) => {
   try {
     const url = new URL(u);
@@ -569,15 +544,12 @@ export default function JobDetailScreen() {
   const user = firebaseAuth.currentUser;
   const canUseCloudUploads = isCloudMode && !!user;
 
-  useEffect(() => {
-    if (isCloudMode && !user) {
-      Alert.alert(
-        "Not logged in",
-        "Firebase session expired. Please log out and log back in, then try uploading again."
-      );
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isCloudMode, user?.uid]);
+  // ✅ EMPLOYEE-ONLY RULES (Job Detail):
+  // - Employee is READ-ONLY on Job Detail (no edits, no done toggle, no delete, no photo add/remove/view)
+  // - Employee DOES NOT load branding keys (company name/phone/email/license)
+  // - Employee CAN: Call, Map, Team Chat, Share PDFs
+  // - Employee CAN: Create Work Ticket (from Assigned Job Detail only)
+  const isReadOnly = isEmployee;
 
   const [companyName, setCompanyName] = useState("");
   const [companyPhone, setCompanyPhone] = useState("");
@@ -603,33 +575,6 @@ export default function JobDetailScreen() {
   };
 
   useEffect(() => {
-    const loadBranding = async () => {
-      try {
-        const [
-          savedCompanyName,
-          savedCompanyPhone,
-          savedCompanyEmail,
-          savedCompanyLicense,
-        ] = await Promise.all([
-          AsyncStorage.getItem(BRANDING_KEYS.COMPANY_NAME),
-          AsyncStorage.getItem(BRANDING_KEYS.COMPANY_PHONE),
-          AsyncStorage.getItem(BRANDING_KEYS.COMPANY_EMAIL),
-          AsyncStorage.getItem(BRANDING_KEYS.COMPANY_LICENSE),
-        ]);
-
-        if (savedCompanyName) setCompanyName(savedCompanyName);
-        if (savedCompanyPhone) setCompanyPhone(savedCompanyPhone);
-        if (savedCompanyEmail) setCompanyEmail(savedCompanyEmail);
-        if (savedCompanyLicense) setCompanyLicense(savedCompanyLicense);
-      } catch (err) {
-        console.warn("Failed to load branding:", err);
-      }
-    };
-
-    loadBranding();
-  }, []);
-
-  useEffect(() => {
     const loadSession = async () => {
       try {
         const stored = await AsyncStorage.getItem(USER_STORAGE_KEY);
@@ -653,6 +598,36 @@ export default function JobDetailScreen() {
     loadSession();
   }, []);
 
+  // ✅ Employee must NOT see branding/defaults (they can still share PDFs, but brand section stays empty)
+  useEffect(() => {
+    const loadBranding = async () => {
+      if (isEmployee) return;
+
+      try {
+        const [
+          savedCompanyName,
+          savedCompanyPhone,
+          savedCompanyEmail,
+          savedCompanyLicense,
+        ] = await Promise.all([
+          AsyncStorage.getItem(BRANDING_KEYS.COMPANY_NAME),
+          AsyncStorage.getItem(BRANDING_KEYS.COMPANY_PHONE),
+          AsyncStorage.getItem(BRANDING_KEYS.COMPANY_EMAIL),
+          AsyncStorage.getItem(BRANDING_KEYS.COMPANY_LICENSE),
+        ]);
+
+        if (savedCompanyName) setCompanyName(savedCompanyName);
+        if (savedCompanyPhone) setCompanyPhone(savedCompanyPhone);
+        if (savedCompanyEmail) setCompanyEmail(savedCompanyEmail);
+        if (savedCompanyLicense) setCompanyLicense(savedCompanyLicense);
+      } catch (err) {
+        console.warn("Failed to load branding:", err);
+      }
+    };
+
+    loadBranding();
+  }, [isEmployee]);
+
   const [job, setJob] = useState<Job | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
@@ -671,9 +646,8 @@ export default function JobDetailScreen() {
   const [photoUris, setPhotoUris] = useState<string[]>([]);
   const [photoBase64s, setPhotoBase64s] = useState<string[]>([]);
 
-  // ✅ Track editing like Add Job
+  // ✅ Track editing like Add Job (but employees never enter edit mode)
   const [isEditing, setIsEditing] = useState(false);
-
   const [activeSection, setActiveSection] = useState<ActiveSectionKey>(null);
 
   const scrollRef = useRef<ScrollView | null>(null);
@@ -697,7 +671,7 @@ export default function JobDetailScreen() {
     setTimeout(() => scrollToSectionWithRetry(key, triesLeft - 1, delayMs), delayMs);
   };
 
-  // ✅ Add Job 1:1
+  // ✅ Add Job 1:1 dismiss
   const dismissKeyboardAndEditing = () => {
     Keyboard.dismiss();
     setIsEditing(false);
@@ -706,6 +680,9 @@ export default function JobDetailScreen() {
   };
 
   const handleFocus = (sectionKey: Exclude<ActiveSectionKey, null>) => {
+    // ✅ Employees are read-only: no focus/edit state changes
+    if (isReadOnly) return;
+
     setIsEditing(true);
     LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
     setActiveSection(sectionKey);
@@ -911,6 +888,7 @@ export default function JobDetailScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id, isCloudMode, companyId, sessionLoaded]);
 
+  // ✅ Owner only: load employees to assign
   useEffect(() => {
     const loadEmployees = async () => {
       if (!isOwner) return;
@@ -1012,6 +990,11 @@ export default function JobDetailScreen() {
   const handleSaveJobEdits = async () => {
     if (!job) return;
 
+    if (isReadOnly) {
+      Alert.alert("Read-only", "Employees cannot edit jobs.");
+      return;
+    }
+
     const updated: Job = {
       ...job,
       title: editTitle.trim() || job.title,
@@ -1082,6 +1065,12 @@ export default function JobDetailScreen() {
 
   const handleToggleDone = async () => {
     if (!job) return;
+
+    if (isReadOnly) {
+      Alert.alert("Read-only", "Employees cannot change job status.");
+      return;
+    }
+
     const nextDone = !isDone;
     setIsDone(nextDone);
 
@@ -1109,6 +1098,11 @@ export default function JobDetailScreen() {
 
   const confirmMoveToTrash = () => {
     if (!job) return;
+
+    if (isReadOnly) {
+      Alert.alert("Read-only", "Employees cannot move jobs to Trash.");
+      return;
+    }
 
     if (isCloudMode) {
       Alert.alert(
@@ -1165,6 +1159,11 @@ export default function JobDetailScreen() {
   };
 
   const handleAddPhotoFromGallery = async () => {
+    if (isReadOnly) {
+      Alert.alert("Locked", "Employees cannot add photos.");
+      return;
+    }
+
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (status !== "granted") {
       Alert.alert("Permission needed", "We need access to your photos to attach pictures to this job.");
@@ -1261,6 +1260,11 @@ export default function JobDetailScreen() {
   };
 
   const handleAddPhotoFromCamera = async () => {
+    if (isReadOnly) {
+      Alert.alert("Locked", "Employees cannot add photos.");
+      return;
+    }
+
     const { status } = await ImagePicker.requestCameraPermissionsAsync();
     if (status !== "granted") {
       Alert.alert("Permission needed", "We need access to your camera to take photos for this job.");
@@ -1335,6 +1339,11 @@ export default function JobDetailScreen() {
   };
 
   const handleRemovePhoto = (uriToRemove: string) => {
+    if (isReadOnly) {
+      Alert.alert("Locked", "Employees cannot remove photos.");
+      return;
+    }
+
     const index = photoUris.indexOf(uriToRemove);
 
     Alert.alert("Remove photo", "Are you sure you want to remove this photo from the job?", [
@@ -1379,6 +1388,8 @@ export default function JobDetailScreen() {
   };
 
   const handleOpenFullImage = (index: number) => {
+    // ✅ Employee: no photo viewer
+    if (isReadOnly) return;
     setFullImageIndex(index);
     setIsImageOverlayVisible(true);
   };
@@ -1409,11 +1420,11 @@ export default function JobDetailScreen() {
       const createdAt = new Date(job.createdAt).toLocaleString();
       const statusLabel = isDone ? "Done" : "Open";
 
+      // ✅ Employee: branding keys are never loaded (stay empty)
       const brandName = companyName.trim();
       const brandPhone = companyPhone.trim();
       const brandEmail = companyEmail.trim();
       const brandLicense = companyLicense.trim();
-
       const hasBranding = brandName || brandPhone || brandEmail || brandLicense;
 
       const companyHeaderLines: string[] = [];
@@ -1433,25 +1444,6 @@ export default function JobDetailScreen() {
         if (dataUrl) dataUrls.push(dataUrl);
       }
 
-      if (!dataUrls.length && !isCloudMode) {
-        const bases = photoBase64s.length ? photoBase64s : job?.photoBase64s || [];
-        for (const b64 of bases) {
-          if (!b64) continue;
-          dataUrls.push(base64ToDataUrl(b64, "image/jpeg"));
-        }
-      }
-
-      const photoBlocks: string[] = [];
-      for (let i = 0; i < dataUrls.length; i++) {
-        const dataUrl = dataUrls[i];
-        photoBlocks.push(`
-          <div class="photo">
-            <img src="${dataUrl}" />
-            <div class="photo-label">Photo ${i + 1}</div>
-          </div>
-        `);
-      }
-
       const photosSection =
         dataUrls.length === 0
           ? `
@@ -1464,7 +1456,16 @@ export default function JobDetailScreen() {
         <div class="section">
           <h2>Photos</h2>
           <div class="photo-grid">
-            ${photoBlocks.join("")}
+            ${dataUrls
+              .map(
+                (du, i) => `
+              <div class="photo">
+                <img src="${du}" />
+                <div class="photo-label">Photo ${i + 1}</div>
+              </div>
+            `
+              )
+              .join("")}
           </div>
         </div>
       `;
@@ -1532,30 +1533,20 @@ export default function JobDetailScreen() {
                 <div class="value">${safeHtml(editAddress || job.address)}</div>
 
                 <div class="label">Description / Scope</div>
-                <div class="value">
-                  ${withLineBreaks(editDescription || job.description)}
-                </div>
+                <div class="value">${withLineBreaks(editDescription || job.description)}</div>
               </div>
 
               <div class="section">
                 <h2>Client Info</h2>
                 <div class="label">Client Name</div>
-                <div class="value">
-                  ${editClientName.trim() ? safeHtml(editClientName.trim()) : "Not set"}
-                </div>
+                <div class="value">${editClientName.trim() ? safeHtml(editClientName.trim()) : "Not set"}</div>
 
                 <div class="label">Client Phone</div>
-                <div class="value">
-                  ${editClientPhone.trim() ? safeHtml(editClientPhone.trim()) : "Not set"}
-                </div>
+                <div class="value">${editClientPhone.trim() ? safeHtml(editClientPhone.trim()) : "Not set"}</div>
 
                 <div class="label">Client Notes</div>
                 <div class="value">
-                  ${
-                    editClientNotes.trim()
-                      ? withLineBreaks(editClientNotes.trim())
-                      : '<span class="muted">No extra notes.</span>'
-                  }
+                  ${editClientNotes.trim() ? withLineBreaks(editClientNotes.trim()) : '<span class="muted">No extra notes.</span>'}
                 </div>
               </div>
 
@@ -1610,9 +1601,9 @@ export default function JobDetailScreen() {
   };
 
   const handleShareClientReport = async () => {
+    // ✅ unchanged logic; employee branding remains empty automatically
     if (!job) return;
     if (guardShareWhileUploading()) return;
-
     try {
       const laborNum = parseNumber(laborHours);
       const rateNum = parseNumber(hourlyRate);
@@ -1626,7 +1617,6 @@ export default function JobDetailScreen() {
       const brandPhone = companyPhone.trim();
       const brandEmail = companyEmail.trim();
       const brandLicense = companyLicense.trim();
-
       const hasBranding = brandName || brandPhone || brandEmail || brandLicense;
 
       const companyHeaderLines: string[] = [];
@@ -1795,7 +1785,8 @@ export default function JobDetailScreen() {
     );
   }
 
-  const heroPhotoUri = photoUris.length ? photoUris[0] : null;
+  // ✅ Employee: remove photo UI entirely (no hero blur image, no attachments card, no viewer)
+  const heroPhotoUri = !isReadOnly && photoUris.length ? photoUris[0] : null;
 
   return (
     <KeyboardAvoidingView
@@ -1826,7 +1817,7 @@ export default function JobDetailScreen() {
           </TouchableOpacity>
         </View>
 
-        {!!isUploadingPhotos && (
+        {!!isUploadingPhotos && !isReadOnly && (
           <View style={{ paddingHorizontal: 18, paddingBottom: 8 }}>
             <Text style={{ color: theme.textMuted, fontFamily: "Athiti-SemiBold", fontSize: 12 }}>
               Uploading photos to cloud…
@@ -1907,7 +1898,7 @@ export default function JobDetailScreen() {
                   </View>
                 </View>
 
-                {/* QUICK ACTIONS */}
+                {/* QUICK ACTIONS (allowed for employees) */}
                 <View style={styles.heroActionsRow}>
                   <ActionIcon
                     iconSource={CallIcon}
@@ -1961,7 +1952,7 @@ export default function JobDetailScreen() {
                 </View>
               </View>
 
-              {/* ✅ EMPLOYEE: read-only assignment info (Cloud mode) */}
+              {/* ✅ EMPLOYEE: read-only Assignment + Work Ticket (Cloud only) */}
               {isEmployee && isCloudMode ? (
                 <SectionCard
                   theme={theme}
@@ -1994,13 +1985,30 @@ export default function JobDetailScreen() {
                     </View>
                   </View>
 
+                  <View style={styles.assignmentActionsRow}>
+                    <TouchableOpacity
+                      style={[styles.assignmentSmallButton, { backgroundColor: accentColor }]}
+                      activeOpacity={0.9}
+                      onPress={() => {
+                        router.push({
+                          pathname: "/work-ticket-create",
+                          params: { jobId: job.id },
+                        } as any);
+                      }}
+                    >
+                      <Text style={[styles.assignmentSmallButtonText, { color: "#F9FAFB" }]}>
+                        Create Work Ticket
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
+
                   <Text style={[styles.assignmentHint, { color: theme.textMuted }]}>
-                    Only assigned jobs appear on your Home screen.
+                    Work tickets are immutable after submit.
                   </Text>
                 </SectionCard>
               ) : null}
 
-              {/* ✅ OWNER ONLY: ASSIGNMENT CARD (Cloud only) */}
+              {/* ✅ OWNER ONLY: ASSIGNMENT CARD */}
               {isOwner && isCloudMode ? (
                 <SectionCard
                   theme={theme}
@@ -2176,15 +2184,15 @@ export default function JobDetailScreen() {
                 </SectionCard>
               ) : null}
 
-              {/* JOB INFO CARD */}
+              {/* JOB INFO */}
               <SectionCard
                 theme={theme}
                 accentColor={accentColor}
                 title="Job Info"
                 subtitle="Title, address, scope"
                 icon="🧾"
-                isActive={cardIsActive("jobInfo")}
-                isDimmed={cardIsDimmed("jobInfo")}
+                isActive={!isReadOnly ? cardIsActive("jobInfo") : false}
+                isDimmed={!isReadOnly ? cardIsDimmed("jobInfo") : false}
                 onLayout={(y) => registerSection("jobInfo", y)}
               >
                 <View style={styles.row}>
@@ -2201,12 +2209,15 @@ export default function JobDetailScreen() {
                       color: theme.inputText,
                       borderColor: theme.inputBorder,
                       borderWidth: 1,
+                      opacity: isReadOnly ? 0.9 : 1,
                     },
                   ]}
                   value={editTitle}
                   onChangeText={setEditTitle}
                   placeholderTextColor={theme.textMuted}
+                  editable={!isReadOnly}
                   onFocus={() => {
+                    if (isReadOnly) return;
                     setIsEditing(true);
                     handleFocus("jobInfo");
                   }}
@@ -2222,12 +2233,15 @@ export default function JobDetailScreen() {
                       color: theme.inputText,
                       borderColor: theme.inputBorder,
                       borderWidth: 1,
+                      opacity: isReadOnly ? 0.9 : 1,
                     },
                   ]}
                   value={editAddress}
                   onChangeText={setEditAddress}
                   placeholderTextColor={theme.textMuted}
+                  editable={!isReadOnly}
                   onFocus={() => {
+                    if (isReadOnly) return;
                     setIsEditing(true);
                     handleFocus("jobInfo");
                   }}
@@ -2245,13 +2259,16 @@ export default function JobDetailScreen() {
                       color: theme.inputText,
                       borderColor: theme.inputBorder,
                       borderWidth: 1,
+                      opacity: isReadOnly ? 0.9 : 1,
                     },
                   ]}
                   value={editDescription}
                   onChangeText={setEditDescription}
                   multiline
                   placeholderTextColor={theme.textMuted}
+                  editable={!isReadOnly}
                   onFocus={() => {
+                    if (isReadOnly) return;
                     setIsEditing(true);
                     handleFocus("jobInfo");
                   }}
@@ -2259,15 +2276,15 @@ export default function JobDetailScreen() {
                 />
               </SectionCard>
 
-              {/* CLIENT CARD */}
+              {/* CLIENT */}
               <SectionCard
                 theme={theme}
                 accentColor={accentColor}
                 title="Client"
                 subtitle="Name, phone, notes"
                 icon="👤"
-                isActive={cardIsActive("client")}
-                isDimmed={cardIsDimmed("client")}
+                isActive={!isReadOnly ? cardIsActive("client") : false}
+                isDimmed={!isReadOnly ? cardIsDimmed("client") : false}
                 onLayout={(y) => registerSection("client", y)}
               >
                 <Text style={[styles.modalLabel, { color: theme.textSecondary }]}>Client Name</Text>
@@ -2279,13 +2296,16 @@ export default function JobDetailScreen() {
                       color: theme.inputText,
                       borderColor: theme.inputBorder,
                       borderWidth: 1,
+                      opacity: isReadOnly ? 0.9 : 1,
                     },
                   ]}
                   value={editClientName}
                   onChangeText={setEditClientName}
                   placeholder="Client name..."
                   placeholderTextColor={theme.textMuted}
+                  editable={!isReadOnly}
                   onFocus={() => {
+                    if (isReadOnly) return;
                     setIsEditing(true);
                     handleFocus("client");
                   }}
@@ -2301,6 +2321,7 @@ export default function JobDetailScreen() {
                       color: theme.inputText,
                       borderColor: theme.inputBorder,
                       borderWidth: 1,
+                      opacity: isReadOnly ? 0.9 : 1,
                     },
                   ]}
                   value={editClientPhone}
@@ -2308,7 +2329,9 @@ export default function JobDetailScreen() {
                   placeholder="Phone number..."
                   placeholderTextColor={theme.textMuted}
                   keyboardType="phone-pad"
+                  editable={!isReadOnly}
                   onFocus={() => {
+                    if (isReadOnly) return;
                     setIsEditing(true);
                     handleFocus("client");
                   }}
@@ -2324,6 +2347,7 @@ export default function JobDetailScreen() {
                       color: theme.inputText,
                       borderColor: theme.inputBorder,
                       borderWidth: 1,
+                      opacity: isReadOnly ? 0.9 : 1,
                     },
                   ]}
                   value={editClientNotes}
@@ -2331,7 +2355,9 @@ export default function JobDetailScreen() {
                   placeholder="Gate codes, timing, special info..."
                   placeholderTextColor={theme.textMuted}
                   multiline
+                  editable={!isReadOnly}
                   onFocus={() => {
+                    if (isReadOnly) return;
                     setIsEditing(true);
                     handleFocus("client");
                   }}
@@ -2339,15 +2365,15 @@ export default function JobDetailScreen() {
                 />
               </SectionCard>
 
-              {/* PRICING CARD */}
+              {/* PRICING */}
               <SectionCard
                 theme={theme}
                 accentColor={accentColor}
                 title="Pricing"
                 subtitle="Labor + materials"
                 icon="💰"
-                isActive={cardIsActive("pricing")}
-                isDimmed={cardIsDimmed("pricing")}
+                isActive={!isReadOnly ? cardIsActive("pricing") : false}
+                isDimmed={!isReadOnly ? cardIsDimmed("pricing") : false}
                 onLayout={(y) => registerSection("pricing", y)}
               >
                 <View
@@ -2382,6 +2408,7 @@ export default function JobDetailScreen() {
                             color: theme.inputText,
                             borderColor: theme.inputBorder,
                             borderWidth: 1,
+                            opacity: isReadOnly ? 0.9 : 1,
                           },
                         ]}
                         value={laborHours}
@@ -2389,7 +2416,9 @@ export default function JobDetailScreen() {
                         keyboardType="numeric"
                         placeholder="e.g. 4"
                         placeholderTextColor={theme.textMuted}
+                        editable={!isReadOnly}
                         onFocus={() => {
+                          if (isReadOnly) return;
                           setIsEditing(true);
                           handleFocus("pricing");
                         }}
@@ -2410,6 +2439,7 @@ export default function JobDetailScreen() {
                             color: theme.inputText,
                             borderColor: theme.inputBorder,
                             borderWidth: 1,
+                            opacity: isReadOnly ? 0.9 : 1,
                           },
                         ]}
                         value={hourlyRate}
@@ -2417,7 +2447,9 @@ export default function JobDetailScreen() {
                         keyboardType="numeric"
                         placeholder="e.g. 125"
                         placeholderTextColor={theme.textMuted}
+                        editable={!isReadOnly}
                         onFocus={() => {
+                          if (isReadOnly) return;
                           setIsEditing(true);
                           handleFocus("pricing");
                         }}
@@ -2439,6 +2471,7 @@ export default function JobDetailScreen() {
                           color: theme.inputText,
                           borderColor: theme.inputBorder,
                           borderWidth: 1,
+                          opacity: isReadOnly ? 0.9 : 1,
                         },
                       ]}
                       value={materialCost}
@@ -2446,7 +2479,9 @@ export default function JobDetailScreen() {
                       keyboardType="numeric"
                       placeholder="e.g. 300"
                       placeholderTextColor={theme.textMuted}
+                      editable={!isReadOnly}
                       onFocus={() => {
+                        if (isReadOnly) return;
                         setIsEditing(true);
                         handleFocus("pricing");
                       }}
@@ -2456,56 +2491,64 @@ export default function JobDetailScreen() {
                 </View>
               </SectionCard>
 
-              {/* PHOTOS CARD */}
-              <SectionCard
-                theme={theme}
-                accentColor={accentColor}
-                title="Attachments"
-                subtitle="Photos + add"
-                icon="📎"
-                isActive={cardIsActive("photos")}
-                isDimmed={cardIsDimmed("photos")}
-                onLayout={(y) => registerSection("photos", y)}
-              >
-                <JobPhotosSection
+              {/* ✅ PHOTOS (owner/independent only) */}
+              {!isReadOnly ? (
+                <SectionCard
                   theme={theme}
                   accentColor={accentColor}
-                  photoUris={photoUris.filter(Boolean)}
-                  onPressAddPhoto={() => setIsAddPhotoMenuVisible(true)}
-                  onPressThumb={handleOpenFullImage}
-                  onRemovePhoto={handleRemovePhoto}
-                  disableRemove={isUploadingPhotos}
-                />
-              </SectionCard>
-
-              {/* TRASH */}
-              <SectionCard theme={theme} accentColor={accentColor} title="Trash" icon="⚠️">
-                <TouchableOpacity
-                  style={[
-                    styles.modalDeleteButton,
-                    { borderColor: theme.dangerBorder, opacity: isCloudMode ? 0.55 : 1 },
-                  ]}
-                  onPress={confirmMoveToTrash}
-                  disabled={isCloudMode}
+                  title="Attachments"
+                  subtitle="Photos + add"
+                  icon="📎"
+                  isActive={cardIsActive("photos")}
+                  isDimmed={cardIsDimmed("photos")}
+                  onLayout={(y) => registerSection("photos", y)}
                 >
-                  <Text style={[styles.modalDeleteText, { color: theme.dangerText }]}>
-                    Move to Trash
-                  </Text>
-                </TouchableOpacity>
+                  <JobPhotosSection
+                    theme={theme}
+                    accentColor={accentColor}
+                    photoUris={photoUris.filter(Boolean)}
+                    onPressAddPhoto={() => setIsAddPhotoMenuVisible(true)}
+                    onPressThumb={handleOpenFullImage}
+                    onRemovePhoto={handleRemovePhoto}
+                    disableRemove={isUploadingPhotos}
+                  />
+                </SectionCard>
+              ) : null}
 
-                <Text style={[styles.modalMeta, { color: theme.textMuted }]}>
+              {/* TRASH (owner/independent only) */}
+              {!isReadOnly ? (
+                <SectionCard theme={theme} accentColor={accentColor} title="Trash" icon="⚠️">
+                  <TouchableOpacity
+                    style={[
+                      styles.modalDeleteButton,
+                      { borderColor: theme.dangerBorder, opacity: isCloudMode ? 0.55 : 1 },
+                    ]}
+                    onPress={confirmMoveToTrash}
+                    disabled={isCloudMode}
+                  >
+                    <Text style={[styles.modalDeleteText, { color: theme.dangerText }]}>
+                      Move to Trash
+                    </Text>
+                  </TouchableOpacity>
+
+                  <Text style={[styles.modalMeta, { color: theme.textMuted }]}>
+                    Created: {new Date(job.createdAt).toLocaleString()}
+                  </Text>
+                </SectionCard>
+              ) : (
+                <Text style={[styles.modalMeta, { color: theme.textMuted, marginBottom: 14 }]}>
                   Created: {new Date(job.createdAt).toLocaleString()}
                 </Text>
-              </SectionCard>
+              )}
 
-              {/* ✅ keep content from hiding behind sticky bar when NOT editing */}
-              {!isEditing ? <View style={{ height: STICKY_BAR_HEIGHT + 26 }} /> : null}
+              {/* keep content from hiding behind sticky bar when NOT editing */}
+              {!isEditing && !isReadOnly ? <View style={{ height: STICKY_BAR_HEIGHT + 26 }} /> : null}
             </View>
           </TouchableWithoutFeedback>
         </ScrollView>
 
-        {/* ✅ STICKY ACTION BAR — HIDE WHILE EDITING (Add Job behavior) */}
-        {!isEditing && (
+        {/* ✅ STICKY ACTION BAR — owner/independent only */}
+        {!isEditing && !isReadOnly && (
           <View
             style={[
               styles.stickyBar,
@@ -2552,8 +2595,8 @@ export default function JobDetailScreen() {
           </View>
         )}
 
-        {/* Add Photo bottom sheet */}
-        {isAddPhotoMenuVisible && (
+        {/* Add Photo bottom sheet (owner/independent only) */}
+        {!isReadOnly && isAddPhotoMenuVisible && (
           <View style={styles.addPhotoMenuOverlay}>
             <TouchableOpacity
               activeOpacity={1}
@@ -2608,8 +2651,8 @@ export default function JobDetailScreen() {
           </View>
         )}
 
-        {/* Fullscreen viewer */}
-        {photoUris.filter(Boolean).length > 0 && (
+        {/* Fullscreen viewer (owner/independent only) */}
+        {!isReadOnly && photoUris.filter(Boolean).length > 0 && (
           <ImageViewing
             images={photoUris.filter(Boolean).map((uri) => ({ uri }))}
             imageIndex={fullImageIndex}
@@ -2624,6 +2667,211 @@ export default function JobDetailScreen() {
     </KeyboardAvoidingView>
   );
 }
+
+const legacyStyles = StyleSheet.create({
+  // generic
+  loadingScreen: { flex: 1, alignItems: "center", justifyContent: "center", padding: 18 },
+  loadingText: { fontSize: 14, fontFamily: "Athiti-SemiBold" },
+
+  simpleButton: { marginTop: 12, paddingVertical: 10, paddingHorizontal: 16, borderRadius: 12 },
+  simpleButtonText: { fontSize: 14, fontFamily: "Athiti-SemiBold" },
+
+  detailsScreen: { flex: 1 },
+  detailsScroll: { paddingHorizontal: 16, paddingTop: 10 },
+
+  // top header
+  headerRow: {
+    paddingHorizontal: 16,
+    paddingTop: 10,
+    paddingBottom: 10,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  backButton: { paddingVertical: 6, paddingRight: 10 },
+  backText: { fontSize: 14, fontFamily: "Athiti-SemiBold" },
+  headerTitle: { fontSize: 16, fontFamily: "Athiti-Bold" },
+  chatHeaderButton: { paddingVertical: 8, paddingHorizontal: 14, borderRadius: 999 },
+  chatHeaderButtonText: { fontSize: 13, fontFamily: "Athiti-SemiBold" },
+
+  // hero
+  heroWrap: { marginTop: 6, marginBottom: 10 },
+  heroBg: {
+    borderRadius: 18,
+    overflow: "hidden",
+    borderWidth: 1,
+    minHeight: 124,
+  },
+  heroOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: "rgba(0,0,0,0.35)" },
+  heroContent: { padding: 16 },
+  heroTitle: { fontSize: 18, fontFamily: "Athiti-Bold" },
+  heroSubtitle: { marginTop: 2, fontSize: 12, fontFamily: "Athiti-SemiBold" },
+  statusPill: {
+    marginTop: 10,
+    alignSelf: "flex-start",
+    paddingVertical: 4,
+    paddingHorizontal: 10,
+    borderRadius: 999,
+    borderWidth: 1,
+  },
+  statusPillText: { fontSize: 11, fontFamily: "Athiti-Bold" },
+  heroActionsRow: {
+    marginTop: 10,
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    paddingHorizontal: 6,
+  },
+
+  actionIconButton: {
+    padding: 8,
+    borderRadius: 16,
+  },
+
+  // cards
+  card: {
+    borderRadius: 18,
+    borderWidth: 1,
+    padding: 14,
+    marginBottom: 12,
+  },
+  cardActiveShadow: {
+    shadowColor: "#000",
+    shadowOpacity: 0.12,
+    shadowRadius: 14,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 6,
+  },
+  cardHeaderRow: { flexDirection: "row", alignItems: "center", gap: 10 },
+  cardIconBubble: {
+    width: 34,
+    height: 34,
+    borderRadius: 12,
+    borderWidth: 1,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  cardIconText: { fontSize: 14, fontFamily: "Athiti-Bold" },
+  cardTitle: { fontSize: 13, fontFamily: "Athiti-Bold" },
+  cardSubtitle: { fontSize: 11, fontFamily: "Athiti-SemiBold" },
+  cardActivePill: {
+    paddingVertical: 4,
+    paddingHorizontal: 10,
+    borderRadius: 999,
+    borderWidth: 1,
+  },
+  cardActivePillText: { fontSize: 11, fontFamily: "Athiti-SemiBold" },
+
+  // inputs
+  modalLabel: { marginTop: 10, marginBottom: 6, fontSize: 12, fontFamily: "Athiti-SemiBold" },
+  modalInput: { borderRadius: 14, paddingVertical: 10, paddingHorizontal: 12, fontSize: 14 },
+  modalInputMultiline: {
+    borderRadius: 14,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    fontSize: 14,
+    minHeight: 92,
+    textAlignVertical: "top",
+  },
+
+  row: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 6 },
+  metaLabel: { fontSize: 12, fontFamily: "Athiti-SemiBold" },
+  metaValue: { fontSize: 12, fontFamily: "Athiti-Bold" },
+
+  // pricing
+  pricingCard: { borderWidth: 1, borderRadius: 16, padding: 12 },
+  pricingTotalHeader: { flexDirection: "row", alignItems: "baseline", justifyContent: "space-between" },
+  pricingTotalHeaderLabel: { fontSize: 12, fontFamily: "Athiti-SemiBold" },
+  pricingTotalHeaderValue: { fontSize: 18, fontFamily: "Athiti-Bold" },
+  pricingInputsRow: { marginTop: 10, flexDirection: "row", gap: 10 },
+  pricingColumn: { flex: 1 },
+  pricingInput: { marginTop: 0 },
+  pricingSingleRow: { marginTop: 10 },
+
+  // assignment
+  assignmentRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 10 },
+  assignmentLabel: { fontSize: 12, fontFamily: "Athiti-SemiBold" },
+  assignmentPicker: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: 14,
+    borderWidth: 1,
+  },
+  assignmentPickerText: { fontSize: 13, fontFamily: "Athiti-Bold" },
+  assignmentPickerChevron: { fontSize: 14, fontFamily: "Athiti-Bold" },
+  assignmentActionsRow: { marginTop: 10, flexDirection: "row", gap: 10 },
+  assignmentSmallButton: { paddingVertical: 10, paddingHorizontal: 12, borderRadius: 14, alignItems: "center", justifyContent: "center" },
+  assignmentSmallButtonText: { fontSize: 13, fontFamily: "Athiti-Bold" },
+  assignmentDropdown: { marginTop: 10, borderWidth: 1, borderRadius: 14, overflow: "hidden" },
+  assignmentOption: { paddingVertical: 10, paddingHorizontal: 12, flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  assignmentOptionText: { fontSize: 13, fontFamily: "Athiti-SemiBold" },
+  assignmentOptionCheck: { fontSize: 14, fontFamily: "Athiti-Bold" },
+  assignmentHint: { marginTop: 10, fontSize: 11, fontFamily: "Athiti-SemiBold" },
+
+  // photos
+  sectionTitle: { fontSize: 12, fontFamily: "Athiti-Bold", marginBottom: 8 },
+  photosRow: { flexDirection: "row", alignItems: "center", justifyContent: "flex-start", marginBottom: 10 },
+  addPhotoButton: { borderWidth: 1, borderRadius: 14, paddingVertical: 10, paddingHorizontal: 12 },
+  addPhotoButtonText: { fontSize: 13, fontFamily: "Athiti-Bold" },
+  photoGrid: { flexDirection: "row", flexWrap: "wrap", gap: GRID_GAP },
+  photoWrapper: {
+    width: THUMB_SIZE,
+    height: THUMB_SIZE,
+    borderRadius: 14,
+    overflow: "hidden",
+    position: "relative",
+  },
+  photoThumb: { width: "100%", height: "100%" },
+  photoRemoveButton: {
+    position: "absolute",
+    top: 6,
+    right: 6,
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    backgroundColor: "rgba(0,0,0,0.65)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  photoRemoveText: { color: "#fff", fontSize: 12, fontFamily: "Athiti-Bold" },
+
+  // trash
+  modalDeleteButton: {
+    borderWidth: 1,
+    borderRadius: 14,
+    paddingVertical: 12,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  modalDeleteText: { fontSize: 13, fontFamily: "Athiti-Bold" },
+  modalMeta: { marginTop: 10, fontSize: 11, fontFamily: "Athiti-SemiBold" },
+
+  // sticky bar
+  stickyBar: {
+    borderTopWidth: 1,
+    paddingHorizontal: 16,
+    paddingTop: 10,
+    paddingBottom: 12,
+  },
+  stickyButtonsRow: { flexDirection: "row", gap: 10 },
+  stickyButton: { borderRadius: 16, paddingVertical: 14, alignItems: "center", justifyContent: "center" },
+  stickyButtonText: { fontSize: 13, fontFamily: "Athiti-Bold" },
+
+  // add photo menu
+  addPhotoMenuOverlay: { ...StyleSheet.absoluteFillObject, justifyContent: "flex-end" },
+  addPhotoMenuBackdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: "rgba(0,0,0,0.35)" },
+  addPhotoMenuSheet: { padding: 16, borderTopLeftRadius: 20, borderTopRightRadius: 20 },
+  addPhotoMenuTitle: { fontSize: 16, fontFamily: "Athiti-Bold", marginBottom: 12 },
+  addPhotoMenuOption: { borderWidth: 1, borderRadius: 16, paddingVertical: 12, paddingHorizontal: 12, marginBottom: 10 },
+  addPhotoMenuOptionText: { fontSize: 14, fontFamily: "Athiti-SemiBold" },
+  addPhotoMenuCancel: { paddingVertical: 10, alignItems: "center" },
+  addPhotoMenuCancelText: { fontSize: 13, fontFamily: "Athiti-SemiBold" },
+});
+
 
 const styles = StyleSheet.create({
   loadingScreen: { flex: 1, alignItems: "center", justifyContent: "center" },
