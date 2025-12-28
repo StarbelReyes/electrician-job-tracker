@@ -3,7 +3,8 @@ import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { LinearGradient } from "expo-linear-gradient";
 import { useFocusEffect, useRouter } from "expo-router";
-import { collection, getDocs, query, where } from "firebase/firestore";
+import { collection, doc, getDoc, getDocs, query, where } from "firebase/firestore";
+
 import React, { FC, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Animated,
@@ -53,8 +54,9 @@ type Job = {
   hourlyRate?: number;
   materialCost?: number;
 
-  // ✅ employee assignment field (scope B)
-  assignedToUid?: string | null;
+  // ✅ employee assignment fields (backward compatible)
+  assignedToUid?: string | null; // legacy
+  assignedToUids?: string[]; // new
 };
 
 type Theme = (typeof themes)["dark"];
@@ -130,6 +132,14 @@ const normalizeCreatedAt = (value: any): string => {
   }
 
   return new Date().toISOString();
+};
+
+// ✅ Assignment check (supports both new + legacy fields)
+const isJobAssignedToUid = (job: Job, uid: string) => {
+  const inArray =
+    Array.isArray(job.assignedToUids) && job.assignedToUids.includes(uid);
+  const legacy = !!job.assignedToUid && job.assignedToUid === uid;
+  return inArray || legacy;
 };
 
 // ------------- MEDIA HEADER COMPONENT -------------
@@ -346,6 +356,10 @@ const HomeScreen: FC = () => {
   // ✅ session info
   const [session, setSession] = useState<Session | null>(null);
 
+// ✅ GUARD: prevents Home from rendering before session is loaded
+const [sessionChecked, setSessionChecked] = useState(false);
+
+
   const isEmployee = session?.role === "employee";
   const isOwner = session?.role === "owner";
   const isCloudMode = isEmployee || isOwner; // Firestore mode
@@ -417,8 +431,9 @@ const HomeScreen: FC = () => {
         return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
       }
       if (sortOption === "Oldest") {
-        return new Date(a.createdAt).getTime() - new Date(a.createdAt).getTime();
+        return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
       }
+      
       if (sortOption === "A-Z") return a.title.localeCompare(b.title);
       if (sortOption === "Z-A") return b.title.localeCompare(a.title);
       return 0;
@@ -477,7 +492,17 @@ const HomeScreen: FC = () => {
           }
           setSession(parsed);
 
-          // --- EMPLOYEE MODE: Firestore (assigned jobs only) ---
+          // ✅ Mark that we’ve loaded session (even if null)
+          setSessionChecked(true);
+
+          console.warn("SESSION CHECK:", {
+            uid: parsed?.uid,
+            role: parsed?.role,
+            companyId: parsed?.companyId,
+          });
+
+
+          // --- EMPLOYEE MODE: Firestore (assigned jobs only; supports assignedToUids + legacy assignedToUid) ---
           if (parsed?.role === "employee") {
             if (!parsed.companyId) {
               setJobs([]);
@@ -494,11 +519,80 @@ const HomeScreen: FC = () => {
               return;
             }
 
-            const jobsRef = collection(db, "companies", parsed.companyId, "jobs");
-            const qref = query(jobsRef, where("assignedToUid", "==", parsed.uid));
-            const snap = await getDocs(qref);
+            // ✅ Guard + Rehydrate companyId from Firestore users/{uid}
+// IMPORTANT: Your Firestore rules use users/{uid}.companyId to authorize job reads.
+let liveCompanyId = parsed.companyId ?? null;
 
-            const fetched: Job[] = snap.docs.map((d) => {
+try {
+  const uref = doc(db, "users", parsed.uid);
+  const usnap = await getDoc(uref);
+  const ud: any = usnap.exists() ? usnap.data() : null;
+
+  const hasName = !!String(ud?.name ?? "").trim();
+  const hasPhoto = !!String(ud?.photoUrl ?? "").trim();
+
+  // ✅ pull companyId from Firestore (source of truth)
+  if (ud?.companyId) {
+    liveCompanyId = String(ud.companyId);
+  }
+
+  // ✅ If user doc has no companyId, your rules will block job reads.
+  if (!liveCompanyId) {
+    setJobs([]);
+    setTrashJobs([]);
+    setIsHydrated(true);
+    router.replace("/join-company" as any);
+    return;
+  }
+
+  // ✅ keep AsyncStorage in sync (so next launches are clean)
+  if (liveCompanyId !== parsed.companyId) {
+    const nextSession = { ...parsed, companyId: liveCompanyId };
+    await AsyncStorage.setItem(USER_STORAGE_KEY, JSON.stringify(nextSession));
+    setSession(nextSession); // optional but helps UI update
+  }
+
+  if (!hasName || !hasPhoto) {
+    setJobs([]);
+    setTrashJobs([]);
+    setIsHydrated(true);
+    router.replace("/profile-setup" as any);
+    return;
+  }
+} catch (err) {
+  console.warn("Profile guard/rehydrate failed:", err);
+  // If this fails, do NOT keep going with possibly-null companyId
+  setJobs([]);
+  setTrashJobs([]);
+  setIsHydrated(true);
+  return;
+}
+
+            // ✅ Use liveCompanyId (NOT parsed.companyId)
+            const jobsRef = collection(db, "companies", liveCompanyId, "jobs");
+
+            const employeeUid = parsed.uid;
+            const qNew = query(jobsRef, where("assignedToUids", "array-contains", employeeUid));
+            const qLegacy = query(jobsRef, where("assignedToUid", "==", employeeUid));
+            
+            let snapNew: any = null;
+let snapLegacy: any = null;
+
+try {
+  snapNew = await getDocs(qNew);
+  console.warn("✅ qNew OK, docs:", snapNew.docs.length);
+} catch (e) {
+  console.warn("❌ qNew FAILED:", e);
+}
+
+try {
+  snapLegacy = await getDocs(qLegacy);
+  console.warn("✅ qLegacy OK, docs:", snapLegacy.docs.length);
+} catch (e) {
+  console.warn("❌ qLegacy FAILED:", e);
+}
+
+            const toJob = (d: any): Job => {
               const data: any = d.data() ?? {};
               return {
                 id: d.id,
@@ -514,9 +608,25 @@ const HomeScreen: FC = () => {
                 laborHours: typeof data.laborHours === "number" ? data.laborHours : 0,
                 hourlyRate: typeof data.hourlyRate === "number" ? data.hourlyRate : 0,
                 materialCost: typeof data.materialCost === "number" ? data.materialCost : 0,
+
+                // backward compatible assignment fields
                 assignedToUid: data.assignedToUid ? String(data.assignedToUid) : undefined,
+                assignedToUids: Array.isArray(data.assignedToUids)
+                  ? data.assignedToUids.map((x: any) => String(x))
+                  : [],
               };
-            });
+            };
+
+            // ✅ merge + dedupe by doc id
+            const merged = new Map<string, Job>();
+snapNew?.docs?.forEach((d: any) => merged.set(d.id, toJob(d)));
+snapLegacy?.docs?.forEach((d: any) => merged.set(d.id, toJob(d)));
+
+
+            // ✅ final safety filter (supports both fields)
+            const fetched = Array.from(merged.values()).filter((j) =>
+              isJobAssignedToUid(j, parsed!.uid!)
+            );
 
             setJobs(fetched);
             setTrashJobs([]); // employees: no trash here
@@ -541,6 +651,23 @@ const HomeScreen: FC = () => {
               router.replace("/login" as any);
               return;
             }
+
+// ✅ DEBUG: test reading ONE job doc directly (rules test)
+try {
+  // 1) put any REAL jobId from Firestore here
+  const testJobId = "PASTE_A_REAL_JOB_ID_HERE";
+
+  const testRef = doc(db, "companies", parsed.companyId!, "jobs", testJobId);
+  const testSnap = await getDoc(testRef);
+
+  console.warn("✅ TEST JOB READ exists:", testSnap.exists());
+  console.warn("✅ TEST JOB READ data:", testSnap.data());
+} catch (e) {
+  console.warn("❌ TEST JOB READ FAILED:", e);
+}
+
+
+
 
             const jobsRef = collection(db, "companies", parsed.companyId, "jobs");
             const snap = await getDocs(jobsRef);
@@ -768,10 +895,24 @@ const HomeScreen: FC = () => {
     setIsEditing(false);
   };
 
-  // ✅ Don’t render until prefs are ready (kills initial flash completely)
-  if (!isReady) {
-    return <View style={{ flex: 1, backgroundColor: themes.graphite.screenBackground }} />;
-  }
+  // ✅ HARD GUARD: never render Home until preferences + session are ready
+if (!isReady || !sessionChecked) {
+  return <View style={{ flex: 1, backgroundColor: themes.graphite.screenBackground }} />;
+}
+
+// ✅ Role guards
+// Employee must have companyId OR they can’t be on Home
+if (session?.role === "employee" && !session.companyId) {
+  router.replace("/join-company" as any);
+  return <View style={{ flex: 1, backgroundColor: theme.screenBackground }} />;
+}
+
+// Owner must have companyId OR they must create company first
+if (session?.role === "owner" && !session.companyId) {
+  router.replace("/create-company" as any);
+  return <View style={{ flex: 1, backgroundColor: theme.screenBackground }} />;
+}
+
 
   return (
     <KeyboardAvoidingView

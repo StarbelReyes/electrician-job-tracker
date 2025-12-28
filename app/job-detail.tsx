@@ -529,6 +529,27 @@ const normalizeStorageUrl = (u: string) => {
   }
 };
 
+const getBestDisplayName = (p: {
+  displayName?: any;
+  name?: any;
+  email?: any;
+  uid?: any;
+}) => {
+  const a = String(p?.displayName ?? "").trim();
+  if (a) return a;
+
+  const b = String(p?.name ?? "").trim();
+  if (b) return b;
+
+  const c = String(p?.email ?? "").trim();
+  if (c) return c;
+
+  const d = String(p?.uid ?? "").trim();
+  if (!d) return "Employee";
+  return d.slice(0, 6) + "…" + d.slice(-4);
+};
+
+
 
 export default function JobDetailScreen() {
   const router = useRouter();
@@ -570,6 +591,7 @@ export default function JobDetailScreen() {
 
   const [isUploadingPhotos, setIsUploadingPhotos] = useState(false);
   const [photoFiles, setPhotoFiles] = useState<StoredPhoto[]>([]);
+
 
   const safeBack = () => {
     try {
@@ -651,7 +673,13 @@ export default function JobDetailScreen() {
   const [materialCost, setMaterialCost] = useState<string>("");
 
   const [photoUris, setPhotoUris] = useState<string[]>([]);
-  const [photoBase64s, setPhotoBase64s] = useState<string[]>([]);
+  const [photoBase64s, setPhotoBase64s] = useState<string[]>([]);const [assignedNameMap, setAssignedNameMap] = useState<Record<string, string>>({});
+
+  // ✅ Map uid -> { displayName, photoURL } for assigned UIDs (works for employee side)
+  const [assignedProfilesByUid, setAssignedProfilesByUid] = useState<
+    Record<string, { displayName: string; photoURL?: string | null }>
+  >({});
+
 
   // ✅ Track editing like Add Job (but employees never enter edit mode)
   const [isEditing, setIsEditing] = useState(false);
@@ -914,85 +942,211 @@ export default function JobDetailScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id, isCloudMode, companyId, sessionLoaded]);
 
-  // ✅ Owner only: load employees to assign (supports BOTH schemas)
-  // - NEW schema: users (companyId + role=employee)
-  // - OLD schema: companies/{companyId}/employees
-  useEffect(() => {
-    const loadEmployees = async () => {
-      if (!isOwner) return;
-      if (!companyId) return;
+// ✅ Owner only: load employees to assign (supports BOTH schemas)
+// - NEW schema: users (companyId + role=employee)
+// - OLD schema: companies/{companyId}/employees
+useEffect(() => {
+  const loadEmployees = async () => {
+    if (!isOwner) return;
+    if (!companyId) return;
 
+    try {
+      // We'll build a merged list by uid, then filter OUT the owner
+      const byUid = new Map<
+        string,
+        { uid: string; displayName: string; email: string; photoURL?: string; role?: string }
+      >();
+
+      // 1) OLD: companies/{companyId}/employees
       try {
-        const byUid = new Map<string, { uid: string; displayName: string; email: string; photoURL?: string }>();
+        const empRef = collection(db, "companies", companyId, "employees");
+        const empSnap = await getDocs(empRef);
 
-        // 1) OLD: companies/{companyId}/employees
-        try {
-          const empRef = collection(db, "companies", companyId, "employees");
-          const empSnap = await getDocs(empRef);
+        empSnap.docs.forEach((d) => {
+          const data: any = d.data() ?? {};
+          const uid = String(data.uid || d.id).trim();
+          if (!uid) return;
 
-          empSnap.docs.forEach((d) => {
-            const data: any = d.data() ?? {};
-            const uid = String(data.uid || d.id).trim();
-            if (!uid) return;
+          const name = String(data.name || data.displayName || "").trim();
+          const email = String(data.email || "").trim();
+          const photoURL = String(data.photoURL || "").trim();
+          const role = String(data.role || "").trim();
 
-            const name = String(data.name || data.displayName || "").trim();
-            const email = String(data.email || "").trim();
-            const photoURL = String(data.photoURL || "").trim();
-
-            byUid.set(uid, { uid, displayName: name, email, photoURL: photoURL || undefined });
+          byUid.set(uid, {
+            uid,
+            displayName: name,
+            email,
+            photoURL: photoURL || undefined,
+            role,
           });
-        } catch (e) {
-          console.warn("Failed to load companies/{companyId}/employees:", e);
-        }
-
-        // 2) NEW: users where companyId == X AND role == employee
-        try {
-          const usersRef = collection(db, "users");
-          const qy = query(usersRef, where("companyId", "==", companyId), where("role", "==", "employee"));
-          const userSnap = await getDocs(qy);
-
-          userSnap.docs.forEach((d) => {
-            const data: any = d.data() ?? {};
-            const uid = String(data.uid || d.id).trim();
-            if (!uid) return;
-
-            const name = String(data.name || data.displayName || "").trim();
-            const email = String(data.email || "").trim();
-            const photoURL = String(data.photoURL || "").trim();
-
-            const existing = byUid.get(uid);
-            if (!existing) byUid.set(uid, { uid, displayName: name, email, photoURL: photoURL || undefined });
-            else {
-              byUid.set(uid, {
-                uid,
-                displayName: existing.displayName || name,
-                email: existing.email || email,
-                photoURL: existing.photoURL || (photoURL || undefined),
-              });
-            }
-          });
-        } catch (e) {
-          console.warn("Failed to load users employees:", e);
-        }
-
-        const list = Array.from(byUid.values())
-          .sort((a, b) => (a.displayName || a.email || a.uid).localeCompare(b.displayName || b.email || b.uid))
-          .map((x) => ({
-            uid: x.uid,
-            displayName: x.displayName,
-            email: x.email,
-            photoURL: x.photoURL || null,
-          }));
-
-        setEmployees(list);
+        });
       } catch (e) {
-        console.warn("Failed to load employees:", e);
-        setEmployees([]);
+        console.warn("Failed to load companies/{companyId}/employees:", e);
       }
-    };
 
-    loadEmployees();
-  }, [isOwner, companyId]);
+      // 2) NEW: users where companyId == X AND role == employee
+      // ✅ This is the IMPORTANT part: only employees, not owners
+      try {
+        const usersRef = collection(db, "users");
+
+        // keep it strict: role must be "employee"
+        const qy = query(
+          usersRef,
+          where("companyId", "==", companyId),
+          where("role", "==", "employee")
+        );
+
+        const userSnap = await getDocs(qy);
+
+        userSnap.docs.forEach((d) => {
+          const data: any = d.data() ?? {};
+          const uid = String(data.uid || d.id).trim();
+          if (!uid) return;
+
+          const name = String(data.name || data.displayName || "").trim();
+          const email = String(data.email || "").trim();
+          const photoURL = String(data.photoURL || "").trim();
+          const role = String(data.role || "").trim();
+
+          const existing = byUid.get(uid);
+
+          if (!existing) {
+            byUid.set(uid, {
+              uid,
+              displayName: name,
+              email,
+              photoURL: photoURL || undefined,
+              role,
+            });
+          } else {
+            byUid.set(uid, {
+              uid,
+              displayName: existing.displayName || name,
+              email: existing.email || email,
+              photoURL: existing.photoURL || (photoURL || undefined),
+              role: existing.role || role,
+            });
+          }
+        });
+      } catch (e) {
+        console.warn("Failed to load users employees:", e);
+      }
+
+      // ✅ FINAL FILTER: remove owner from list even if something weird happens
+      const ownerUid = session?.uid ? String(session.uid).trim() : "";
+      const ownerEmail = session?.email ? String(session.email).trim().toLowerCase() : "";
+
+      const list = Array.from(byUid.values())
+        .filter((x) => {
+          // remove self by uid
+          if (ownerUid && x.uid === ownerUid) return false;
+
+          // remove self by email fallback (your starbelr@gmail.com case)
+          const e = (x.email || "").trim().toLowerCase();
+          if (ownerEmail && e && e === ownerEmail) return false;
+
+          // also block any user record that is explicitly role=owner
+          const r = (x.role || "").trim().toLowerCase();
+          if (r === "owner") return false;
+
+          return true;
+        })
+        .sort((a, b) =>
+          (a.displayName || a.email || a.uid).localeCompare(b.displayName || b.email || b.uid)
+        )
+        .map((x) => ({
+          uid: x.uid,
+          displayName: x.displayName,
+          email: x.email,
+          photoURL: x.photoURL || null,
+          role: x.role || null,
+        }));
+
+      setEmployees(list as any);
+    } catch (e) {
+      console.warn("Failed to load employees:", e);
+      setEmployees([]);
+    }
+  };
+
+  loadEmployees();
+}, [isOwner, companyId, session?.uid, session?.email]);
+
+// ✅ Load assigned employee display names + avatars for the CURRENT job (employee side + fallback for owner)
+useEffect(() => {
+  const loadAssignedProfiles = async () => {
+    if (!isCloudMode) return;
+    if (!companyId) return;
+    if (!assignedToUids.length) {
+      setAssignedProfilesByUid({});
+      return;
+    }
+
+    try {
+      const next: Record<string, { displayName: string; photoURL?: string | null }> = {};
+
+      // Try users/{uid} first (recommended profile store)
+      for (const uid of assignedToUids) {
+        const cleanUid = String(uid || "").trim();
+        if (!cleanUid) continue;
+
+        try {
+          const uRef = doc(db, "users", cleanUid);
+          const uSnap = await getDoc(uRef);
+          if (uSnap.exists()) {
+            const data: any = uSnap.data() ?? {};
+            next[cleanUid] = {
+              displayName: getBestDisplayName({
+                displayName: data.displayName,
+                name: data.name,
+                email: data.email,
+                uid: cleanUid,
+              }),
+              photoURL: data.photoURL ? String(data.photoURL).trim() : null,
+            };
+            continue;
+          }
+        } catch (e) {
+          console.warn("Assigned profile users/{uid} read failed:", cleanUid, e);
+        }
+
+        // Fallback: companies/{companyId}/employees/{uid}
+        try {
+          const eRef = doc(db, "companies", companyId, "employees", cleanUid);
+          const eSnap = await getDoc(eRef);
+          if (eSnap.exists()) {
+            const data: any = eSnap.data() ?? {};
+            next[cleanUid] = {
+              displayName: getBestDisplayName({
+                displayName: data.displayName,
+                name: data.name,
+                email: data.email,
+                uid: cleanUid,
+              }),
+              photoURL: data.photoURL ? String(data.photoURL).trim() : null,
+            };
+            continue;
+          }
+        } catch (e) {
+          console.warn("Assigned profile companies/.../employees read failed:", cleanUid, e);
+        }
+
+        // last-resort fallback
+        next[cleanUid] = { displayName: getBestDisplayName({ uid: cleanUid }) };
+      }
+
+      setAssignedProfilesByUid(next);
+    } catch (e) {
+      console.warn("Failed to load assigned profiles:", e);
+      setAssignedProfilesByUid({});
+    }
+  };
+
+  loadAssignedProfiles();
+}, [isCloudMode, companyId, assignedToUids]);
+
+
+
 
   useEffect(() => {
     const loadTickets = async () => {
@@ -1049,12 +1203,24 @@ export default function JobDetailScreen() {
     return `${names[0]} + ${names.length - 1} more`;
   }, [assignedToUids, employees]);
 
+  // ✅ EMPLOYEE label (paste this right under assignedLabel)
   const employeeAssignedLabel = useMemo(() => {
     if (!assignedToUids.length) return "Unassigned";
+  
+    // ✅ If THIS employee is assigned, always show "You (Assigned)"
     if (session?.uid && assignedToUids.includes(session.uid)) return "You (Assigned)";
-    const short = assignedToUids[0].slice(0, 6) + "…" + assignedToUids[0].slice(-4);
-    return assignedToUids.length === 1 ? `Assigned (${short})` : `Assigned (${assignedToUids.length})`;
-  }, [assignedToUids, session?.uid]);
+  
+    // ✅ Otherwise show actual assigned employee names
+    const names = assignedToUids
+      .map((uid) => assignedProfilesByUid[uid]?.displayName)
+      .filter(Boolean) as string[];
+  
+    if (!names.length) return `Assigned (${assignedToUids.length})`;
+    if (names.length === 1) return names[0];
+    return `${names[0]} + ${names.length - 1} more`;
+  }, [assignedToUids, session?.uid, assignedProfilesByUid]);
+  
+
 
   const getCloudJobRef = () => {
     if (!companyId) return null;

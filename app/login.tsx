@@ -102,9 +102,9 @@ export default function LoginScreen() {
 
   const handleLoginPress = async () => {
     const trimmedEmail = email.trim();
-    const trimmedPassword = password.trim();
+    const rawPassword = password; // ✅ DO NOT trim password
 
-    if (!trimmedEmail || !trimmedPassword) {
+    if (!trimmedEmail || !rawPassword) {
       return Alert.alert("Error", "Please fill in all fields.");
     }
     if (loading) return;
@@ -115,7 +115,7 @@ export default function LoginScreen() {
       const cred = await signInWithEmailAndPassword(
         firebaseAuth,
         trimmedEmail,
-        trimmedPassword
+        rawPassword
       );
 
       const user = cred.user;
@@ -123,6 +123,8 @@ export default function LoginScreen() {
       // Fetch Firestore profile (source of truth for role + company)
       let profile: UserProfile | null = null;
       try {
+        // ✅ This assumes user doc id == uid.
+        // If your schema doesn't do that, this will NOT find the profile.
         const userRef = doc(db, "users", user.uid);
         const snap = await getDoc(userRef);
         if (snap.exists()) {
@@ -151,7 +153,6 @@ export default function LoginScreen() {
 
       LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
       await AsyncStorage.setItem(USER_STORAGE_KEY, JSON.stringify(session));
-      setLoading(false);
 
       const nextRoute =
         role === "employee" && !companyId ? "/join-company" : "/home";
@@ -161,7 +162,6 @@ export default function LoginScreen() {
       ]);
     } catch (err: any) {
       console.warn("Firebase login error:", err);
-      setLoading(false);
 
       let message = "Could not log in. Please try again.";
 
@@ -176,6 +176,8 @@ export default function LoginScreen() {
       }
 
       Alert.alert("Login failed", message);
+    } finally {
+      setLoading(false); // ✅ always stop loading
     }
   };
 
