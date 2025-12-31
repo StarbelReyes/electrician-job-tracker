@@ -6,6 +6,16 @@ import {
   createUserWithEmailAndPassword,
   sendEmailVerification,
 } from "firebase/auth";
+import {
+  collection,
+  doc,
+  getDocs,
+  query,
+  serverTimestamp,
+  setDoc,
+  updateDoc,
+  where,
+} from "firebase/firestore";
 import React, { useEffect, useRef, useState } from "react";
 import {
   Alert,
@@ -29,12 +39,49 @@ import {
   ThemeName,
   themes,
 } from "../constants/appTheme";
-import { firebaseAuth } from "../firebaseConfig";
+import { db, firebaseAuth } from "../firebaseConfig";
 
 const USER_STORAGE_KEY = "EJT_USER_SESSION";
 
+type Role = "owner" | "employee" | "independent";
+
+function pad4(n: number) {
+  return String(n).padStart(4, "0");
+}
+
+function makeJoinCode(): string {
+  // TRAKTR-1234 style
+  const num = Math.floor(Math.random() * 10000);
+  return `TRAKTR-${pad4(num)}`;
+}
+
+async function ensureUniqueJoinCode(maxAttempts = 6): Promise<string> {
+  for (let i = 0; i < maxAttempts; i++) {
+    const code = makeJoinCode().toUpperCase();
+
+    const qref = query(
+      collection(db, "companies"),
+      where("joinCode", "==", code)
+    );
+
+    const snap = await getDocs(qref);
+    if (snap.empty) return code;
+  }
+
+  // Extremely unlikely fallback: include more digits
+  const num = Math.floor(Math.random() * 1000000);
+  return `TRAKTR-${String(num).padStart(6, "0")}`.toUpperCase();
+}
+
+function isValidEmail(e: string) {
+  return /^\S+@\S+\.\S+$/.test(e);
+}
+
 export default function SignupScreen() {
   const router = useRouter();
+
+  // ✅ Same as index.tsx: avoid typed-route errors if TS hasn't included a new route yet
+  const go = (path: string) => router.replace(path as any);
 
   // THEME + ACCENT
   const [themeName, setThemeName] = useState<ThemeName>("dark");
@@ -53,7 +100,8 @@ export default function SignupScreen() {
         if (
           savedTheme === "light" ||
           savedTheme === "dark" ||
-          savedTheme === "midnight"
+          savedTheme === "midnight" ||
+          savedTheme === "graphite"
         ) {
           setThemeName(savedTheme as ThemeName);
         }
@@ -75,11 +123,11 @@ export default function SignupScreen() {
 
   // FORM STATE
   const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
+  const [password, setPassword] = useState(""); // ✅ do NOT trim passwords
+  const [showPassword, setShowPassword] = useState(false);
   const [name, setName] = useState("");
-  const [role, setRole] = useState<"owner" | "employee" | "independent">(
-    "independent"
-  );
+  const [role, setRole] = useState<Role>("independent");
+  const [businessName, setBusinessName] = useState(""); // ✅ owners only
   const [loading, setLoading] = useState(false);
 
   const buttonScale = useRef(new Animated.Value(1)).current;
@@ -92,20 +140,30 @@ export default function SignupScreen() {
     }).start();
   };
 
-  const handleSignup = async () => {
-    const trimmedEmail = email.trim();
-    const trimmedPassword = password.trim();
-    const trimmedName = name.trim();
+  const dismissKeyboard = () => {
+    Keyboard.dismiss();
+  };
 
-    if (!trimmedName || !trimmedEmail || !trimmedPassword) {
+  const handleSignup = async () => {
+    const trimmedEmail = email.trim().toLowerCase();
+    const trimmedName = name.trim();
+    const trimmedBusiness = businessName.trim();
+
+    // ✅ validations (don’t trim password)
+    if (!trimmedName || !trimmedEmail || !password) {
       return Alert.alert("Error", "All fields are required.");
     }
 
-    if (trimmedPassword.length < 6) {
-      return Alert.alert(
-        "Weak password",
-        "Password must be at least 6 characters."
-      );
+    if (!isValidEmail(trimmedEmail)) {
+      return Alert.alert("Error", "That email address looks invalid.");
+    }
+
+    if (password.length < 6) {
+      return Alert.alert("Weak password", "Password must be at least 6 characters.");
+    }
+
+    if (role === "owner" && !trimmedBusiness) {
+      return Alert.alert("Error", "Business name is required for company owners.");
     }
 
     if (loading) return;
@@ -115,22 +173,66 @@ export default function SignupScreen() {
       const cred = await createUserWithEmailAndPassword(
         firebaseAuth,
         trimmedEmail,
-        trimmedPassword
+        password
       );
 
       const user = cred.user;
 
-      try {
-        await sendEmailVerification(user);
-      } catch (err) {
-        console.warn("Email verification send error:", err);
+      // Fire and forget — don’t block signup if email send fails
+      sendEmailVerification(user).catch((err) =>
+        console.warn("Email verification send error:", err)
+      );
+
+      // ✅ Create user profile in Firestore (source of truth for role/company)
+      const userRef = doc(db, "users", user.uid);
+
+      // We'll set companyId below if owner creates one
+      let companyId: string | null = null;
+
+      await setDoc(
+        userRef,
+        {
+          uid: user.uid,
+          email: user.email ?? trimmedEmail,
+          name: trimmedName,
+          role,
+          companyId: null,
+
+          // ✅ NEW: first-time gating flag
+          profileComplete: role === "owner" ? true : false,
+
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        },
+        { merge: true }
+      );
+
+      // ✅ If owner: create company + join code, then attach to user profile
+      if (role === "owner") {
+        const joinCode = await ensureUniqueJoinCode();
+        const companyRef = doc(collection(db, "companies"));
+        companyId = companyRef.id;
+
+        await setDoc(companyRef, {
+          name: trimmedBusiness,
+          ownerUid: user.uid,
+          joinCode,
+          createdAt: serverTimestamp(),
+        });
+
+        await updateDoc(userRef, {
+          companyId,
+          updatedAt: serverTimestamp(),
+        });
       }
 
+      // ✅ Store local session (includes role + companyId)
       const session = {
         uid: user.uid,
-        email: user.email,
+        email: user.email ?? trimmedEmail,
         name: trimmedName,
         role,
+        companyId,
         provider: "firebase-email",
         createdAt: new Date().toISOString(),
       };
@@ -138,16 +240,19 @@ export default function SignupScreen() {
       LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
       await AsyncStorage.setItem(USER_STORAGE_KEY, JSON.stringify(session));
 
-      setLoading(false);
+      // ✅ NEW: route rules after signup
+      const nextRoute =
+        role === "owner"
+          ? "/home"
+          : "/profile-setup"; // employee + independent must set name/photo
 
       Alert.alert(
         "Account Created",
         `Welcome, ${trimmedName}!\n\nWe sent a verification link to ${trimmedEmail}. Please confirm your email before logging in on a new device.`,
-        [{ text: "Continue", onPress: () => router.replace("/home") }]
+        [{ text: "Continue", onPress: () => go(nextRoute) }]
       );
     } catch (err: any) {
       console.warn("Firebase signup error:", err);
-      setLoading(false);
 
       let message = "Could not create your account. Please try again.";
 
@@ -160,11 +265,9 @@ export default function SignupScreen() {
       }
 
       Alert.alert("Signup Failed", message);
+    } finally {
+      setLoading(false);
     }
-  };
-
-  const dismissKeyboard = () => {
-    Keyboard.dismiss();
   };
 
   return (
@@ -174,12 +277,7 @@ export default function SignupScreen() {
       keyboardVerticalOffset={0}
     >
       <TouchableWithoutFeedback onPress={dismissKeyboard} accessible={false}>
-        <View
-          style={[
-            styles.screen,
-            { backgroundColor: theme.screenBackground },
-          ]}
-        >
+        <View style={[styles.screen, { backgroundColor: theme.screenBackground }]}>
           {/* App header */}
           <View style={styles.headerRow}>
             <Text style={[styles.appTitle, { color: theme.headerText }]}>
@@ -226,6 +324,7 @@ export default function SignupScreen() {
                 placeholderTextColor={theme.textMuted}
                 value={name}
                 onChangeText={setName}
+                editable={!loading}
               />
             </View>
 
@@ -253,6 +352,7 @@ export default function SignupScreen() {
                 onChangeText={setEmail}
                 autoCapitalize="none"
                 keyboardType="email-address"
+                editable={!loading}
               />
             </View>
 
@@ -276,10 +376,23 @@ export default function SignupScreen() {
                 style={[styles.input, { color: theme.inputText }]}
                 placeholder="Password (min 6 chars)"
                 placeholderTextColor={theme.textMuted}
-                secureTextEntry
+                secureTextEntry={!showPassword}
                 value={password}
                 onChangeText={setPassword}
+                editable={!loading}
               />
+              <TouchableOpacity
+                style={styles.eyeButton}
+                onPress={() => setShowPassword((p) => !p)}
+                activeOpacity={0.7}
+                disabled={loading}
+              >
+                <Ionicons
+                  name={showPassword ? "eye-off-outline" : "eye-outline"}
+                  size={20}
+                  color={theme.textMuted}
+                />
+              </TouchableOpacity>
             </View>
 
             {/* Role selector */}
@@ -292,27 +405,23 @@ export default function SignupScreen() {
                   key={option}
                   onPress={() => setRole(option)}
                   activeOpacity={0.9}
+                  disabled={loading}
                   style={[
                     styles.rolePill,
                     {
-                      borderColor:
-                        role === option ? accentColor : theme.cardBorder,
+                      borderColor: role === option ? accentColor : theme.cardBorder,
                       backgroundColor:
                         role === option
                           ? accentColor + "1A"
                           : theme.cardBackground + "F2",
+                      opacity: loading ? 0.8 : 1,
                     },
                   ]}
                 >
                   <Text
                     style={[
                       styles.rolePillText,
-                      {
-                        color:
-                          role === option
-                            ? accentColor
-                            : theme.textPrimary,
-                      },
+                      { color: role === option ? accentColor : theme.textPrimary },
                     ]}
                   >
                     {option === "owner"
@@ -324,6 +433,39 @@ export default function SignupScreen() {
                 </TouchableOpacity>
               ))}
             </View>
+
+            {/* ✅ Business name (owners only) */}
+            {role === "owner" && (
+              <>
+                <Text style={[styles.label, { color: theme.textMuted }]}>
+                  Business name
+                </Text>
+                <View
+                  style={[
+                    styles.inputShell,
+                    {
+                      backgroundColor: theme.inputBackground + "F2",
+                      borderColor: theme.inputBorder,
+                    },
+                  ]}
+                >
+                  <Ionicons
+                    name="business-outline"
+                    size={18}
+                    color={theme.textMuted}
+                    style={{ marginRight: 8 }}
+                  />
+                  <TextInput
+                    style={[styles.input, { color: theme.inputText }]}
+                    placeholder="Your business name"
+                    placeholderTextColor={theme.textMuted}
+                    value={businessName}
+                    onChangeText={setBusinessName}
+                    editable={!loading}
+                  />
+                </View>
+              </>
+            )}
 
             {/* Submit button */}
             <Animated.View style={{ transform: [{ scale: buttonScale }] }}>
@@ -354,13 +496,8 @@ export default function SignupScreen() {
             </Animated.View>
 
             {/* Back to login */}
-            <TouchableOpacity onPress={() => router.back()} activeOpacity={0.8}>
-              <Text
-                style={[
-                  styles.footerLink,
-                  { color: theme.textMuted },
-                ]}
-              >
+            <TouchableOpacity onPress={() => router.back()} activeOpacity={0.8} disabled={loading}>
+              <Text style={[styles.footerLink, { color: theme.textMuted }]}>
                 Already have an account? Log in
               </Text>
             </TouchableOpacity>
@@ -419,6 +556,10 @@ const styles = StyleSheet.create({
   input: {
     flex: 1,
     fontSize: 14,
+  },
+  eyeButton: {
+    paddingHorizontal: 6,
+    paddingVertical: 4,
   },
 
   label: {
