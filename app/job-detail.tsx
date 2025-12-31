@@ -673,8 +673,9 @@ export default function JobDetailScreen() {
   const [materialCost, setMaterialCost] = useState<string>("");
 
   const [photoUris, setPhotoUris] = useState<string[]>([]);
-  const [photoBase64s, setPhotoBase64s] = useState<string[]>([]);const [assignedNameMap, setAssignedNameMap] = useState<Record<string, string>>({});
-
+  const [photoBase64s, setPhotoBase64s] = useState<string[]>([]);
+  const [assignedNameMap, setAssignedNameMap] = useState<Record<string, string>>({});
+  
   // ✅ Map uid -> { displayName, photoURL } for assigned UIDs (works for employee side)
   const [assignedProfilesByUid, setAssignedProfilesByUid] = useState<
     Record<string, { displayName: string; photoURL?: string | null }>
@@ -1191,34 +1192,46 @@ useEffect(() => {
   // ✅ MULTI label
   const assignedLabel = useMemo(() => {
     if (!assignedToUids.length) return "Unassigned";
-
-    const names = assignedToUids
-      .map((uid) => employees.find((e) => e.uid === uid))
-      .filter(Boolean)
-      .map((e: any) => String(e.displayName || e.name || e.email || "Employee").trim())
-      .filter(Boolean);
-
-    if (!names.length) return `Assigned (${assignedToUids.length})`;
-    if (names.length === 1) return names[0];
-    return `${names[0]} + ${names.length - 1} more`;
-  }, [assignedToUids, employees]);
-
-  // ✅ EMPLOYEE label (paste this right under assignedLabel)
-  const employeeAssignedLabel = useMemo(() => {
-    if (!assignedToUids.length) return "Unassigned";
   
-    // ✅ If THIS employee is assigned, always show "You (Assigned)"
-    if (session?.uid && assignedToUids.includes(session.uid)) return "You (Assigned)";
-  
-    // ✅ Otherwise show actual assigned employee names
     const names = assignedToUids
       .map((uid) => assignedProfilesByUid[uid]?.displayName)
       .filter(Boolean) as string[];
   
-    if (!names.length) return `Assigned (${assignedToUids.length})`;
-    if (names.length === 1) return names[0];
-    return `${names[0]} + ${names.length - 1} more`;
-  }, [assignedToUids, session?.uid, assignedProfilesByUid]);
+    if (names.length) {
+      if (names.length === 1) return names[0];
+      return `${names[0]} + ${names.length - 1} more`;
+    }
+  
+    // fallback (owner list)
+    const names2 = assignedToUids
+      .map((uid) => employees.find((e) => e.uid === uid))
+      .filter(Boolean)
+      .map((e: any) => String(e.displayName || e.email || "Employee").trim())
+      .filter(Boolean);
+  
+    if (!names2.length) return `Assigned (${assignedToUids.length})`;
+    if (names2.length === 1) return names2[0];
+    return `${names2[0]} + ${names2.length - 1} more`;
+  }, [assignedToUids, employees, assignedProfilesByUid]);
+
+  // ✅ EMPLOYEE label (must be above return + above any JSX usage)
+const employeeAssignedLabel = useMemo(() => {
+  if (!assignedToUids.length) return "Unassigned";
+
+  // If THIS employee is assigned, always show "You (Assigned)"
+  if (session?.uid && assignedToUids.includes(session.uid)) return "You (Assigned)";
+
+  // Otherwise show actual assigned employee names (from loaded profiles)
+  const names = assignedToUids
+    .map((uid) => assignedProfilesByUid[uid]?.displayName)
+    .filter(Boolean) as string[];
+
+  if (!names.length) return `Assigned (${assignedToUids.length})`;
+  if (names.length === 1) return names[0];
+  return `${names[0]} + ${names.length - 1} more`;
+}, [assignedToUids, session?.uid, assignedProfilesByUid]);
+
+  
   
 
 

@@ -57,8 +57,12 @@ type Job = {
   hourlyRate?: number;
   materialCost?: number;
 
-  // ✅ owner/employee cloud field
-  assignedToUid?: string | null;
+  // ✅ NEW assignment model (ARRAY)
+  assignedToUids?: string[];
+
+  // ✅ required for owner reads/writes in your rules
+  ownerUid?: string;
+  createdByUid?: string;
 };
 
 const STORAGE_KEYS = {
@@ -313,10 +317,8 @@ function JobPhotos({
 export default function AddJobScreen() {
   const router = useRouter();
 
-  // ✅ Use global theme + accent + isReady (prevents theme “swap flash”)
   const { isReady, theme, accentColor } = usePreferences();
 
-  // ✅ session
   const [session, setSession] = useState<Session | null>(null);
   const isOwner = session?.role === "owner";
   const isEmployee = session?.role === "employee";
@@ -338,15 +340,11 @@ export default function AddJobScreen() {
     loadSession();
   }, []);
 
-  // ✅ PERMANENT FIX:
-  // When Add Job is opened via bottom nav using replace(), there is no back stack.
-  // router.back() will throw GO_BACK warning. This makes navigation safe.
   const goBackSafe = () => {
     if (router.canGoBack()) router.back();
     else router.replace("/home" as any);
   };
 
-  // Form state
   const [title, setTitle] = useState("");
   const [address, setAddress] = useState("");
   const [description, setDescription] = useState("");
@@ -363,7 +361,6 @@ export default function AddJobScreen() {
 
   const [isEditing, setIsEditing] = useState(false);
 
-  // Scroll / sections
   const scrollRef = useRef<ScrollView | null>(null);
   const sectionPositions = useRef<Record<string, number>>({});
 
@@ -381,7 +378,6 @@ export default function AddJobScreen() {
     }
   };
 
-  // Button animation
   const saveScale = useRef(new Animated.Value(1)).current;
 
   const saveAnim = {
@@ -412,7 +408,6 @@ export default function AddJobScreen() {
     }).start();
   }, [screenScale]);
 
-  // Helpers
   const parseNumber = (value: string) => {
     const n = Number(value.replace(/[^0-9.]/g, ""));
     return Number.isNaN(n) ? 0 : n;
@@ -429,7 +424,6 @@ export default function AddJobScreen() {
   };
 
   const handleSaveJob = async () => {
-    // ✅ block employees from creating jobs
     if (isEmployee) {
       Alert.alert("Not allowed", "Employees can’t create jobs.");
       return;
@@ -452,7 +446,13 @@ export default function AddJobScreen() {
         ]);
         return;
       }
+      if (!session?.uid) {
+        Alert.alert("Session error", "Please log in again.");
+        router.replace("/login" as any);
+        return;
+      }
 
+      // ✅ NEW MODEL + REQUIRED OWNER MARKERS
       const fireJob = {
         title: trimmedTitle,
         address: trimmedAddress,
@@ -468,25 +468,23 @@ export default function AddJobScreen() {
         hourlyRate: parseNumber(hourlyRate),
         materialCost: parseNumber(materialCost),
 
-        // ⚠️ foundation: these URIs are device-local. Later we’ll upload to Storage.
         photoUris: photoUris,
-        // ⚠️ do NOT store base64s in Firestore (doc size risk)
+        // ✅ never store base64 in Firestore
         photoBase64s: [],
 
-        // ✅ Option B: unassigned by default
-        assignedToUid: null,
+        // ✅ ARRAY model (unassigned by default)
+        assignedToUids: [],
+
+        // ✅ REQUIRED for your rules + owner query
+        ownerUid: session.uid,
+        createdByUid: session.uid,
       };
 
       try {
         const jobsRef = collection(db, "companies", session.companyId, "jobs");
         await addDoc(jobsRef, fireJob);
 
-        Alert.alert("Saved", "Job created.", [
-          {
-            text: "OK",
-            onPress: goBackSafe, // ✅ FIXED
-          },
-        ]);
+        Alert.alert("Saved", "Job created.", [{ text: "OK", onPress: goBackSafe }]);
         return;
       } catch (e) {
         console.warn("Failed to create Firestore job:", e);
@@ -495,7 +493,7 @@ export default function AddJobScreen() {
       }
     }
 
-    // ---------------- INDEPENDENT MODE: AsyncStorage (unchanged) ----------------
+    // ---------------- INDEPENDENT MODE: AsyncStorage ----------------
     const newJob: Job = {
       id: createJobId(),
       title: trimmedTitle,
@@ -511,6 +509,7 @@ export default function AddJobScreen() {
       materialCost: parseNumber(materialCost),
       photoUris,
       photoBase64s,
+      assignedToUids: [],
     };
 
     try {
@@ -520,12 +519,7 @@ export default function AddJobScreen() {
       const next = [newJob, ...jobs];
       await persistJobs(next);
 
-      Alert.alert("Saved", "Job created.", [
-        {
-          text: "OK",
-          onPress: goBackSafe, // ✅ FIXED
-        },
-      ]);
+      Alert.alert("Saved", "Job created.", [{ text: "OK", onPress: goBackSafe }]);
     } catch (e) {
       console.warn("Failed to save new job:", e);
       Alert.alert("Error", "Could not save this job. Try again.");
@@ -537,7 +531,6 @@ export default function AddJobScreen() {
     setIsEditing(false);
   };
 
-  // ✅ Don’t render until prefs are ready (kills initial flash)
   if (!isReady) {
     return <View style={{ flex: 1, backgroundColor: themes.light.screenBackground }} />;
   }
@@ -602,9 +595,7 @@ export default function AddJobScreen() {
                 </View>
 
                 <View onLayout={(e) => registerSection("address", e.nativeEvent.layout.y)}>
-                  <Text style={[styles.modalLabel, { color: theme.textSecondary }]}>
-                    Address
-                  </Text>
+                  <Text style={[styles.modalLabel, { color: theme.textSecondary }]}>Address</Text>
                   <TextInput
                     style={[
                       styles.modalInput,
@@ -627,9 +618,7 @@ export default function AddJobScreen() {
                   />
                 </View>
 
-                <View
-                  onLayout={(e) => registerSection("description", e.nativeEvent.layout.y)}
-                >
+                <View onLayout={(e) => registerSection("description", e.nativeEvent.layout.y)}>
                   <Text style={[styles.modalLabel, { color: theme.textSecondary }]}>
                     Description / Scope
                   </Text>
@@ -737,9 +726,7 @@ export default function AddJobScreen() {
                 </View>
 
                 <View onLayout={(e) => registerSection("pricing", e.nativeEvent.layout.y)}>
-                  <Text style={[styles.sectionTitle, { color: theme.textSecondary }]}>
-                    Pricing
-                  </Text>
+                  <Text style={[styles.sectionTitle, { color: theme.textSecondary }]}>Pricing</Text>
 
                   <View
                     style={[
@@ -851,9 +838,7 @@ export default function AddJobScreen() {
                 </View>
 
                 <View onLayout={(e) => registerSection("photos", e.nativeEvent.layout.y)}>
-                  <Text style={[styles.sectionTitle, { color: theme.textSecondary }]}>
-                    Photos
-                  </Text>
+                  <Text style={[styles.sectionTitle, { color: theme.textSecondary }]}>Photos</Text>
 
                   <JobPhotos
                     theme={theme}
@@ -868,7 +853,10 @@ export default function AddJobScreen() {
                 <View style={styles.modalButtonRow}>
                   <Animated.View style={{ flex: 1, transform: [{ scale: saveScale }] }}>
                     <TouchableOpacity
-                      style={[styles.modalButton, { backgroundColor: theme.primaryButtonBackground }]}
+                      style={[
+                        styles.modalButton,
+                        { backgroundColor: theme.primaryButtonBackground },
+                      ]}
                       onPress={handleSaveJob}
                       activeOpacity={0.9}
                       onPressIn={saveAnim.onPressIn}

@@ -1,0 +1,229 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ---------------- HELPERS ----------------
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isSelf(uid) {
+      return isSignedIn() && request.auth.uid == uid;
+    }
+
+    function userDoc(uid) {
+      return get(/databases/$(database)/documents/users/$(uid)).data;
+    }
+
+    function roleOfMe() {
+      return userDoc(request.auth.uid).role;
+    }
+
+    function myCompanyId() {
+      return userDoc(request.auth.uid).companyId;
+    }
+
+    function companyDoc(companyId) {
+      return get(/databases/$(database)/documents/companies/$(companyId)).data;
+    }
+
+    function isCompanyOwner(companyId) {
+      return isSignedIn()
+        && (
+          companyDoc(companyId).createdByUid == request.auth.uid
+          || companyDoc(companyId).ownerUid == request.auth.uid
+        );
+    }
+
+    function isNullableString(x) {
+      return x == null || x is string;
+    }
+
+    // ---------------- USERS ----------------
+    match /users/{uid} {
+      allow read: if isSelf(uid);
+      allow create: if isSelf(uid);
+      allow update: if isSelf(uid);
+      allow delete: if false;
+    }
+
+    // ---------------- COMPANIES ----------------
+    match /companies/{companyId} {
+
+      allow create: if isSignedIn()
+        && roleOfMe() == "owner"
+        && request.resource.data.createdByUid == request.auth.uid;
+
+      allow read: if isCompanyOwner(companyId)
+        || (isSignedIn() && myCompanyId() == companyId);
+
+      allow update: if isCompanyOwner(companyId);
+      allow delete: if false;
+
+      // -------- employees subcollection --------
+      match /employees/{employeeId} {
+
+        // OWNER: can read/create/update any employee doc
+        allow read, create, update: if isCompanyOwner(companyId);
+
+        // EMPLOYEE: can read their own membership doc
+        allow read: if isSignedIn()
+          && request.auth.uid == employeeId
+          && myCompanyId() == companyId;
+
+        // EMPLOYEE: join create (locked schema)
+        allow create: if isSignedIn()
+          && request.auth.uid == employeeId
+          && request.resource.data.joinCodeUsed is string
+          && request.resource.data.joinCodeUsed == companyDoc(companyId).joinCode
+          && request.resource.data.joinedAt is timestamp
+          && request.resource.data.keys().hasOnly([
+            "joinedAt",
+            "joinCodeUsed"
+          ]);
+
+        // EMPLOYEE: can update ONLY their profile fields
+        allow update: if isSignedIn()
+          && request.auth.uid == employeeId
+          && myCompanyId() == companyId
+          && request.resource.data.diff(resource.data).changedKeys().hasOnly([
+            "uid",
+            "email",
+            "name",
+            "photoUrl",
+            "profileComplete",
+            "updatedAt"
+          ])
+          && request.resource.data.uid == employeeId
+          && isNullableString(request.resource.data.email)
+          && request.resource.data.name is string
+          && request.resource.data.photoUrl is string
+          && (request.resource.data.profileComplete == true
+              || request.resource.data.profileComplete == false
+              || request.resource.data.profileComplete == null)
+          && request.resource.data.updatedAt is timestamp;
+
+        allow delete: if false;
+      } // ✅ IMPORTANT: close employees match properly
+
+      // -------- jobs subcollection --------
+      match /jobs/{jobId} {
+
+        // ✅ READ (query-safe):
+        // - employees: only if assigned via assignedToUids
+        // - owners: only if job carries createdByUid or ownerUid
+        //
+        // This avoids get() calls in list queries so array-contains queries work reliably.
+        allow read: if isSignedIn()
+          && (
+            // employee assigned
+            (resource.data.assignedToUids is list
+              && resource.data.assignedToUids.hasAny([request.auth.uid]))
+            // owner marker on job doc (must exist on jobs)
+            || (resource.data.createdByUid is string
+              && resource.data.createdByUid == request.auth.uid)
+            || (resource.data.ownerUid is string
+              && resource.data.ownerUid == request.auth.uid)
+          );
+
+        // ✅ Writes (kept owner-only but query-safe)
+        // Requires jobs you create/update to include createdByUid or ownerUid = your uid.
+        allow create, update: if isSignedIn()
+          && (
+            (request.resource.data.createdByUid is string
+              && request.resource.data.createdByUid == request.auth.uid)
+            || (request.resource.data.ownerUid is string
+              && request.resource.data.ownerUid == request.auth.uid)
+          );
+
+        allow delete: if false;
+
+        // -------- workTickets under job --------
+        match /workTickets/{ticketId} {
+
+          // owner can read any (this uses get() through isCompanyOwner; OK because this is not the jobs LIST query)
+          allow read: if isCompanyOwner(companyId);
+
+          // employee can read if assigned on parent job (ARRAY MODEL ONLY)
+          allow read: if isSignedIn()
+            && roleOfMe() == "employee"
+            && myCompanyId() == companyId
+            && exists(/databases/$(database)/documents/companies/$(companyId)/jobs/$(jobId))
+            && (
+              get(/databases/$(database)/documents/companies/$(companyId)/jobs/$(jobId)).data.assignedToUids is list
+              && request.auth.uid in get(/databases/$(database)/documents/companies/$(companyId)/jobs/$(jobId)).data.assignedToUids
+            );
+
+          // employee create (ARRAY MODEL ONLY)
+          allow create: if isSignedIn()
+            && roleOfMe() == "employee"
+            && myCompanyId() == companyId
+            && (
+              get(/databases/$(database)/documents/companies/$(companyId)/jobs/$(jobId)).data.assignedToUids is list
+              && request.auth.uid in get(/databases/$(database)/documents/companies/$(companyId)/jobs/$(jobId)).data.assignedToUids
+            )
+            && request.resource.data.dayKey is string
+            && ticketId == (request.resource.data.dayKey + "_" + request.auth.uid)
+            && request.resource.data.createdByUid == request.auth.uid
+            && (request.resource.data.createdByRole == "employee"
+                || request.resource.data.createdByRole == null)
+            && request.resource.data.jobId == jobId
+            && request.resource.data.jobTitle is string
+            && request.resource.data.jobAddress is string
+            && request.resource.data.workPerformed is string
+            && request.resource.data.laborHours is number
+            && request.resource.data.materialsUsed is string
+            && isNullableString(request.resource.data.createdByName)
+            && isNullableString(request.resource.data.createdByEmail)
+            && request.resource.data.keys().hasAll(["createdAt"])
+            && request.resource.data.isFinal == true
+            && request.resource.data.isReviewed == false
+            && request.resource.data.keys().hasOnly([
+              "jobId",
+              "jobTitle",
+              "jobAddress",
+              "workPerformed",
+              "laborHours",
+              "materialsUsed",
+              "createdByUid",
+              "createdByName",
+              "createdByEmail",
+              "createdByRole",
+              "createdAt",
+              "dayKey",
+              "isFinal",
+              "isReviewed"
+            ]);
+
+          // owner review update
+          allow update: if isCompanyOwner(companyId)
+            && request.resource.data.diff(resource.data).changedKeys().hasOnly([
+              "isReviewed",
+              "reviewedAt",
+              "reviewedByUid"
+            ])
+            && resource.data.isReviewed == false
+            && request.resource.data.isReviewed == true
+            && request.resource.data.reviewedAt is timestamp
+            && request.resource.data.reviewedByUid == request.auth.uid;
+
+          allow delete: if false;
+        }
+      }
+
+      // ---------------- JOIN CODES ----------------
+      match /joinCodes/{code} {
+        allow read: if isSignedIn();
+
+        allow create, update: if isSignedIn()
+          && request.resource.data.companyId is string
+          && isCompanyOwner(request.resource.data.companyId);
+
+        allow delete: if isSignedIn()
+          && resource.data.companyId is string
+          && isCompanyOwner(resource.data.companyId);
+      }
+    }
+  }
+}
+

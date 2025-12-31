@@ -54,9 +54,16 @@ type Job = {
   hourlyRate?: number;
   materialCost?: number;
 
-  // ✅ employee assignment fields (backward compatible)
-  assignedToUid?: string | null; // legacy
-  assignedToUids?: string[]; // new
+  // ✅ assignment model (ARRAY ONLY)
+assignedToUids?: string[];
+
+// ✅ legacy support (older jobs)
+assignedToUid?: string | null;
+
+
+  // ✅ required for owner reads under your rules
+  ownerUid?: string;
+  createdByUid?: string;
 };
 
 type Theme = (typeof themes)["dark"];
@@ -71,7 +78,6 @@ const STORAGE_KEYS = {
 };
 
 // Focused carousel sizing
-// ✅ FIX: card height was too short, causing bottom row (Open pill + photo chip) to overflow visually outside the card.
 const CARD_HEIGHT = 210;
 const CARD_SPACING = 18;
 const CARD_OUTER_HEIGHT = CARD_HEIGHT + CARD_SPACING;
@@ -113,7 +119,6 @@ const normalizeCreatedAt = (value: any): string => {
   if (!value) return new Date().toISOString();
   if (typeof value === "string") return value;
 
-  // Firestore Timestamp -> has toDate()
   if (typeof value?.toDate === "function") {
     try {
       return value.toDate().toISOString();
@@ -122,7 +127,6 @@ const normalizeCreatedAt = (value: any): string => {
     }
   }
 
-  // fallback: numeric millis
   if (typeof value === "number") {
     try {
       return new Date(value).toISOString();
@@ -132,14 +136,6 @@ const normalizeCreatedAt = (value: any): string => {
   }
 
   return new Date().toISOString();
-};
-
-// ✅ Assignment check (supports both new + legacy fields)
-const isJobAssignedToUid = (job: Job, uid: string) => {
-  const inArray =
-    Array.isArray(job.assignedToUids) && job.assignedToUids.includes(uid);
-  const legacy = !!job.assignedToUid && job.assignedToUid === uid;
-  return inArray || legacy;
 };
 
 // ------------- MEDIA HEADER COMPONENT -------------
@@ -349,25 +345,18 @@ const FocusJobCard: FC<FocusJobCardProps> = ({
 const HomeScreen: FC = () => {
   const router = useRouter();
 
-  // ✅ Global theme + accent
   const { isReady, theme, accentColor } = usePreferences();
   const brand = accentColor;
 
-  // ✅ session info
   const [session, setSession] = useState<Session | null>(null);
-
-// ✅ GUARD: prevents Home from rendering before session is loaded
-const [sessionChecked, setSessionChecked] = useState(false);
-
+  const [sessionChecked, setSessionChecked] = useState(false);
 
   const isEmployee = session?.role === "employee";
   const isOwner = session?.role === "owner";
-  const isCloudMode = isEmployee || isOwner; // Firestore mode
+  const isCloudMode = isEmployee || isOwner;
   const isIndependent = session?.role === "independent" || !session?.role;
 
-  // ✅ owner-only entry point to Work Tickets inbox
   const goToWorkTicketsInbox = useCallback(() => {
-    // exact path:
     router.push("/work-tickets");
   }, [router]);
 
@@ -433,7 +422,6 @@ const [sessionChecked, setSessionChecked] = useState(false);
       if (sortOption === "Oldest") {
         return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
       }
-      
       if (sortOption === "A-Z") return a.title.localeCompare(b.title);
       if (sortOption === "Z-A") return b.title.localeCompare(a.title);
       return 0;
@@ -474,7 +462,6 @@ const [sessionChecked, setSessionChecked] = useState(false);
     [router]
   );
 
-  // ✅ Load session + then load jobs accordingly
   useFocusEffect(
     useCallback(() => {
       const loadData = async () => {
@@ -491,8 +478,6 @@ const [sessionChecked, setSessionChecked] = useState(false);
             }
           }
           setSession(parsed);
-
-          // ✅ Mark that we’ve loaded session (even if null)
           setSessionChecked(true);
 
           console.warn("SESSION CHECK:", {
@@ -501,8 +486,7 @@ const [sessionChecked, setSessionChecked] = useState(false);
             companyId: parsed?.companyId,
           });
 
-
-          // --- EMPLOYEE MODE: Firestore (assigned jobs only; supports assignedToUids + legacy assignedToUid) ---
+          // --- EMPLOYEE MODE ---
           if (parsed?.role === "employee") {
             if (!parsed.companyId) {
               setJobs([]);
@@ -519,186 +503,191 @@ const [sessionChecked, setSessionChecked] = useState(false);
               return;
             }
 
-            // ✅ Guard + Rehydrate companyId from Firestore users/{uid}
-// IMPORTANT: Your Firestore rules use users/{uid}.companyId to authorize job reads.
-let liveCompanyId = parsed.companyId ?? null;
+            // Keep your existing user-doc guard (fine)
+            let liveCompanyId = parsed.companyId ?? null;
+            try {
+              const uref = doc(db, "users", parsed.uid);
+              const usnap = await getDoc(uref);
+              const ud: any = usnap.exists() ? usnap.data() : null;
 
-try {
-  const uref = doc(db, "users", parsed.uid);
-  const usnap = await getDoc(uref);
-  const ud: any = usnap.exists() ? usnap.data() : null;
+              const hasName = !!String(ud?.name ?? "").trim();
+              const hasPhoto = !!String(ud?.photoUrl ?? "").trim();
 
-  const hasName = !!String(ud?.name ?? "").trim();
-  const hasPhoto = !!String(ud?.photoUrl ?? "").trim();
+              if (ud?.companyId) liveCompanyId = String(ud.companyId);
 
-  // ✅ pull companyId from Firestore (source of truth)
-  if (ud?.companyId) {
-    liveCompanyId = String(ud.companyId);
-  }
+              if (!liveCompanyId) {
+                setJobs([]);
+                setTrashJobs([]);
+                setIsHydrated(true);
+                router.replace("/join-company" as any);
+                return;
+              }
 
-  // ✅ If user doc has no companyId, your rules will block job reads.
-  if (!liveCompanyId) {
-    setJobs([]);
-    setTrashJobs([]);
-    setIsHydrated(true);
-    router.replace("/join-company" as any);
-    return;
-  }
+              if (liveCompanyId !== parsed.companyId) {
+                const nextSession = { ...parsed, companyId: liveCompanyId };
+                await AsyncStorage.setItem(USER_STORAGE_KEY, JSON.stringify(nextSession));
+                setSession(nextSession);
+              }
 
-  // ✅ keep AsyncStorage in sync (so next launches are clean)
-  if (liveCompanyId !== parsed.companyId) {
-    const nextSession = { ...parsed, companyId: liveCompanyId };
-    await AsyncStorage.setItem(USER_STORAGE_KEY, JSON.stringify(nextSession));
-    setSession(nextSession); // optional but helps UI update
-  }
+              if (!hasName || !hasPhoto) {
+                setJobs([]);
+                setTrashJobs([]);
+                setIsHydrated(true);
+                router.replace("/profile-setup" as any);
+                return;
+              }
+            } catch (err) {
+              console.warn("Profile guard/rehydrate failed:", err);
+              setJobs([]);
+              setTrashJobs([]);
+              setIsHydrated(true);
+              return;
+            }
 
-  if (!hasName || !hasPhoto) {
-    setJobs([]);
-    setTrashJobs([]);
-    setIsHydrated(true);
-    router.replace("/profile-setup" as any);
-    return;
-  }
-} catch (err) {
-  console.warn("Profile guard/rehydrate failed:", err);
-  // If this fails, do NOT keep going with possibly-null companyId
-  setJobs([]);
-  setTrashJobs([]);
-  setIsHydrated(true);
-  return;
-}
-
-            // ✅ Use liveCompanyId (NOT parsed.companyId)
             const jobsRef = collection(db, "companies", liveCompanyId, "jobs");
-
             const employeeUid = parsed.uid;
+            
+            // ✅ NEW schema
             const qNew = query(jobsRef, where("assignedToUids", "array-contains", employeeUid));
+            
+            // ✅ LEGACY schema
             const qLegacy = query(jobsRef, where("assignedToUid", "==", employeeUid));
             
-            let snapNew: any = null;
-let snapLegacy: any = null;
-
-try {
-  snapNew = await getDocs(qNew);
-  console.warn("✅ qNew OK, docs:", snapNew.docs.length);
-} catch (e) {
-  console.warn("❌ qNew FAILED:", e);
-}
-
-try {
-  snapLegacy = await getDocs(qLegacy);
-  console.warn("✅ qLegacy OK, docs:", snapLegacy.docs.length);
-} catch (e) {
-  console.warn("❌ qLegacy FAILED:", e);
-}
-
-            const toJob = (d: any): Job => {
-              const data: any = d.data() ?? {};
-              return {
-                id: d.id,
-                title: String(data.title ?? ""),
-                address: String(data.address ?? ""),
-                description: String(data.description ?? ""),
-                createdAt: normalizeCreatedAt(data.createdAt),
-                isDone: Boolean(data.isDone ?? false),
-                clientName: data.clientName ? String(data.clientName) : undefined,
-                clientPhone: data.clientPhone ? String(data.clientPhone) : undefined,
-                clientNotes: data.clientNotes ? String(data.clientNotes) : undefined,
-                photoUris: Array.isArray(data.photoUris) ? data.photoUris : [],
-                laborHours: typeof data.laborHours === "number" ? data.laborHours : 0,
-                hourlyRate: typeof data.hourlyRate === "number" ? data.hourlyRate : 0,
-                materialCost: typeof data.materialCost === "number" ? data.materialCost : 0,
-
-                // backward compatible assignment fields
-                assignedToUid: data.assignedToUid ? String(data.assignedToUid) : undefined,
-                assignedToUids: Array.isArray(data.assignedToUids)
-                  ? data.assignedToUids.map((x: any) => String(x))
-                  : [],
+            try {
+              const [snapNew, snapLegacy] = await Promise.all([
+                getDocs(qNew).catch((e) => {
+                  console.warn("❌ qNew FAILED:", e);
+                  return null as any;
+                }),
+                getDocs(qLegacy).catch((e) => {
+                  console.warn("❌ qLegacy FAILED:", e);
+                  return null as any;
+                }),
+              ]);
+            
+              const byId = new Map<string, Job>();
+            
+              const addSnap = (snap: any) => {
+                if (!snap?.docs?.length) return;
+                snap.docs.forEach((d: any) => {
+                  const data: any = d.data() ?? {};
+                  byId.set(d.id, {
+                    id: d.id,
+                    title: String(data.title ?? ""),
+                    address: String(data.address ?? ""),
+                    description: String(data.description ?? ""),
+                    createdAt: normalizeCreatedAt(data.createdAt),
+                    isDone: Boolean(data.isDone ?? false),
+                    clientName: data.clientName ? String(data.clientName) : undefined,
+                    clientPhone: data.clientPhone ? String(data.clientPhone) : undefined,
+                    clientNotes: data.clientNotes ? String(data.clientNotes) : undefined,
+                    photoUris: Array.isArray(data.photoUris) ? data.photoUris : [],
+                    laborHours: typeof data.laborHours === "number" ? data.laborHours : 0,
+                    hourlyRate: typeof data.hourlyRate === "number" ? data.hourlyRate : 0,
+                    materialCost: typeof data.materialCost === "number" ? data.materialCost : 0,
+            
+                    assignedToUids: Array.isArray(data.assignedToUids) ? data.assignedToUids : [],
+                    assignedToUid: data.assignedToUid ? String(data.assignedToUid) : null,
+            
+                    ownerUid: data.ownerUid ? String(data.ownerUid) : undefined,
+                    createdByUid: data.createdByUid ? String(data.createdByUid) : undefined,
+                  });
+                });
               };
-            };
-
-            // ✅ merge + dedupe by doc id
-            const merged = new Map<string, Job>();
-snapNew?.docs?.forEach((d: any) => merged.set(d.id, toJob(d)));
-snapLegacy?.docs?.forEach((d: any) => merged.set(d.id, toJob(d)));
-
-
-            // ✅ final safety filter (supports both fields)
-            const fetched = Array.from(merged.values()).filter((j) =>
-              isJobAssignedToUid(j, parsed!.uid!)
-            );
-
-            setJobs(fetched);
-            setTrashJobs([]); // employees: no trash here
-            setIsHydrated(true);
-            return;
-          }
-
-          // --- OWNER MODE: Firestore (all company jobs) ---
-          if (parsed?.role === "owner") {
-            if (!parsed.companyId) {
+            
+              addSnap(snapNew);
+              addSnap(snapLegacy);
+            
+              const merged = Array.from(byId.values());
+            
+              console.warn("EMP JOBS MERGED:", {
+                newSize: snapNew?.size ?? 0,
+                legacySize: snapLegacy?.size ?? 0,
+                merged: merged.length,
+                uid: employeeUid,
+                companyId: liveCompanyId,
+              });
+            
+              setJobs(merged);
+              setTrashJobs([]);
+              setIsHydrated(true);
+              return;
+            } catch (e) {
+              console.warn("❌ EMP JOBS MERGE FAILED:", e);
               setJobs([]);
               setTrashJobs([]);
               setIsHydrated(true);
-              // owner should create a company first
-              router.replace("/create-company" as any);
               return;
             }
-            if (!parsed.uid) {
-              setJobs([]);
-              setTrashJobs([]);
-              setIsHydrated(true);
-              router.replace("/login" as any);
-              return;
-            }
+            
+          }
 
-// ✅ DEBUG: test reading ONE job doc directly (rules test)
-try {
-  // 1) put any REAL jobId from Firestore here
-  const testJobId = "PASTE_A_REAL_JOB_ID_HERE";
+// --- OWNER MODE ---
+if (parsed?.role === "owner") {
+  if (!parsed.companyId) {
+    setJobs([]);
+    setTrashJobs([]);
+    setIsHydrated(true);
+    router.replace("/create-company" as any);
+    return;
+  }
+  if (!parsed.uid) {
+    setJobs([]);
+    setTrashJobs([]);
+    setIsHydrated(true);
+    router.replace("/login" as any);
+    return;
+  }
 
-  const testRef = doc(db, "companies", parsed.companyId!, "jobs", testJobId);
-  const testSnap = await getDoc(testRef);
+  const jobsRef = collection(db, "companies", parsed.companyId, "jobs");
 
-  console.warn("✅ TEST JOB READ exists:", testSnap.exists());
-  console.warn("✅ TEST JOB READ data:", testSnap.data());
-} catch (e) {
-  console.warn("❌ TEST JOB READ FAILED:", e);
+  try {
+    const snap = await getDocs(jobsRef); // ✅ load all jobs in company
+
+    console.warn("OWNER JOBS SNAP:", {
+      size: snap.size,
+      empty: snap.empty,
+      uid: parsed.uid,
+      companyId: parsed.companyId,
+    });
+
+    const fetched: Job[] = snap.docs.map((d) => {
+      const data: any = d.data() ?? {};
+      return {
+        id: d.id,
+        title: String(data.title ?? ""),
+        address: String(data.address ?? ""),
+        description: String(data.description ?? ""),
+        createdAt: normalizeCreatedAt(data.createdAt),
+        isDone: Boolean(data.isDone ?? false),
+        clientName: data.clientName ? String(data.clientName) : undefined,
+        clientPhone: data.clientPhone ? String(data.clientPhone) : undefined,
+        clientNotes: data.clientNotes ? String(data.clientNotes) : undefined,
+        photoUris: Array.isArray(data.photoUris) ? data.photoUris : [],
+        laborHours: typeof data.laborHours === "number" ? data.laborHours : 0,
+        hourlyRate: typeof data.hourlyRate === "number" ? data.hourlyRate : 0,
+        materialCost: typeof data.materialCost === "number" ? data.materialCost : 0,
+        assignedToUids: Array.isArray(data.assignedToUids) ? data.assignedToUids : [],
+        ownerUid: data.ownerUid ? String(data.ownerUid) : undefined,
+        createdByUid: data.createdByUid ? String(data.createdByUid) : undefined,
+      };
+    });
+
+    setJobs(fetched);
+    setTrashJobs([]);
+    setIsHydrated(true);
+    return;
+  } catch (e) {
+    console.warn("❌ OWNER JOBS QUERY FAILED:", e);
+    setJobs([]);
+    setTrashJobs([]);
+    setIsHydrated(true);
+    return;
+  }
 }
 
 
-
-
-            const jobsRef = collection(db, "companies", parsed.companyId, "jobs");
-            const snap = await getDocs(jobsRef);
-
-            const fetched: Job[] = snap.docs.map((d) => {
-              const data: any = d.data() ?? {};
-              return {
-                id: d.id,
-                title: String(data.title ?? ""),
-                address: String(data.address ?? ""),
-                description: String(data.description ?? ""),
-                createdAt: normalizeCreatedAt(data.createdAt),
-                isDone: Boolean(data.isDone ?? false),
-                clientName: data.clientName ? String(data.clientName) : undefined,
-                clientPhone: data.clientPhone ? String(data.clientPhone) : undefined,
-                clientNotes: data.clientNotes ? String(data.clientNotes) : undefined,
-                photoUris: Array.isArray(data.photoUris) ? data.photoUris : [],
-                laborHours: typeof data.laborHours === "number" ? data.laborHours : 0,
-                hourlyRate: typeof data.hourlyRate === "number" ? data.hourlyRate : 0,
-                materialCost: typeof data.materialCost === "number" ? data.materialCost : 0,
-                assignedToUid: data.assignedToUid ? String(data.assignedToUid) : undefined,
-              };
-            });
-
-            setJobs(fetched);
-            setTrashJobs([]); // owner: no local trash (we’ll do Firestore delete later)
-            setIsHydrated(true);
-            return;
-          }
-
-          // --- INDEPENDENT MODE: AsyncStorage (keep existing behavior) ---
+          // --- INDEPENDENT MODE ---
           const [[, jobsJson], [, trashJson], [, sortJson]] = await AsyncStorage.multiGet([
             STORAGE_KEYS.JOBS,
             STORAGE_KEYS.TRASH,
@@ -722,51 +711,6 @@ try {
                 hourlyRate: 0,
                 materialCost: 0,
               },
-              {
-                id: "2",
-                title: "Troubleshoot Lights Flickering",
-                address: "456 5th Ave, Manhattan, NY",
-                description: "Check loose neutrals, dimmers, shared circuits.",
-                createdAt: "2025-11-12T14:30:00Z",
-                isDone: false,
-                clientName: "Restaurant Manager",
-                clientPhone: "555-987-6543",
-                clientNotes: "Busy during lunch, go before 11 AM.",
-                photoUris: [],
-                laborHours: 0,
-                hourlyRate: 0,
-                materialCost: 0,
-              },
-              {
-                id: "3",
-                title: "Install Tesla Wall Charger",
-                address: "789 Ocean Pkwy, Brooklyn, NY",
-                description: "Run dedicated circuit, mount charger, test load.",
-                createdAt: "2025-11-13T09:15:00Z",
-                isDone: false,
-                clientName: "Maria Lopez",
-                clientPhone: "555-222-3333",
-                clientNotes: "Garage access via side gate.",
-                photoUris: [],
-                laborHours: 0,
-                hourlyRate: 0,
-                materialCost: 0,
-              },
-              {
-                id: "4",
-                title: "Replace panel in basement",
-                address: "NYC",
-                description: "Full panel change, label all circuits.",
-                createdAt: "2025-11-16T15:09:50Z",
-                isDone: false,
-                clientName: "Basement Owner",
-                clientPhone: "555-000-1111",
-                clientNotes: "",
-                photoUris: [],
-                laborHours: 0,
-                hourlyRate: 0,
-                materialCost: 0,
-              },
             ];
             setJobs(seed);
           } else {
@@ -780,7 +724,7 @@ try {
 
           setIsHydrated(true);
         } catch (err) {
-          console.warn("Failed to load saved jobs:", err);
+          console.warn("Failed to load jobs:", err);
           setIsHydrated(true);
         }
       };
@@ -789,10 +733,9 @@ try {
     }, [router])
   );
 
-  // ✅ Save to AsyncStorage ONLY for INDEPENDENT mode
   useEffect(() => {
     if (!isHydrated) return;
-    if (isCloudMode) return; // owner/employee: Firestore
+    if (isCloudMode) return;
     if (!isIndependent) return;
 
     const saveData = async () => {
@@ -846,7 +789,6 @@ try {
 
   const handleDeleteJob = useCallback(
     (id: string) => {
-      // ✅ independent-only for now
       if (isCloudMode) return;
 
       setJobs((prev) => {
@@ -859,8 +801,6 @@ try {
     },
     [isCloudMode]
   );
-
-  // ------------- FOCUSED LIST SCROLL LOGIC -------------
 
   const scrollY = useRef(new Animated.Value(0)).current;
   const [activeIndex, setActiveIndex] = useState(0);
@@ -895,24 +835,19 @@ try {
     setIsEditing(false);
   };
 
-  // ✅ HARD GUARD: never render Home until preferences + session are ready
-if (!isReady || !sessionChecked) {
-  return <View style={{ flex: 1, backgroundColor: themes.graphite.screenBackground }} />;
-}
+  if (!isReady || !sessionChecked) {
+    return <View style={{ flex: 1, backgroundColor: themes.graphite.screenBackground }} />;
+  }
 
-// ✅ Role guards
-// Employee must have companyId OR they can’t be on Home
-if (session?.role === "employee" && !session.companyId) {
-  router.replace("/join-company" as any);
-  return <View style={{ flex: 1, backgroundColor: theme.screenBackground }} />;
-}
+  if (session?.role === "employee" && !session.companyId) {
+    router.replace("/join-company" as any);
+    return <View style={{ flex: 1, backgroundColor: theme.screenBackground }} />;
+  }
 
-// Owner must have companyId OR they must create company first
-if (session?.role === "owner" && !session.companyId) {
-  router.replace("/create-company" as any);
-  return <View style={{ flex: 1, backgroundColor: theme.screenBackground }} />;
-}
-
+  if (session?.role === "owner" && !session.companyId) {
+    router.replace("/create-company" as any);
+    return <View style={{ flex: 1, backgroundColor: theme.screenBackground }} />;
+  }
 
   return (
     <KeyboardAvoidingView
@@ -1145,7 +1080,6 @@ const styles = StyleSheet.create({
     letterSpacing: 0.2,
   },
 
-  // ✅ NEW: owner-only button styles
   workTicketsBtn: {
     flexDirection: "row",
     alignItems: "center",
