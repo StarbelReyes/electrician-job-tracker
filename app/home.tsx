@@ -36,6 +36,7 @@ type Session = {
   email?: string | null;
   name?: string;
   photoUrl?: string | null; // ✅ so Home can show avatar + keep synced
+  photoVersion?: string | null; // ✅ cache-buster for avatar refresh when overwriting same Storage path
   role?: Role;
   companyId?: string | null;
 };
@@ -136,6 +137,18 @@ const normalizeCreatedAt = (value: any): string => {
   }
 
   return new Date().toISOString();
+};
+
+// ✅ Avatar cache-buster (Storage overwrite often keeps same URL, Image can cache old)
+const buildAvatarUri = (photoUrl?: string | null, photoVersion?: string | null) => {
+  const raw = (photoUrl ?? "").trim();
+  if (!raw) return null;
+
+  const v = (photoVersion ?? "").trim();
+  if (!v) return raw;
+
+  const join = raw.includes("?") ? "&" : "?";
+  return `${raw}${join}v=${encodeURIComponent(v)}`;
 };
 
 // ------------- MEDIA HEADER COMPONENT -------------
@@ -532,18 +545,32 @@ const HomeScreen: FC = () => {
                 return;
               }
 
+              // ✅ derive version from Firestore updatedAt if present (best cache-buster)
+              let photoVersion: string | null = parsed.photoVersion ?? null;
+              const ua = ud?.updatedAt;
+              if (ua) {
+                try {
+                  if (typeof ua?.toMillis === "function") photoVersion = String(ua.toMillis());
+                  else if (typeof ua?.seconds === "number") photoVersion = String(ua.seconds);
+                  else if (typeof ua === "number") photoVersion = String(ua);
+                  else if (typeof ua === "string") photoVersion = ua;
+                } catch {}
+              }
+
               // ✅ Keep session synced (companyId + name/photo)
               const nextSession: Session = {
                 ...parsed,
                 companyId: liveCompanyId,
                 name: liveName || parsed?.name,
                 photoUrl: livePhoto || parsed?.photoUrl || null,
+                photoVersion: photoVersion,
               };
 
               const changed =
                 nextSession.companyId !== parsed.companyId ||
                 nextSession.name !== parsed.name ||
-                nextSession.photoUrl !== parsed.photoUrl;
+                nextSession.photoUrl !== parsed.photoUrl ||
+                nextSession.photoVersion !== parsed.photoVersion;
 
               if (changed) {
                 await AsyncStorage.setItem(USER_STORAGE_KEY, JSON.stringify(nextSession));
@@ -671,14 +698,29 @@ const HomeScreen: FC = () => {
               const liveName = String(ud?.name ?? "").trim();
               const livePhoto = String(ud?.photoUrl ?? "").trim();
 
+              // ✅ derive version from Firestore updatedAt if present (best cache-buster)
+              let photoVersion: string | null = parsed.photoVersion ?? null;
+              const ua = ud?.updatedAt;
+              if (ua) {
+                try {
+                  if (typeof ua?.toMillis === "function") photoVersion = String(ua.toMillis());
+                  else if (typeof ua?.seconds === "number") photoVersion = String(ua.seconds);
+                  else if (typeof ua === "number") photoVersion = String(ua);
+                  else if (typeof ua === "string") photoVersion = ua;
+                } catch {}
+              }
+
               const nextSession: Session = {
                 ...parsed,
                 name: liveName || parsed?.name,
                 photoUrl: livePhoto || parsed?.photoUrl || null,
+                photoVersion,
               };
 
               const changed =
-                nextSession.name !== parsed.name || nextSession.photoUrl !== parsed.photoUrl;
+                nextSession.name !== parsed.name ||
+                nextSession.photoUrl !== parsed.photoUrl ||
+                nextSession.photoVersion !== parsed.photoVersion;
 
               if (changed) {
                 await AsyncStorage.setItem(USER_STORAGE_KEY, JSON.stringify(nextSession));
@@ -885,6 +927,11 @@ const HomeScreen: FC = () => {
     setIsEditing(false);
   };
 
+  const avatarUri = useMemo(
+    () => buildAvatarUri(session?.photoUrl ?? null, session?.photoVersion ?? null),
+    [session?.photoUrl, session?.photoVersion]
+  );
+
   if (!isReady || !sessionChecked) {
     return <View style={{ flex: 1, backgroundColor: themes.graphite.screenBackground }} />;
   }
@@ -918,48 +965,51 @@ const HomeScreen: FC = () => {
             ]}
           >
             <View style={styles.headerRow}>
-  <Text
-    style={[styles.header, { color: theme.headerText }]}
-    numberOfLines={1}
-    ellipsizeMode="tail"
-  >
-    THE TRAKTR APP
-  </Text>
+              <Text
+                style={[styles.header, { color: theme.headerText }]}
+                numberOfLines={1}
+                ellipsizeMode="tail"
+              >
+                THE TRAKTR APP
+              </Text>
 
-  <View style={styles.headerRight}>
-    {isOwner && (
-      <TouchableOpacity
-        activeOpacity={0.9}
-        style={[
-          styles.workTicketsBtn,
-          { backgroundColor: theme.cardBackground + "F2", borderColor: theme.cardBorder },
-        ]}
-        onPress={goToWorkTicketsInbox}
-      >
-        <Ionicons name="clipboard-outline" size={16} color={theme.textPrimary} />
-        <Text style={[styles.workTicketsBtnText, { color: theme.textPrimary }]}>
-          Work Tickets
-        </Text>
-      </TouchableOpacity>
-    )}
+              <View style={styles.headerRight}>
+                {isOwner && (
+                  <TouchableOpacity
+                    activeOpacity={0.9}
+                    style={[
+                      styles.workTicketsBtn,
+                      { backgroundColor: theme.cardBackground + "F2", borderColor: theme.cardBorder },
+                    ]}
+                    onPress={goToWorkTicketsInbox}
+                  >
+                    <Ionicons name="clipboard-outline" size={16} color={theme.textPrimary} />
+                    <Text style={[styles.workTicketsBtnText, { color: theme.textPrimary }]}>
+                      Work Tickets
+                    </Text>
+                  </TouchableOpacity>
+                )}
 
-    <TouchableOpacity
-      activeOpacity={0.9}
-      onPress={goToProfile}
-      style={[
-        styles.profileBtn,
-        { backgroundColor: theme.cardBackground + "F2", borderColor: theme.cardBorder },
-      ]}
-    >
-      {session?.photoUrl ? (
-        <Image source={{ uri: session.photoUrl }} style={styles.profileAvatar} />
-      ) : (
-        <Ionicons name="person-circle-outline" size={26} color={theme.textPrimary} />
-      )}
-    </TouchableOpacity>
-  </View>
-</View>
-
+                <TouchableOpacity
+                  activeOpacity={0.9}
+                  onPress={goToProfile}
+                  style={[
+                    styles.profileBtn,
+                    { backgroundColor: theme.cardBackground + "F2", borderColor: theme.cardBorder },
+                  ]}
+                >
+                  {avatarUri ? (
+                    <Image
+                      key={avatarUri} // ✅ forces refresh when version changes
+                      source={{ uri: avatarUri }}
+                      style={styles.profileAvatar}
+                    />
+                  ) : (
+                    <Ionicons name="person-circle-outline" size={26} color={theme.textPrimary} />
+                  )}
+                </TouchableOpacity>
+              </View>
+            </View>
 
             <View style={styles.aiHelperRow}>
               <TouchableOpacity
@@ -1147,24 +1197,24 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
   },
-  
+
   // ✅ title must shrink or it will push buttons off-screen
   header: {
     flex: 1,
-    minWidth: 0,          // ✅ IMPORTANT for Android
-    flexShrink: 1,        // ✅ IMPORTANT
-    marginRight: 12,      // ✅ space before buttons
+    minWidth: 0, // ✅ IMPORTANT for Android
+    flexShrink: 1, // ✅ IMPORTANT
+    marginRight: 12, // ✅ space before buttons
     fontSize: 22,
     fontFamily: "Athiti-Bold",
     letterSpacing: 0.2,
   },
-  
+
   // ✅ don’t rely on gap (not consistent everywhere)
   headerRight: {
     flexDirection: "row",
     alignItems: "center",
   },
-  
+
   workTicketsBtn: {
     flexDirection: "row",
     alignItems: "center",
@@ -1172,9 +1222,9 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     borderRadius: 999,
     borderWidth: 1,
-    marginRight: 10,      // ✅ replaces gap
+    marginRight: 10, // ✅ replaces gap
   },
-  
+
   workTicketsBtnText: {
     fontSize: 12,
     fontFamily: "Athiti-SemiBold",
