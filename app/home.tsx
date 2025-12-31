@@ -35,6 +35,7 @@ type Session = {
   uid?: string;
   email?: string | null;
   name?: string;
+  photoUrl?: string | null; // ✅ so Home can show avatar + keep synced
   role?: Role;
   companyId?: string | null;
 };
@@ -55,11 +56,10 @@ type Job = {
   materialCost?: number;
 
   // ✅ assignment model (ARRAY ONLY)
-assignedToUids?: string[];
+  assignedToUids?: string[];
 
-// ✅ legacy support (older jobs)
-assignedToUid?: string | null;
-
+  // ✅ legacy support (older jobs)
+  assignedToUid?: string | null;
 
   // ✅ required for owner reads under your rules
   ownerUid?: string;
@@ -360,6 +360,11 @@ const HomeScreen: FC = () => {
     router.push("/work-tickets");
   }, [router]);
 
+  // ✅ Profile screen route
+  const goToProfile = useCallback(() => {
+    router.push("/profile" as any);
+  }, [router]);
+
   const [isEditing, setIsEditing] = useState(false);
 
   const [jobs, setJobs] = useState<Job[]>([]);
@@ -503,15 +508,19 @@ const HomeScreen: FC = () => {
               return;
             }
 
-            // Keep your existing user-doc guard (fine)
             let liveCompanyId = parsed.companyId ?? null;
+
             try {
+              // ✅ Fetch user doc (source of truth for name/photo/companyId)
               const uref = doc(db, "users", parsed.uid);
               const usnap = await getDoc(uref);
               const ud: any = usnap.exists() ? usnap.data() : null;
 
-              const hasName = !!String(ud?.name ?? "").trim();
-              const hasPhoto = !!String(ud?.photoUrl ?? "").trim();
+              const liveName = String(ud?.name ?? "").trim();
+              const livePhoto = String(ud?.photoUrl ?? "").trim();
+
+              const hasName = !!liveName;
+              const hasPhoto = !!livePhoto;
 
               if (ud?.companyId) liveCompanyId = String(ud.companyId);
 
@@ -523,16 +532,34 @@ const HomeScreen: FC = () => {
                 return;
               }
 
-              if (liveCompanyId !== parsed.companyId) {
-                const nextSession = { ...parsed, companyId: liveCompanyId };
+              // ✅ Keep session synced (companyId + name/photo)
+              const nextSession: Session = {
+                ...parsed,
+                companyId: liveCompanyId,
+                name: liveName || parsed?.name,
+                photoUrl: livePhoto || parsed?.photoUrl || null,
+              };
+
+              const changed =
+                nextSession.companyId !== parsed.companyId ||
+                nextSession.name !== parsed.name ||
+                nextSession.photoUrl !== parsed.photoUrl;
+
+              if (changed) {
                 await AsyncStorage.setItem(USER_STORAGE_KEY, JSON.stringify(nextSession));
                 setSession(nextSession);
+              } else {
+                setSession(parsed);
               }
 
+              // ✅ profile guard
               if (!hasName || !hasPhoto) {
                 setJobs([]);
                 setTrashJobs([]);
                 setIsHydrated(true);
+
+                // NOTE: your guard routes to /profile-setup
+                // If you only have /profile.tsx, change this to "/profile"
                 router.replace("/profile-setup" as any);
                 return;
               }
@@ -546,13 +573,10 @@ const HomeScreen: FC = () => {
 
             const jobsRef = collection(db, "companies", liveCompanyId, "jobs");
             const employeeUid = parsed.uid;
-            
-            // ✅ NEW schema
+
             const qNew = query(jobsRef, where("assignedToUids", "array-contains", employeeUid));
-            
-            // ✅ LEGACY schema
             const qLegacy = query(jobsRef, where("assignedToUid", "==", employeeUid));
-            
+
             try {
               const [snapNew, snapLegacy] = await Promise.all([
                 getDocs(qNew).catch((e) => {
@@ -564,9 +588,9 @@ const HomeScreen: FC = () => {
                   return null as any;
                 }),
               ]);
-            
+
               const byId = new Map<string, Job>();
-            
+
               const addSnap = (snap: any) => {
                 if (!snap?.docs?.length) return;
                 snap.docs.forEach((d: any) => {
@@ -585,21 +609,21 @@ const HomeScreen: FC = () => {
                     laborHours: typeof data.laborHours === "number" ? data.laborHours : 0,
                     hourlyRate: typeof data.hourlyRate === "number" ? data.hourlyRate : 0,
                     materialCost: typeof data.materialCost === "number" ? data.materialCost : 0,
-            
+
                     assignedToUids: Array.isArray(data.assignedToUids) ? data.assignedToUids : [],
                     assignedToUid: data.assignedToUid ? String(data.assignedToUid) : null,
-            
+
                     ownerUid: data.ownerUid ? String(data.ownerUid) : undefined,
                     createdByUid: data.createdByUid ? String(data.createdByUid) : undefined,
                   });
                 });
               };
-            
+
               addSnap(snapNew);
               addSnap(snapLegacy);
-            
+
               const merged = Array.from(byId.values());
-            
+
               console.warn("EMP JOBS MERGED:", {
                 newSize: snapNew?.size ?? 0,
                 legacySize: snapLegacy?.size ?? 0,
@@ -607,7 +631,7 @@ const HomeScreen: FC = () => {
                 uid: employeeUid,
                 companyId: liveCompanyId,
               });
-            
+
               setJobs(merged);
               setTrashJobs([]);
               setIsHydrated(true);
@@ -619,73 +643,99 @@ const HomeScreen: FC = () => {
               setIsHydrated(true);
               return;
             }
-            
           }
 
-// --- OWNER MODE ---
-if (parsed?.role === "owner") {
-  if (!parsed.companyId) {
-    setJobs([]);
-    setTrashJobs([]);
-    setIsHydrated(true);
-    router.replace("/create-company" as any);
-    return;
-  }
-  if (!parsed.uid) {
-    setJobs([]);
-    setTrashJobs([]);
-    setIsHydrated(true);
-    router.replace("/login" as any);
-    return;
-  }
+          // --- OWNER MODE ---
+          if (parsed?.role === "owner") {
+            if (!parsed.companyId) {
+              setJobs([]);
+              setTrashJobs([]);
+              setIsHydrated(true);
+              router.replace("/create-company" as any);
+              return;
+            }
+            if (!parsed.uid) {
+              setJobs([]);
+              setTrashJobs([]);
+              setIsHydrated(true);
+              router.replace("/login" as any);
+              return;
+            }
 
-  const jobsRef = collection(db, "companies", parsed.companyId, "jobs");
+            // ✅ Keep owner session synced too (name/photo)
+            try {
+              const uref = doc(db, "users", parsed.uid);
+              const usnap = await getDoc(uref);
+              const ud: any = usnap.exists() ? usnap.data() : null;
 
-  try {
-    const snap = await getDocs(jobsRef); // ✅ load all jobs in company
+              const liveName = String(ud?.name ?? "").trim();
+              const livePhoto = String(ud?.photoUrl ?? "").trim();
 
-    console.warn("OWNER JOBS SNAP:", {
-      size: snap.size,
-      empty: snap.empty,
-      uid: parsed.uid,
-      companyId: parsed.companyId,
-    });
+              const nextSession: Session = {
+                ...parsed,
+                name: liveName || parsed?.name,
+                photoUrl: livePhoto || parsed?.photoUrl || null,
+              };
 
-    const fetched: Job[] = snap.docs.map((d) => {
-      const data: any = d.data() ?? {};
-      return {
-        id: d.id,
-        title: String(data.title ?? ""),
-        address: String(data.address ?? ""),
-        description: String(data.description ?? ""),
-        createdAt: normalizeCreatedAt(data.createdAt),
-        isDone: Boolean(data.isDone ?? false),
-        clientName: data.clientName ? String(data.clientName) : undefined,
-        clientPhone: data.clientPhone ? String(data.clientPhone) : undefined,
-        clientNotes: data.clientNotes ? String(data.clientNotes) : undefined,
-        photoUris: Array.isArray(data.photoUris) ? data.photoUris : [],
-        laborHours: typeof data.laborHours === "number" ? data.laborHours : 0,
-        hourlyRate: typeof data.hourlyRate === "number" ? data.hourlyRate : 0,
-        materialCost: typeof data.materialCost === "number" ? data.materialCost : 0,
-        assignedToUids: Array.isArray(data.assignedToUids) ? data.assignedToUids : [],
-        ownerUid: data.ownerUid ? String(data.ownerUid) : undefined,
-        createdByUid: data.createdByUid ? String(data.createdByUid) : undefined,
-      };
-    });
+              const changed =
+                nextSession.name !== parsed.name || nextSession.photoUrl !== parsed.photoUrl;
 
-    setJobs(fetched);
-    setTrashJobs([]);
-    setIsHydrated(true);
-    return;
-  } catch (e) {
-    console.warn("❌ OWNER JOBS QUERY FAILED:", e);
-    setJobs([]);
-    setTrashJobs([]);
-    setIsHydrated(true);
-    return;
-  }
-}
+              if (changed) {
+                await AsyncStorage.setItem(USER_STORAGE_KEY, JSON.stringify(nextSession));
+                setSession(nextSession);
+              } else {
+                setSession(parsed);
+              }
+            } catch {
+              setSession(parsed);
+            }
 
+            const jobsRef = collection(db, "companies", parsed.companyId, "jobs");
+
+            try {
+              const snap = await getDocs(jobsRef);
+
+              console.warn("OWNER JOBS SNAP:", {
+                size: snap.size,
+                empty: snap.empty,
+                uid: parsed.uid,
+                companyId: parsed.companyId,
+              });
+
+              const fetched: Job[] = snap.docs.map((d) => {
+                const data: any = d.data() ?? {};
+                return {
+                  id: d.id,
+                  title: String(data.title ?? ""),
+                  address: String(data.address ?? ""),
+                  description: String(data.description ?? ""),
+                  createdAt: normalizeCreatedAt(data.createdAt),
+                  isDone: Boolean(data.isDone ?? false),
+                  clientName: data.clientName ? String(data.clientName) : undefined,
+                  clientPhone: data.clientPhone ? String(data.clientPhone) : undefined,
+                  clientNotes: data.clientNotes ? String(data.clientNotes) : undefined,
+                  photoUris: Array.isArray(data.photoUris) ? data.photoUris : [],
+                  laborHours: typeof data.laborHours === "number" ? data.laborHours : 0,
+                  hourlyRate: typeof data.hourlyRate === "number" ? data.hourlyRate : 0,
+                  materialCost: typeof data.materialCost === "number" ? data.materialCost : 0,
+                  assignedToUids: Array.isArray(data.assignedToUids) ? data.assignedToUids : [],
+                  ownerUid: data.ownerUid ? String(data.ownerUid) : undefined,
+                  createdByUid: data.createdByUid ? String(data.createdByUid) : undefined,
+                };
+              });
+
+              setJobs(fetched);
+              setTrashJobs([]);
+              setIsHydrated(true);
+              return;
+            } catch (e) {
+              console.warn("❌ OWNER JOBS QUERY FAILED:", e);
+              setJobs([]);
+              setTrashJobs([]);
+              setIsHydrated(true);
+              return;
+            }
+          }
 
           // --- INDEPENDENT MODE ---
           const [[, jobsJson], [, trashJson], [, sortJson]] = await AsyncStorage.multiGet([
@@ -868,24 +918,48 @@ if (parsed?.role === "owner") {
             ]}
           >
             <View style={styles.headerRow}>
-              <Text style={[styles.header, { color: theme.headerText }]}>THE TRAKTR APP</Text>
+  <Text
+    style={[styles.header, { color: theme.headerText }]}
+    numberOfLines={1}
+    ellipsizeMode="tail"
+  >
+    THE TRAKTR APP
+  </Text>
 
-              {isOwner && (
-                <TouchableOpacity
-                  activeOpacity={0.9}
-                  style={[
-                    styles.workTicketsBtn,
-                    { backgroundColor: theme.cardBackground + "F2", borderColor: theme.cardBorder },
-                  ]}
-                  onPress={goToWorkTicketsInbox}
-                >
-                  <Ionicons name="clipboard-outline" size={16} color={theme.textPrimary} />
-                  <Text style={[styles.workTicketsBtnText, { color: theme.textPrimary }]}>
-                    Work Tickets
-                  </Text>
-                </TouchableOpacity>
-              )}
-            </View>
+  <View style={styles.headerRight}>
+    {isOwner && (
+      <TouchableOpacity
+        activeOpacity={0.9}
+        style={[
+          styles.workTicketsBtn,
+          { backgroundColor: theme.cardBackground + "F2", borderColor: theme.cardBorder },
+        ]}
+        onPress={goToWorkTicketsInbox}
+      >
+        <Ionicons name="clipboard-outline" size={16} color={theme.textPrimary} />
+        <Text style={[styles.workTicketsBtnText, { color: theme.textPrimary }]}>
+          Work Tickets
+        </Text>
+      </TouchableOpacity>
+    )}
+
+    <TouchableOpacity
+      activeOpacity={0.9}
+      onPress={goToProfile}
+      style={[
+        styles.profileBtn,
+        { backgroundColor: theme.cardBackground + "F2", borderColor: theme.cardBorder },
+      ]}
+    >
+      {session?.photoUrl ? (
+        <Image source={{ uri: session.photoUrl }} style={styles.profileAvatar} />
+      ) : (
+        <Ionicons name="person-circle-outline" size={26} color={theme.textPrimary} />
+      )}
+    </TouchableOpacity>
+  </View>
+</View>
+
 
             <View style={styles.aiHelperRow}>
               <TouchableOpacity
@@ -1072,27 +1146,54 @@ const styles = StyleSheet.create({
     marginBottom: 8,
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "space-between",
   },
+  
+  // ✅ title must shrink or it will push buttons off-screen
   header: {
+    flex: 1,
+    minWidth: 0,          // ✅ IMPORTANT for Android
+    flexShrink: 1,        // ✅ IMPORTANT
+    marginRight: 12,      // ✅ space before buttons
     fontSize: 22,
     fontFamily: "Athiti-Bold",
     letterSpacing: 0.2,
   },
-
+  
+  // ✅ don’t rely on gap (not consistent everywhere)
+  headerRight: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  
   workTicketsBtn: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 6,
     paddingHorizontal: 12,
     paddingVertical: 8,
     borderRadius: 999,
     borderWidth: 1,
+    marginRight: 10,      // ✅ replaces gap
   },
+  
   workTicketsBtnText: {
     fontSize: 12,
     fontFamily: "Athiti-SemiBold",
     letterSpacing: 0.2,
+  },
+
+  profileBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 999,
+    borderWidth: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    overflow: "hidden",
+  },
+  profileAvatar: {
+    width: 34,
+    height: 34,
+    borderRadius: 999,
   },
 
   aiHelperRow: {

@@ -30,6 +30,11 @@ type Session = {
   name?: string;
   role?: "owner" | "employee" | "independent";
   companyId?: string | null;
+
+  // ✅ NEW (so Home/assign list can show it without re-fetch)
+  photoUrl?: string;
+  profileComplete?: boolean;
+
   provider?: string;
   createdAt?: string;
   loggedInAt?: string;
@@ -152,6 +157,7 @@ export default function ProfileSetupScreen() {
 
   const handleSave = async () => {
     const trimmedName = name.trim();
+
     if (!uid) {
       Alert.alert("Not logged in", "Please log in again.");
       router.replace("/login" as any);
@@ -188,16 +194,15 @@ export default function ProfileSetupScreen() {
           name: trimmedName,
           photoUrl,
           profileComplete: true,
-      
+
           // ✅ REQUIRED for Firestore rules + job reads
           companyId: companyId,
           role: "employee",
-      
+
           updatedAt: serverTimestamp(),
         },
         { merge: true }
       );
-      
 
       // 3) Write companies/{companyId}/employees/{uid}
       const employeeRef = doc(db, "companies", companyId, "employees", uid);
@@ -213,7 +218,7 @@ export default function ProfileSetupScreen() {
         { merge: true }
       );
 
-      // 4) Update AsyncStorage session
+      // 4) Update AsyncStorage session (✅ include photoUrl + profileComplete)
       const nextSession: Session = {
         ...(session ?? { uid }),
         uid,
@@ -221,6 +226,10 @@ export default function ProfileSetupScreen() {
         name: trimmedName,
         role: "employee",
         companyId,
+
+        // ✅ NEW
+        photoUrl,
+        profileComplete: true,
       };
 
       await AsyncStorage.setItem(USER_STORAGE_KEY, JSON.stringify(nextSession));
@@ -238,7 +247,14 @@ export default function ProfileSetupScreen() {
   };
 
   if (!isReady || !authReady) {
-    return <View style={{ flex: 1, backgroundColor: theme?.screenBackground ?? "#0F1115" }} />;
+    return (
+      <View
+        style={{
+          flex: 1,
+          backgroundColor: theme?.screenBackground ?? "#0F1115",
+        }}
+      />
+    );
   }
 
   return (
@@ -335,7 +351,6 @@ export default function ProfileSetupScreen() {
                 </Text>
               </TouchableOpacity>
             </Animated.View>
-
           </View>
         </ScrollView>
       </View>
