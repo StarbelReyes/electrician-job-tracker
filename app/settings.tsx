@@ -3,13 +3,7 @@ import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as Clipboard from "expo-clipboard";
 import { useRouter } from "expo-router";
-import {
-  deleteDoc,
-  doc,
-  getDoc,
-  serverTimestamp,
-  setDoc,
-} from "firebase/firestore";
+import { deleteDoc, doc, getDoc, serverTimestamp, setDoc } from "firebase/firestore";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   Alert,
@@ -33,9 +27,6 @@ import { db, firebaseAuth } from "../firebaseConfig";
 const USER_STORAGE_KEY = "EJT_USER_SESSION";
 
 const STORAGE_KEYS = {
-  DEFAULT_HOURLY_RATE: "EJT_DEFAULT_HOURLY_RATE",
-  DEFAULT_CLIENT_NAME: "EJT_DEFAULT_CLIENT_NAME",
-  DEFAULT_NOTES_TEMPLATE: "EJT_DEFAULT_NOTES_TEMPLATE",
   BACKUP_LAST_EXPORT: "EJT_BACKUP_LAST_EXPORT",
 
   COMPANY_NAME: "EJT_COMPANY_NAME",
@@ -86,21 +77,22 @@ export default function SettingsScreen() {
 
   // SESSION
   const [session, setSession] = useState<Session | null>(null);
+  const role: Role = (session?.role ?? "independent") as Role;
+
+  const isOwner = role === "owner";
+  const isEmployee = role === "employee";
+  const isIndependent = role === "independent";
+
+  const companyId = session?.companyId ?? null;
+
+  // ✅ Company Invites should be OWNER-only (employees shouldn’t see/share invites)
+  const canShowJoinCode = !!companyId && isOwner;
 
   // COMPANY JOIN CODE
   const [joinCode, setJoinCode] = useState<string | null>(null);
   const [joinCodeLoading, setJoinCodeLoading] = useState(false);
 
-  const isOwner = session?.role === "owner";
-  const companyId = session?.companyId ?? null;
-  const canShowJoinCode = !!companyId;
-
-  // JOB DEFAULTS
-  const [defaultHourlyRate, setDefaultHourlyRate] = useState("");
-  const [defaultClientName, setDefaultClientName] = useState("");
-  const [defaultNotesTemplate, setDefaultNotesTemplate] = useState("");
-
-  // COMPANY BRANDING
+  // COMPANY BRANDING (Hidden for employee)
   const [companyName, setCompanyName] = useState("");
   const [companyPhone, setCompanyPhone] = useState("");
   const [companyEmail, setCompanyEmail] = useState("");
@@ -156,31 +148,19 @@ export default function SettingsScreen() {
     }
   }, []);
 
+  // ✅ Job Defaults REMOVED for ALL roles (owner/employee/independent)
+  // Only loading: backup + branding
   const loadSettings = useCallback(async () => {
     try {
-      const [
-        hourlySaved,
-        clientSaved,
-        notesSaved,
-        lastExportSaved,
-        companyNameSaved,
-        companyPhoneSaved,
-        companyEmailSaved,
-        companyLicenseSaved,
-      ] = await Promise.all([
-        AsyncStorage.getItem(STORAGE_KEYS.DEFAULT_HOURLY_RATE),
-        AsyncStorage.getItem(STORAGE_KEYS.DEFAULT_CLIENT_NAME),
-        AsyncStorage.getItem(STORAGE_KEYS.DEFAULT_NOTES_TEMPLATE),
-        AsyncStorage.getItem(STORAGE_KEYS.BACKUP_LAST_EXPORT),
-        AsyncStorage.getItem(STORAGE_KEYS.COMPANY_NAME),
-        AsyncStorage.getItem(STORAGE_KEYS.COMPANY_PHONE),
-        AsyncStorage.getItem(STORAGE_KEYS.COMPANY_EMAIL),
-        AsyncStorage.getItem(STORAGE_KEYS.COMPANY_LICENSE),
-      ]);
+      const [lastExportSaved, companyNameSaved, companyPhoneSaved, companyEmailSaved, companyLicenseSaved] =
+        await Promise.all([
+          AsyncStorage.getItem(STORAGE_KEYS.BACKUP_LAST_EXPORT),
+          AsyncStorage.getItem(STORAGE_KEYS.COMPANY_NAME),
+          AsyncStorage.getItem(STORAGE_KEYS.COMPANY_PHONE),
+          AsyncStorage.getItem(STORAGE_KEYS.COMPANY_EMAIL),
+          AsyncStorage.getItem(STORAGE_KEYS.COMPANY_LICENSE),
+        ]);
 
-      if (hourlySaved) setDefaultHourlyRate(hourlySaved);
-      if (clientSaved) setDefaultClientName(clientSaved);
-      if (notesSaved) setDefaultNotesTemplate(notesSaved);
       if (lastExportSaved) setLastExport(lastExportSaved);
 
       if (companyNameSaved) setCompanyName(companyNameSaved);
@@ -193,10 +173,12 @@ export default function SettingsScreen() {
   }, []);
 
   const loadJoinCodeFromFirestore = useCallback(async () => {
-    if (!companyId) {
+    // Owner-only join code display; otherwise keep it empty
+    if (!companyId || !isOwner) {
       setJoinCode(null);
       return;
     }
+
     setJoinCodeLoading(true);
     try {
       const companyRef = doc(db, "companies", companyId);
@@ -213,7 +195,7 @@ export default function SettingsScreen() {
     } finally {
       setJoinCodeLoading(false);
     }
-  }, [companyId]);
+  }, [companyId, isOwner]);
 
   useEffect(() => {
     loadSession();
@@ -223,18 +205,6 @@ export default function SettingsScreen() {
   useEffect(() => {
     loadJoinCodeFromFirestore();
   }, [loadJoinCodeFromFirestore]);
-
-  const saveJobDefaults = async (hourly: string, client: string, notes: string) => {
-    try {
-      await AsyncStorage.multiSet([
-        [STORAGE_KEYS.DEFAULT_HOURLY_RATE, hourly],
-        [STORAGE_KEYS.DEFAULT_CLIENT_NAME, client],
-        [STORAGE_KEYS.DEFAULT_NOTES_TEMPLATE, notes],
-      ]);
-    } catch (err) {
-      console.warn("Failed to save job defaults:", err);
-    }
-  };
 
   const saveBranding = async (name: string, phone: string, email: string, license: string) => {
     try {
@@ -248,6 +218,12 @@ export default function SettingsScreen() {
       console.warn("Failed to save branding:", err);
     }
   };
+
+  useEffect(() => {
+    // ✅ Branding only matters for owner/independent; employees don’t need these fields
+    if (isEmployee) return;
+    saveBranding(companyName.trim(), companyPhone.trim(), companyEmail.trim(), companyLicense.trim());
+  }, [companyName, companyPhone, companyEmail, companyLicense, isEmployee]);
 
   const handleExportJobs = async () => {
     try {
@@ -351,14 +327,6 @@ export default function SettingsScreen() {
     }
   };
 
-  useEffect(() => {
-    saveJobDefaults(defaultHourlyRate, defaultClientName, defaultNotesTemplate);
-  }, [defaultHourlyRate, defaultClientName, defaultNotesTemplate]);
-
-  useEffect(() => {
-    saveBranding(companyName.trim(), companyPhone.trim(), companyEmail.trim(), companyLicense.trim());
-  }, [companyName, companyPhone, companyEmail, companyLicense]);
-
   const handleSendFeedback = () => {
     const email = "support@example.com";
     const subject = encodeURIComponent("Traktr feedback");
@@ -415,7 +383,7 @@ export default function SettingsScreen() {
   };
 
   // ✅ FIXED: rotates mapping and cleans old joinCodes doc
-  // Option 2: stores companyName in joinCodes mapping so Join screen can display it without reading /companies.
+  // Stores companyName in joinCodes mapping so Join screen can display it without reading /companies.
   const handleGenerateJoinCode = async () => {
     const authed = firebaseAuth.currentUser;
     if (!authed) {
@@ -435,11 +403,13 @@ export default function SettingsScreen() {
 
       // Read old joinCode + (optional) Firestore company name
       const companySnap = await getDoc(companyRef);
-      const oldCode =
-        companySnap.exists() ? ((companySnap.data() as any)?.joinCode as string | undefined) : undefined;
+      const oldCode = companySnap.exists()
+        ? ((companySnap.data() as any)?.joinCode as string | undefined)
+        : undefined;
 
-      const firestoreCompanyName =
-        companySnap.exists() ? ((companySnap.data() as any)?.name as string | undefined) : undefined;
+      const firestoreCompanyName = companySnap.exists()
+        ? ((companySnap.data() as any)?.name as string | undefined)
+        : undefined;
 
       const nameForInvite =
         (firestoreCompanyName && firestoreCompanyName.trim()) ||
@@ -449,11 +419,7 @@ export default function SettingsScreen() {
       const newCode = await generateUniqueJoinCode();
 
       // 1) Write new joinCode onto company doc
-      await setDoc(
-        companyRef,
-        { joinCode: newCode, updatedAt: serverTimestamp() },
-        { merge: true }
-      );
+      await setDoc(companyRef, { joinCode: newCode, updatedAt: serverTimestamp() }, { merge: true });
 
       // 2) Write mapping joinCodes/{newCode} -> companyId (+ companyName)
       const joinCodeRef = doc(db, "joinCodes", newCode);
@@ -545,7 +511,7 @@ export default function SettingsScreen() {
           >
             <TouchableWithoutFeedback onPress={dismissKeyboardAndEditing} accessible={false}>
               <View>
-                {/* ✅ COMPANY INVITES */}
+                {/* ✅ COMPANY INVITES (OWNER ONLY) */}
                 {canShowJoinCode ? (
                   <View
                     style={[
@@ -622,7 +588,7 @@ export default function SettingsScreen() {
                         <Text style={[styles.pillBtnText, { color: brand }]}>Share</Text>
                       </TouchableOpacity>
 
-                      {!joinCode && isOwner ? (
+                      {!joinCode ? (
                         <TouchableOpacity
                           style={[
                             styles.pillBtn,
@@ -665,213 +631,119 @@ export default function SettingsScreen() {
                   </View>
                 ) : null}
 
-                {/* JOB DEFAULTS */}
-                <View
-                  style={[
-                    styles.sectionCard,
-                    {
-                      backgroundColor: theme.cardBackground + "F2",
-                      borderColor: theme.cardBorder + "55",
-                      borderTopColor: brand + "AA",
-                      borderTopWidth: 2,
-                    },
-                  ]}
-                  onLayout={(e) => registerSection("jobDefaults", e.nativeEvent.layout.y)}
-                >
-                  <View style={styles.sectionHeaderRow}>
-                    <View
-                      style={[
-                        styles.sectionIconBadge,
-                        { borderColor: brand + "80", backgroundColor: brand + "1A" },
-                      ]}
-                    >
-                      <Ionicons name="clipboard-outline" size={16} color={brand} />
+                {/* ✅ COMPANY / BRANDING (HIDDEN FOR EMPLOYEE) */}
+                {!isEmployee ? (
+                  <View
+                    style={[
+                      styles.sectionCard,
+                      {
+                        backgroundColor: theme.cardBackground + "F2",
+                        borderColor: theme.cardBorder + "55",
+                        borderTopColor: brand + "AA",
+                        borderTopWidth: 2,
+                      },
+                    ]}
+                    onLayout={(e) => registerSection("branding", e.nativeEvent.layout.y)}
+                  >
+                    <View style={styles.sectionHeaderRow}>
+                      <View
+                        style={[
+                          styles.sectionIconBadge,
+                          { borderColor: brand + "80", backgroundColor: brand + "1A" },
+                        ]}
+                      >
+                        <Ionicons name="briefcase-outline" size={16} color={brand} />
+                      </View>
+                      <Text style={[styles.sectionTitle, { color: brand }]}>Company / Branding</Text>
                     </View>
-                    <Text style={[styles.sectionTitle, { color: brand }]}>Job Defaults</Text>
-                  </View>
-                  <Text style={[styles.sectionSubtitle, { color: theme.textMuted }]}>
-                    Pre-fill new jobs with your common values.
-                  </Text>
-
-                  <View style={styles.fieldBlock}>
-                    <Text style={[styles.fieldLabel, { color: theme.textSecondary }]}>Default hourly rate</Text>
-                    <Text style={[styles.fieldHelp, { color: theme.textMuted }]}>
-                      Used as the starting hourly rate for new jobs.
+                    <Text style={[styles.sectionSubtitle, { color: theme.textMuted }]}>
+                      Shown on PDF reports for clients and your boss.
                     </Text>
-                    <TextInput
-                      style={[
-                        styles.fieldInput,
-                        {
-                          backgroundColor: theme.inputBackground + "F2",
-                          color: theme.inputText,
-                          borderColor: theme.inputBorder,
-                        },
-                      ]}
-                      value={defaultHourlyRate}
-                      onChangeText={setDefaultHourlyRate}
-                      keyboardType="numeric"
-                      placeholder="Not set"
-                      placeholderTextColor={theme.textMuted}
-                      onFocus={() => handleFocus("jobDefaults")}
-                      onBlur={handleBlur}
-                    />
-                  </View>
 
-                  <View style={styles.fieldBlock}>
-                    <Text style={[styles.fieldLabel, { color: theme.textSecondary }]}>Default client name</Text>
-                    <TextInput
-                      style={[
-                        styles.fieldInput,
-                        {
-                          backgroundColor: theme.inputBackground + "F2",
-                          color: theme.inputText,
-                          borderColor: theme.inputBorder,
-                        },
-                      ]}
-                      value={defaultClientName}
-                      onChangeText={setDefaultClientName}
-                      placeholder="None"
-                      placeholderTextColor={theme.textMuted}
-                      onFocus={() => handleFocus("jobDefaults")}
-                      onBlur={handleBlur}
-                    />
-                  </View>
-
-                  <View style={styles.fieldBlock}>
-                    <Text style={[styles.fieldLabel, { color: theme.textSecondary }]}>Default notes template</Text>
-                    <TextInput
-                      style={[
-                        styles.notesInput,
-                        {
-                          backgroundColor: theme.inputBackground + "F2",
-                          color: theme.inputText,
-                          borderColor: theme.inputBorder,
-                        },
-                      ]}
-                      multiline
-                      value={defaultNotesTemplate}
-                      onChangeText={setDefaultNotesTemplate}
-                      placeholder="Standard (empty)"
-                      placeholderTextColor={theme.textMuted}
-                      onFocus={() => handleFocus("jobDefaults")}
-                      onBlur={handleBlur}
-                    />
-                  </View>
-                </View>
-
-                {/* COMPANY / BRANDING */}
-                <View
-                  style={[
-                    styles.sectionCard,
-                    {
-                      backgroundColor: theme.cardBackground + "F2",
-                      borderColor: theme.cardBorder + "55",
-                      borderTopColor: brand + "AA",
-                      borderTopWidth: 2,
-                    },
-                  ]}
-                  onLayout={(e) => registerSection("branding", e.nativeEvent.layout.y)}
-                >
-                  <View style={styles.sectionHeaderRow}>
-                    <View
-                      style={[
-                        styles.sectionIconBadge,
-                        { borderColor: brand + "80", backgroundColor: brand + "1A" },
-                      ]}
-                    >
-                      <Ionicons name="briefcase-outline" size={16} color={brand} />
+                    <View style={styles.fieldBlock}>
+                      <Text style={[styles.fieldLabel, { color: theme.textSecondary }]}>Company name</Text>
+                      <TextInput
+                        style={[
+                          styles.fieldInput,
+                          {
+                            backgroundColor: theme.inputBackground + "F2",
+                            color: theme.inputText,
+                            borderColor: theme.inputBorder,
+                          },
+                        ]}
+                        value={companyName}
+                        onChangeText={setCompanyName}
+                        placeholder="e.g. Reyes Electrical LLC"
+                        placeholderTextColor={theme.textMuted}
+                        onFocus={() => handleFocus("branding")}
+                        onBlur={handleBlur}
+                      />
                     </View>
-                    <Text style={[styles.sectionTitle, { color: brand }]}>Company / Branding</Text>
-                  </View>
-                  <Text style={[styles.sectionSubtitle, { color: theme.textMuted }]}>
-                    Shown on PDF reports for clients and your boss.
-                  </Text>
 
-                  <View style={styles.fieldBlock}>
-                    <Text style={[styles.fieldLabel, { color: theme.textSecondary }]}>Company name</Text>
-                    <TextInput
-                      style={[
-                        styles.fieldInput,
-                        {
-                          backgroundColor: theme.inputBackground + "F2",
-                          color: theme.inputText,
-                          borderColor: theme.inputBorder,
-                        },
-                      ]}
-                      value={companyName}
-                      onChangeText={setCompanyName}
-                      placeholder="e.g. Reyes Electrical LLC"
-                      placeholderTextColor={theme.textMuted}
-                      onFocus={() => handleFocus("branding")}
-                      onBlur={handleBlur}
-                    />
-                  </View>
+                    <View style={styles.fieldBlock}>
+                      <Text style={[styles.fieldLabel, { color: theme.textSecondary }]}>Company phone</Text>
+                      <TextInput
+                        style={[
+                          styles.fieldInput,
+                          {
+                            backgroundColor: theme.inputBackground + "F2",
+                            color: theme.inputText,
+                            borderColor: theme.inputBorder,
+                          },
+                        ]}
+                        value={companyPhone}
+                        onChangeText={setCompanyPhone}
+                        keyboardType="phone-pad"
+                        placeholder="(xxx) xxx-xxxx"
+                        placeholderTextColor={theme.textMuted}
+                        onFocus={() => handleFocus("branding")}
+                        onBlur={handleBlur}
+                      />
+                    </View>
 
-                  <View style={styles.fieldBlock}>
-                    <Text style={[styles.fieldLabel, { color: theme.textSecondary }]}>Company phone</Text>
-                    <TextInput
-                      style={[
-                        styles.fieldInput,
-                        {
-                          backgroundColor: theme.inputBackground + "F2",
-                          color: theme.inputText,
-                          borderColor: theme.inputBorder,
-                        },
-                      ]}
-                      value={companyPhone}
-                      onChangeText={setCompanyPhone}
-                      keyboardType="phone-pad"
-                      placeholder="(xxx) xxx-xxxx"
-                      placeholderTextColor={theme.textMuted}
-                      onFocus={() => handleFocus("branding")}
-                      onBlur={handleBlur}
-                    />
-                  </View>
+                    <View style={styles.fieldBlock}>
+                      <Text style={[styles.fieldLabel, { color: theme.textSecondary }]}>Company email</Text>
+                      <TextInput
+                        style={[
+                          styles.fieldInput,
+                          {
+                            backgroundColor: theme.inputBackground + "F2",
+                            color: theme.inputText,
+                            borderColor: theme.inputBorder,
+                          },
+                        ]}
+                        value={companyEmail}
+                        onChangeText={setCompanyEmail}
+                        keyboardType="email-address"
+                        placeholder="you@example.com"
+                        placeholderTextColor={theme.textMuted}
+                        autoCapitalize="none"
+                        onFocus={() => handleFocus("branding")}
+                        onBlur={handleBlur}
+                      />
+                    </View>
 
-                  <View style={styles.fieldBlock}>
-                    <Text style={[styles.fieldLabel, { color: theme.textSecondary }]}>Company email</Text>
-                    <TextInput
-                      style={[
-                        styles.fieldInput,
-                        {
-                          backgroundColor: theme.inputBackground + "F2",
-                          color: theme.inputText,
-                          borderColor: theme.inputBorder,
-                        },
-                      ]}
-                      value={companyEmail}
-                      onChangeText={setCompanyEmail}
-                      keyboardType="email-address"
-                      placeholder="you@example.com"
-                      placeholderTextColor={theme.textMuted}
-                      autoCapitalize="none"
-                      onFocus={() => handleFocus("branding")}
-                      onBlur={handleBlur}
-                    />
+                    <View style={styles.fieldBlock}>
+                      <Text style={[styles.fieldLabel, { color: theme.textSecondary }]}>License / ID / tagline</Text>
+                      <TextInput
+                        style={[
+                          styles.fieldInput,
+                          {
+                            backgroundColor: theme.inputBackground + "F2",
+                            color: theme.inputText,
+                            borderColor: theme.inputBorder,
+                          },
+                        ]}
+                        value={companyLicense}
+                        onChangeText={setCompanyLicense}
+                        placeholder="e.g. NYC Master License #12345"
+                        placeholderTextColor={theme.textMuted}
+                        onFocus={() => handleFocus("branding")}
+                        onBlur={handleBlur}
+                      />
+                    </View>
                   </View>
-
-                  <View style={styles.fieldBlock}>
-                    <Text style={[styles.fieldLabel, { color: theme.textSecondary }]}>
-                      License / ID / tagline
-                    </Text>
-                    <TextInput
-                      style={[
-                        styles.fieldInput,
-                        {
-                          backgroundColor: theme.inputBackground + "F2",
-                          color: theme.inputText,
-                          borderColor: theme.inputBorder,
-                        },
-                      ]}
-                      value={companyLicense}
-                      onChangeText={setCompanyLicense}
-                      placeholder="e.g. NYC Master License #12345"
-                      placeholderTextColor={theme.textMuted}
-                      onFocus={() => handleFocus("branding")}
-                      onBlur={handleBlur}
-                    />
-                  </View>
-                </View>
+                ) : null}
 
                 {/* DATA & BACKUP */}
                 <View
@@ -915,8 +787,8 @@ export default function SettingsScreen() {
                         Create a backup (copy all jobs)
                       </Text>
                       <Text style={[styles.fieldHelp, { color: theme.textMuted, lineHeight: 15 }]}>
-                        Copies all your jobs into the clipboard so you can paste them into Notes, email,
-                        or Files and keep them safe.
+                        Copies all your jobs into the clipboard so you can paste them into Notes, email, or Files and
+                        keep them safe.
                       </Text>
                     </View>
 
@@ -935,8 +807,8 @@ export default function SettingsScreen() {
                         Restore using copied backup
                       </Text>
                       <Text style={[styles.fieldHelp, { color: theme.textMuted, lineHeight: 15 }]}>
-                        Open your saved backup in Notes or email, select all the text and tap Copy,
-                        then return here and restore your jobs.
+                        Open your saved backup in Notes or email, select all the text and tap Copy, then return here
+                        and restore your jobs.
                       </Text>
                     </View>
 
@@ -971,9 +843,12 @@ export default function SettingsScreen() {
                       ]}
                     >
                       <Ionicons name="person-circle-outline" size={16} color={brand} />
-                    </View>
-                    <Text style={[styles.sectionTitle, { color: brand }]}>Account</Text>
+                      </View>
+                    <Text style={[styles.sectionTitle, { color: brand }]}>
+                      Account{isEmployee ? " (Employee)" : isOwner ? " (Owner)" : isIndependent ? " (Independent)" : ""}
+                    </Text>
                   </View>
+
                   <Text style={[styles.sectionSubtitle, { color: theme.textMuted }]}>
                     Log out of Traktr on this device.
                   </Text>
@@ -1109,16 +984,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     paddingVertical: 8,
     fontSize: 13,
-    fontFamily: "Athiti-Regular",
-  },
-  notesInput: {
-    borderRadius: 10,
-    borderWidth: 1,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-    fontSize: 13,
-    minHeight: 80,
-    textAlignVertical: "top",
     fontFamily: "Athiti-Regular",
   },
 
