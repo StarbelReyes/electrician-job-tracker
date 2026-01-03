@@ -146,6 +146,7 @@ const THUMB_SIZE =
 const STICKY_BAR_HEIGHT = 86;
 const SCROLL_OFFSET = 80;
 
+
 type ActiveSectionKey = "jobInfo" | "client" | "pricing" | "photos" | "assignment" | null;
 
 // ---------------- HELPERS ----------------
@@ -290,11 +291,16 @@ type JobPhotosSectionProps = {
   theme: any;
   accentColor: string;
   photoUris: string[];
-  onPressAddPhoto: () => void;
+  onPressAddPhoto?: () => void;
   onPressThumb: (index: number) => void;
-  onRemovePhoto: (uri: string) => void;
+  onRemovePhoto?: (uri: string) => void;
   disableRemove?: boolean;
+
+  // ✅ NEW: UI toggles
+  showAddButton?: boolean;        // default true
+  showRemoveButtons?: boolean;    // default true
 };
+
 
 function JobPhotosSection({
   theme,
@@ -304,26 +310,34 @@ function JobPhotosSection({
   onPressThumb,
   onRemovePhoto,
   disableRemove,
+  showAddButton = true,
+  showRemoveButtons = true,
 }: JobPhotosSectionProps) {
+
   return (
     <View>
       <Text style={[styles.sectionTitle, { color: theme.textSecondary }]}>Photos</Text>
 
-      <View style={styles.photosRow}>
-        <TouchableOpacity
-          style={[
-            styles.addPhotoButton,
-            {
-              backgroundColor: theme.cardBackground,
-              borderColor: accentColor,
-            },
-          ]}
-          onPress={onPressAddPhoto}
-          activeOpacity={0.9}
-        >
-          <Text style={[styles.addPhotoButtonText, { color: theme.textPrimary }]}>+ Add Photo</Text>
-        </TouchableOpacity>
-      </View>
+      {showAddButton ? (
+  <View style={styles.photosRow}>
+    <TouchableOpacity
+      style={[
+        styles.addPhotoButton,
+        {
+          backgroundColor: theme.cardBackground,
+          borderColor: accentColor,
+        },
+      ]}
+      onPress={() => onPressAddPhoto?.()}
+      activeOpacity={0.9}
+    >
+      <Text style={[styles.addPhotoButtonText, { color: theme.textPrimary }]}>
+        + Add Photo
+      </Text>
+    </TouchableOpacity>
+  </View>
+) : null}
+
 
       {photoUris.length > 0 && (
         <View style={styles.photoGrid}>
@@ -337,13 +351,16 @@ function JobPhotosSection({
                 <Image source={{ uri }} style={styles.photoThumb} resizeMode="cover" />
               </TouchableOpacity>
 
-              <TouchableOpacity
-                style={[styles.photoRemoveButton, disableRemove ? { opacity: 0.5 } : null]}
-                disabled={!!disableRemove}
-                onPress={() => onRemovePhoto(uri)}
-              >
-                <Text style={styles.photoRemoveText}>X</Text>
-              </TouchableOpacity>
+              {showRemoveButtons ? (
+  <TouchableOpacity
+    style={[styles.photoRemoveButton, disableRemove ? { opacity: 0.5 } : null]}
+    disabled={!!disableRemove}
+    onPress={() => onRemovePhoto?.(uri)}
+  >
+    <Text style={styles.photoRemoveText}>X</Text>
+  </TouchableOpacity>
+) : null}
+
             </View>
           ))}
         </View>
@@ -1718,11 +1735,11 @@ const employeeAssignedLabel = useMemo(() => {
   };
 
   const handleOpenFullImage = (index: number) => {
-    // ✅ Employee: no photo viewer
-    if (isReadOnly) return;
+    // ✅ Employees CAN view photos, just not add/remove
     setFullImageIndex(index);
     setIsImageOverlayVisible(true);
   };
+  
 
   const guardShareWhileUploading = () => {
     if (!isCloudMode) return false;
@@ -1879,43 +1896,46 @@ const employeeAssignedLabel = useMemo(() => {
                   ${editClientNotes.trim() ? withLineBreaks(editClientNotes.trim()) : '<span class="muted">No extra notes.</span>'}
                 </div>
               </div>
+              
+                    ${isEmployee ? "" : `
+        <div class="section">
+          <h2>Pricing</h2>
+          <table class="table">
+            <thead>
+              <tr>
+                <th>Item</th>
+                <th>Details</th>
+                <th class="amount">Amount</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Labor</td>
+                <td>${laborNum} h × $${rateNum.toFixed(2)}</td>
+                <td class="amount">$${(laborNum * rateNum).toFixed(2)}</td>
+              </tr>
+              <tr>
+                <td>Material</td>
+                <td>Material cost</td>
+                <td class="amount">$${materialNum.toFixed(2)}</td>
+              </tr>
+            </tbody>
+            <tfoot>
+              <tr>
+                <td colspan="2">Total</td>
+                <td class="amount amount-total">$${totalAmount.toFixed(2)}</td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+      `}
 
-              <div class="section">
-                <h2>Pricing</h2>
-                <table class="table">
-                  <thead>
-                    <tr>
-                      <th>Item</th>
-                      <th>Details</th>
-                      <th class="amount">Amount</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    <tr>
-                      <td>Labor</td>
-                      <td>${laborNum} h × $${rateNum.toFixed(2)}</td>
-                      <td class="amount">$${(laborNum * rateNum).toFixed(2)}</td>
-                    </tr>
-                    <tr>
-                      <td>Material</td>
-                      <td>Material cost</td>
-                      <td class="amount">$${materialNum.toFixed(2)}</td>
-                    </tr>
-                  </tbody>
-                  <tfoot>
-                    <tr>
-                      <td colspan="2">Total</td>
-                      <td class="amount amount-total">$${totalAmount.toFixed(2)}</td>
-                    </tr>
-                  </tfoot>
-                </table>
-              </div>
+      ${photosSection}
 
-              ${photosSection}
-            </div>
-          </body>
-        </html>
-      `;
+    </div>
+  </body>
+</html>
+`;
 
       const { uri } = await Print.printToFileAsync({ html });
 
@@ -2111,8 +2131,8 @@ const employeeAssignedLabel = useMemo(() => {
     );
   }
 
-  // ✅ Employee: remove photo UI entirely (no hero blur image, no attachments card, no viewer)
-  const heroPhotoUri = !isReadOnly && photoUris.length ? photoUris[0] : null;
+  
+  const heroPhotoUri = photoUris.length ? photoUris[0] : null;
 
   return (
     <KeyboardAvoidingView
@@ -2714,97 +2734,190 @@ const employeeAssignedLabel = useMemo(() => {
 
 
               {/* JOB INFO */}
-              <SectionCard
-                theme={theme}
-                accentColor={accentColor}
-                title="Job Info"
-                subtitle="Title, address, scope"
-                icon="🧾"
-                isActive={!isReadOnly ? cardIsActive("jobInfo") : false}
-                isDimmed={!isReadOnly ? cardIsDimmed("jobInfo") : false}
-                onLayout={(y) => registerSection("jobInfo", y)}
-              >
-                <View style={styles.row}>
-                  <Text style={[styles.metaLabel, { color: theme.textMuted }]}>Job ID</Text>
-                  <Text style={[styles.metaValue, { color: theme.textPrimary }]}>{job.id}</Text>
-                </View>
+              {isEmployee ? (
+  <SectionCard
+    theme={theme}
+    accentColor={accentColor}
+    title="Today’s Tasks"
+    subtitle="Complete each step"
+    icon="✅"
+  >
+                    {/* 1) Job Overview (read-only display) */}
+    <View style={styles.empBlock}>
+      <Text style={[styles.empBlockLabel, { color: theme.textMuted }]}>JOB</Text>
+      <Text style={[styles.empBlockValue, { color: theme.textPrimary }]} numberOfLines={1}>
+        {job.title || "Untitled job"}
+      </Text>
+    </View>
 
-                <Text style={[styles.modalLabel, { color: theme.textSecondary }]}>Title</Text>
-                <TextInput
-                  style={[
-                    styles.modalInput,
-                    {
-                      backgroundColor: theme.inputBackground,
-                      color: theme.inputText,
-                      borderColor: theme.inputBorder,
-                      borderWidth: 1,
-                      opacity: isReadOnly ? 0.9 : 1,
-                    },
-                  ]}
-                  value={editTitle}
-                  onChangeText={setEditTitle}
-                  placeholderTextColor={theme.textMuted}
-                  editable={!isReadOnly}
-                  onFocus={() => {
-                    if (isReadOnly) return;
-                    setIsEditing(true);
-                    handleFocus("jobInfo");
-                  }}
-                  onBlur={() => setIsEditing(false)}
-                />
+    <View style={styles.empBlock}>
+      <Text style={[styles.empBlockLabel, { color: theme.textMuted }]}>LOCATION</Text>
+      <Text style={[styles.empBlockValue, { color: theme.textPrimary }]}>
+        {job.address || "No address provided"}
+      </Text>
+    </View>
 
-                <Text style={[styles.modalLabel, { color: theme.textSecondary }]}>Address</Text>
-                <TextInput
-                  style={[
-                    styles.modalInput,
-                    {
-                      backgroundColor: theme.inputBackground,
-                      color: theme.inputText,
-                      borderColor: theme.inputBorder,
-                      borderWidth: 1,
-                      opacity: isReadOnly ? 0.9 : 1,
-                    },
-                  ]}
-                  value={editAddress}
-                  onChangeText={setEditAddress}
-                  placeholderTextColor={theme.textMuted}
-                  editable={!isReadOnly}
-                  onFocus={() => {
-                    if (isReadOnly) return;
-                    setIsEditing(true);
-                    handleFocus("jobInfo");
-                  }}
-                  onBlur={() => setIsEditing(false)}
-                />
+    <View style={styles.empBlock}>
+      <Text style={[styles.empBlockLabel, { color: theme.textMuted }]}>SCOPE / NOTES</Text>
+      <Text style={[styles.empScopeText, { color: theme.textPrimary }]}>
+        {job.description?.trim() ? job.description : "No scope provided"}
+      </Text>
+    </View>
 
-                <Text style={[styles.modalLabel, { color: theme.textSecondary }]}>
-                  Description / Scope
-                </Text>
-                <TextInput
-                  style={[
-                    styles.modalInputMultiline,
-                    {
-                      backgroundColor: theme.inputBackground,
-                      color: theme.inputText,
-                      borderColor: theme.inputBorder,
-                      borderWidth: 1,
-                      opacity: isReadOnly ? 0.9 : 1,
-                    },
-                  ]}
-                  value={editDescription}
-                  onChangeText={setEditDescription}
-                  multiline
-                  placeholderTextColor={theme.textMuted}
-                  editable={!isReadOnly}
-                  onFocus={() => {
-                    if (isReadOnly) return;
-                    setIsEditing(true);
-                    handleFocus("jobInfo");
-                  }}
-                  onBlur={() => setIsEditing(false)}
-                />
-              </SectionCard>
+    {/* Divider */}
+    <View style={[styles.empDivider, { borderColor: theme.cardBorder }]} />
 
+    {/* 2) Task list UI (read-only) */}
+    <View style={styles.empTaskList}>
+      <View style={[styles.empTaskRow, { backgroundColor: theme.cardSecondaryBackground, borderColor: theme.cardBorder }]}>
+        <Text style={[styles.empTaskCheck, { color: accentColor }]}>①</Text>
+        <View style={{ flex: 1 }}>
+          <Text style={[styles.empTaskTitle, { color: theme.textPrimary }]}>Review scope</Text>
+          <Text style={[styles.empTaskSub, { color: theme.textMuted }]}>
+            Read the scope above and confirm what’s expected.
+          </Text>
+        </View>
+      </View>
+
+      <View style={[styles.empTaskRow, { backgroundColor: theme.cardSecondaryBackground, borderColor: theme.cardBorder }]}>
+        <Text style={[styles.empTaskCheck, { color: accentColor }]}>②</Text>
+        <View style={{ flex: 1 }}>
+          <Text style={[styles.empTaskTitle, { color: theme.textPrimary }]}>Navigate to site</Text>
+          <Text style={[styles.empTaskSub, { color: theme.textMuted }]}>
+            Use the Map button in the header actions.
+          </Text>
+        </View>
+      </View>
+
+      <View style={[styles.empTaskRow, { backgroundColor: theme.cardSecondaryBackground, borderColor: theme.cardBorder }]}>
+        <Text style={[styles.empTaskCheck, { color: accentColor }]}>③</Text>
+        <View style={{ flex: 1 }}>
+          <Text style={[styles.empTaskTitle, { color: theme.textPrimary }]}>Contact if needed</Text>
+          <Text style={[styles.empTaskSub, { color: theme.textMuted }]}>
+            Use Call button if client phone exists.
+          </Text>
+        </View>
+      </View>
+
+      <View style={[styles.empTaskRow, { backgroundColor: theme.cardSecondaryBackground, borderColor: theme.cardBorder }]}>
+        <Text style={[styles.empTaskCheck, { color: accentColor }]}>④</Text>
+        <View style={{ flex: 1 }}>
+          <Text style={[styles.empTaskTitle, { color: theme.textPrimary }]}>Check Team Chat</Text>
+          <Text style={[styles.empTaskSub, { color: theme.textMuted }]}>
+            Confirm updates / instructions from the owner.
+          </Text>
+        </View>
+      </View>
+
+      <View style={[styles.empTaskRow, { backgroundColor: theme.cardSecondaryBackground, borderColor: theme.cardBorder }]}>
+        <Text style={[styles.empTaskCheck, { color: accentColor }]}>⑤</Text>
+        <View style={{ flex: 1 }}>
+          <Text style={[styles.empTaskTitle, { color: theme.textPrimary }]}>Submit Work Ticket</Text>
+          <Text style={[styles.empTaskSub, { color: theme.textMuted }]}>
+            After work is complete, submit a ticket from Assignment card.
+          </Text>
+        </View>
+      </View>
+    </View>
+
+    <Text style={[styles.empTaskHint, { color: theme.textMuted }]}>
+      These tasks are a guided checklist. Work tickets are your official record.
+    </Text>
+  </SectionCard>
+) : (
+  // ✅ OWNER/INDEPENDENT: keep your existing Job Info card EXACTLY as-is
+  <SectionCard
+    theme={theme}
+    accentColor={accentColor}
+    title="Job Info"
+    subtitle="Title, address, scope"
+    icon="🧾"
+    isActive={!isReadOnly ? cardIsActive("jobInfo") : false}
+    isDimmed={!isReadOnly ? cardIsDimmed("jobInfo") : false}
+    onLayout={(y) => registerSection("jobInfo", y)}
+  >
+    {/* KEEP YOUR EXISTING owner inputs here EXACTLY (the TextInputs you already have) */}
+    <View style={styles.row}>
+      <Text style={[styles.metaLabel, { color: theme.textMuted }]}>Job ID</Text>
+      <Text style={[styles.metaValue, { color: theme.textPrimary }]}>{job.id}</Text>
+    </View>
+
+    <Text style={[styles.modalLabel, { color: theme.textSecondary }]}>Title</Text>
+    <TextInput
+      style={[
+        styles.modalInput,
+        {
+          backgroundColor: theme.inputBackground,
+          color: theme.inputText,
+          borderColor: theme.inputBorder,
+          borderWidth: 1,
+          opacity: isReadOnly ? 0.9 : 1,
+        },
+      ]}
+      value={editTitle}
+      onChangeText={setEditTitle}
+      placeholderTextColor={theme.textMuted}
+      editable={!isReadOnly}
+      onFocus={() => {
+        if (isReadOnly) return;
+        setIsEditing(true);
+        handleFocus("jobInfo");
+      }}
+      onBlur={() => setIsEditing(false)}
+    />
+
+    <Text style={[styles.modalLabel, { color: theme.textSecondary }]}>Address</Text>
+    <TextInput
+      style={[
+        styles.modalInput,
+        {
+          backgroundColor: theme.inputBackground,
+          color: theme.inputText,
+          borderColor: theme.inputBorder,
+          borderWidth: 1,
+          opacity: isReadOnly ? 0.9 : 1,
+        },
+      ]}
+      value={editAddress}
+      onChangeText={setEditAddress}
+      placeholderTextColor={theme.textMuted}
+      editable={!isReadOnly}
+      onFocus={() => {
+        if (isReadOnly) return;
+        setIsEditing(true);
+        handleFocus("jobInfo");
+      }}
+      onBlur={() => setIsEditing(false)}
+    />
+
+    <Text style={[styles.modalLabel, { color: theme.textSecondary }]}>
+      Description / Scope
+    </Text>
+    <TextInput
+      style={[
+        styles.modalInputMultiline,
+        {
+          backgroundColor: theme.inputBackground,
+          color: theme.inputText,
+          borderColor: theme.inputBorder,
+          borderWidth: 1,
+          opacity: isReadOnly ? 0.9 : 1,
+        },
+      ]}
+      value={editDescription}
+      onChangeText={setEditDescription}
+      multiline
+      placeholderTextColor={theme.textMuted}
+      editable={!isReadOnly}
+      onFocus={() => {
+        if (isReadOnly) return;
+        setIsEditing(true);
+        handleFocus("jobInfo");
+      }}
+      onBlur={() => setIsEditing(false)}
+    />
+  </SectionCard>
+)}
               {/* CLIENT */}
               <SectionCard
                 theme={theme}
@@ -2895,16 +3008,17 @@ const employeeAssignedLabel = useMemo(() => {
               </SectionCard>
 
               {/* PRICING */}
-              <SectionCard
-                theme={theme}
-                accentColor={accentColor}
-                title="Pricing"
-                subtitle="Labor + materials"
-                icon="💰"
-                isActive={!isReadOnly ? cardIsActive("pricing") : false}
-                isDimmed={!isReadOnly ? cardIsDimmed("pricing") : false}
-                onLayout={(y) => registerSection("pricing", y)}
-              >
+              {!isEmployee ? (
+  <SectionCard
+    theme={theme}
+    accentColor={accentColor}
+    title="Pricing"
+    subtitle="Labor + materials"
+    icon="💰"
+    isActive={!isReadOnly ? cardIsActive("pricing") : false}
+    isDimmed={!isReadOnly ? cardIsDimmed("pricing") : false}
+    onLayout={(y) => registerSection("pricing", y)}
+  >
                 <View
                   style={[
                     styles.pricingCard,
@@ -3018,31 +3132,59 @@ const employeeAssignedLabel = useMemo(() => {
                     />
                   </View>
                 </View>
-              </SectionCard>
+              </SectionCard>) : null}
 
-              {/* ✅ PHOTOS (owner/independent only) */}
-              {!isReadOnly ? (
-                <SectionCard
-                  theme={theme}
-                  accentColor={accentColor}
-                  title="Attachments"
-                  subtitle="Photos + add"
-                  icon="📎"
-                  isActive={cardIsActive("photos")}
-                  isDimmed={cardIsDimmed("photos")}
-                  onLayout={(y) => registerSection("photos", y)}
-                >
-                  <JobPhotosSection
-                    theme={theme}
-                    accentColor={accentColor}
-                    photoUris={photoUris.filter(Boolean)}
-                    onPressAddPhoto={() => setIsAddPhotoMenuVisible(true)}
-                    onPressThumb={handleOpenFullImage}
-                    onRemovePhoto={handleRemovePhoto}
-                    disableRemove={isUploadingPhotos}
-                  />
-                </SectionCard>
-              ) : null}
+              {/* ✅ PHOTOS (Employee view-only) */}
+{isEmployee ? (
+  <SectionCard
+    theme={theme}
+    accentColor={accentColor}
+    title="Attachments"
+    subtitle="Photos added by the owner"
+    icon="📎"
+  >
+    {photoUris.filter(Boolean).length === 0 ? (
+      <Text style={{ color: theme.textMuted, fontFamily: "Athiti-SemiBold" }}>
+        No photos attached yet.
+      </Text>
+    ) : (
+      <JobPhotosSection
+        theme={theme}
+        accentColor={accentColor}
+        photoUris={photoUris.filter(Boolean)}
+        onPressThumb={handleOpenFullImage}
+        showAddButton={false}
+        showRemoveButtons={false}
+      />
+    )}
+  </SectionCard>
+) : null}
+
+{/* ✅ PHOTOS (Owner/Independent full controls) */}
+{!isReadOnly ? (
+  <SectionCard
+    theme={theme}
+    accentColor={accentColor}
+    title="Attachments"
+    subtitle="Photos + add"
+    icon="📎"
+    isActive={cardIsActive("photos")}
+    isDimmed={cardIsDimmed("photos")}
+    onLayout={(y) => registerSection("photos", y)}
+  >
+    <JobPhotosSection
+      theme={theme}
+      accentColor={accentColor}
+      photoUris={photoUris.filter(Boolean)}
+      onPressAddPhoto={() => setIsAddPhotoMenuVisible(true)}
+      onPressThumb={handleOpenFullImage}
+      onRemovePhoto={handleRemovePhoto}
+      disableRemove={isUploadingPhotos}
+      showAddButton={true}
+      showRemoveButtons={true}
+    />
+  </SectionCard>
+) : null}
 
               {/* TRASH (owner/independent only) */}
               {!isReadOnly ? (
@@ -3180,18 +3322,19 @@ const employeeAssignedLabel = useMemo(() => {
           </View>
         )}
 
-        {/* Fullscreen viewer (owner/independent only) */}
-        {!isReadOnly && photoUris.filter(Boolean).length > 0 && (
-          <ImageViewing
-            images={photoUris.filter(Boolean).map((uri) => ({ uri }))}
-            imageIndex={fullImageIndex}
-            visible={isImageOverlayVisible}
-            onRequestClose={() => setIsImageOverlayVisible(false)}
-            swipeToCloseEnabled
-            doubleTapToZoomEnabled
-            backgroundColor="rgba(0,0,0,0.95)"
-          />
-        )}
+      {/* Fullscreen viewer (Employee CAN view) */}
+{photoUris.filter(Boolean).length > 0 && (
+  <ImageViewing
+    images={photoUris.filter(Boolean).map((uri) => ({ uri }))}
+    imageIndex={fullImageIndex}
+    visible={isImageOverlayVisible}
+    onRequestClose={() => setIsImageOverlayVisible(false)}
+    swipeToCloseEnabled
+    doubleTapToZoomEnabled
+    backgroundColor="rgba(0,0,0,0.95)"
+  />
+)}
+
       </Animated.View>
     </KeyboardAvoidingView>
   );
@@ -3795,5 +3938,76 @@ assignmentOptionAvatarRow: {
   paddingVertical: 10,
   paddingHorizontal: 12,
 },
+
+empBlock: {
+  marginBottom: 12,
+},
+
+empBlockLabel: {
+  fontSize: 11,
+  fontFamily: "Athiti-Bold",
+  letterSpacing: 0.6,
+},
+
+empBlockValue: {
+  marginTop: 4,
+  fontSize: 15,
+  fontFamily: "Athiti-Bold",
+},
+
+empScopeText: {
+  marginTop: 6,
+  fontSize: 13,
+  lineHeight: 19,
+  fontFamily: "Athiti-Regular",
+},
+
+empDivider: {
+  borderTopWidth: 1,
+  marginVertical: 10,
+  opacity: 0.9,
+},
+
+empTaskList: {
+  gap: 10,
+},
+
+empTaskRow: {
+  borderWidth: 1,
+  borderRadius: 16,
+  paddingVertical: 12,
+  paddingHorizontal: 12,
+  flexDirection: "row",
+  alignItems: "flex-start",
+  gap: 10,
+},
+
+empTaskCheck: {
+  fontSize: 14,
+  fontFamily: "Athiti-Bold",
+  width: 26,
+  textAlign: "center",
+  marginTop: 1,
+},
+
+empTaskTitle: {
+  fontSize: 13,
+  fontFamily: "Athiti-Bold",
+},
+
+empTaskSub: {
+  marginTop: 2,
+  fontSize: 12,
+  lineHeight: 16,
+  fontFamily: "Athiti-Regular",
+},
+
+empTaskHint: {
+  marginTop: 10,
+  fontSize: 11,
+  fontFamily: "Athiti-SemiBold",
+  lineHeight: 15,
+},
+
 
 });
