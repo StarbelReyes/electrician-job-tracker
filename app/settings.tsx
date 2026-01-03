@@ -4,7 +4,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as Clipboard from "expo-clipboard";
 import { useRouter } from "expo-router";
 import { deleteDoc, doc, getDoc, serverTimestamp, setDoc } from "firebase/firestore";
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
   Animated,
@@ -243,7 +243,7 @@ export default function SettingsScreen() {
           "1) Open Notes, email, or Files\n" +
           "2) Long-press and tap Paste\n" +
           "3) Save that note/file somewhere safe\n\n" +
-          "To restore later: open that backup, copy ALL the text, then come back here and tap “Use copied backup”."
+          "To restore later: open that backup, copy ALL the text, then come back here and tap “Restore backup”."
       );
     } catch (err) {
       console.warn("Failed to export jobs:", err);
@@ -261,7 +261,7 @@ export default function SettingsScreen() {
             "Do this:\n" +
             "1) Open your backup in Notes or email\n" +
             "2) Select ALL the backup text and tap Copy\n" +
-            "3) Return to Traktr and tap “Use copied backup” again."
+            "3) Return to Traktr and tap “Restore backup” again."
         );
         return;
       }
@@ -457,6 +457,131 @@ export default function SettingsScreen() {
     }
   };
 
+  // ---------- VISUAL HELPERS (to stop the “mashed up” look) ----------
+  const cardBg = useMemo(() => theme.cardBackground + "F2", [theme.cardBackground]);
+  const cardBorder = useMemo(() => theme.cardBorder + "66", [theme.cardBorder]);
+  const divider = useMemo(() => theme.cardBorder + "33", [theme.cardBorder]);
+
+  const SectionHeader = ({
+    icon,
+    title,
+    metaRight,
+  }: {
+    icon: keyof typeof Ionicons.glyphMap;
+    title: string;
+    metaRight?: string;
+  }) => {
+    return (
+      <View style={styles.sectionHeaderShell}>
+        <View style={styles.sectionHeaderLeft}>
+          <View
+            style={[
+              styles.sectionIconBadge,
+              { borderColor: brand + "85", backgroundColor: brand + "1A" },
+            ]}
+          >
+            <Ionicons name={icon} size={16} color={brand} />
+          </View>
+
+          <Text style={[styles.sectionTitleStrong, { color: theme.textPrimary }]}>{title}</Text>
+        </View>
+
+        {metaRight ? (
+          <Text style={[styles.sectionMetaRight, { color: theme.textMuted }]} numberOfLines={2}>
+            {metaRight}
+          </Text>
+        ) : null}
+      </View>
+    );
+  };
+
+  const RowDivider = () => <View style={[styles.rowDivider, { backgroundColor: divider }]} />;
+
+  const SettingsRow = ({
+    title,
+    subtitle,
+    rightLabel,
+    rightIcon,
+    rightButtonText,
+    onPressRow,
+    onPressButton,
+    danger,
+    disabled,
+  }: {
+    title: string;
+    subtitle?: string;
+    rightLabel?: string;
+    rightIcon?: keyof typeof Ionicons.glyphMap;
+    rightButtonText?: string;
+    onPressRow?: () => void;
+    onPressButton?: () => void;
+    danger?: boolean;
+    disabled?: boolean;
+  }) => {
+    const isRowPressable = !!onPressRow && !disabled;
+
+    return (
+      <TouchableOpacity
+        activeOpacity={isRowPressable ? 0.85 : 1}
+        onPress={onPressRow}
+        disabled={!isRowPressable}
+        style={[
+          styles.settingsRow,
+          {
+            opacity: disabled ? 0.55 : 1,
+          },
+        ]}
+      >
+        <View style={styles.rowTextWrap}>
+          <Text style={[styles.rowTitleStrong, { color: theme.textPrimary }]} numberOfLines={1}>
+            {title}
+          </Text>
+          {subtitle ? (
+            <Text style={[styles.rowSubtitle, { color: theme.textMuted }]} numberOfLines={2}>
+              {subtitle}
+            </Text>
+          ) : null}
+        </View>
+
+        {/* RIGHT SIDE: either a pill button OR (label + chevron/icon) */}
+        {rightButtonText ? (
+          <TouchableOpacity
+            activeOpacity={0.9}
+            onPress={onPressButton}
+            disabled={disabled}
+            style={[
+              styles.rowPillBtn,
+              {
+                backgroundColor: (danger ? "#FF3B30" : brand) + "1F",
+                borderColor: (danger ? "#FF3B30" : brand) + "AA",
+              },
+            ]}
+          >
+            <Text style={[styles.rowPillBtnText, { color: danger ? "#FF3B30" : brand }]}>
+              {rightButtonText}
+            </Text>
+          </TouchableOpacity>
+        ) : (
+          <View style={styles.rowRight}>
+            {rightLabel ? (
+              <Text style={[styles.rowRightLabel, { color: brand }]} numberOfLines={1}>
+                {rightLabel}
+              </Text>
+            ) : null}
+
+            {rightIcon ? (
+              <Ionicons name={rightIcon} size={16} color={theme.textMuted} />
+            ) : onPressRow ? (
+              <Ionicons name="chevron-forward" size={18} color={theme.textMuted} />
+            ) : null}
+          </View>
+        )}
+      </TouchableOpacity>
+    );
+  };
+
+  // -------------------------------------------------------------------
+
   return (
     <KeyboardAvoidingView
       style={{ flex: 1, backgroundColor: theme.screenBackground }}
@@ -517,40 +642,32 @@ export default function SettingsScreen() {
                     style={[
                       styles.sectionCard,
                       {
-                        backgroundColor: theme.cardBackground + "F2",
-                        borderColor: theme.cardBorder + "55",
+                        backgroundColor: cardBg,
+                        borderColor: cardBorder,
                         borderTopColor: brand + "AA",
                         borderTopWidth: 2,
                       },
                     ]}
                     onLayout={(e) => registerSection("companyInvites", e.nativeEvent.layout.y)}
                   >
-                    <View style={styles.sectionHeaderRow}>
-                      <View
-                        style={[
-                          styles.sectionIconBadge,
-                          { borderColor: brand + "80", backgroundColor: brand + "1A" },
-                        ]}
-                      >
-                        <Ionicons name="key-outline" size={16} color={brand} />
-                      </View>
-                      <Text style={[styles.sectionTitle, { color: brand }]}>Company Invites</Text>
-                    </View>
+                    <SectionHeader
+                      icon="key-outline"
+                      title="Company Invites"
+                      metaRight={joinCodeLoading ? "Loading…" : undefined}
+                    />
 
                     <Text style={[styles.sectionSubtitle, { color: theme.textMuted }]}>
                       Share this join code with employees so they can join your company.
                     </Text>
 
-                    <View style={styles.inviteRow}>
-                      <View style={{ flex: 1 }}>
-                        <Text style={[styles.fieldLabel, { color: theme.textSecondary }]}>Join code</Text>
-                        <Text style={[styles.joinCodeText, { color: theme.textPrimary }]} selectable>
-                          {joinCodeLoading ? "Loading…" : joinCode ? joinCode : "No join code set"}
-                        </Text>
-                        <Text style={[styles.fieldHelp, { color: theme.textMuted }]}>
-                          Employees enter this in “Join a company”.
-                        </Text>
-                      </View>
+                    <View style={styles.fieldBlock}>
+                      <Text style={[styles.fieldLabel, { color: theme.textSecondary }]}>Join code</Text>
+                      <Text style={[styles.joinCodeText, { color: theme.textPrimary }]} selectable>
+                        {joinCodeLoading ? "Loading…" : joinCode ? joinCode : "No join code set"}
+                      </Text>
+                      <Text style={[styles.fieldHelp, { color: theme.textMuted }]}>
+                        Employees enter this in “Join a company”.
+                      </Text>
                     </View>
 
                     <View style={styles.inviteActionsRow}>
@@ -637,25 +754,15 @@ export default function SettingsScreen() {
                     style={[
                       styles.sectionCard,
                       {
-                        backgroundColor: theme.cardBackground + "F2",
-                        borderColor: theme.cardBorder + "55",
+                        backgroundColor: cardBg,
+                        borderColor: cardBorder,
                         borderTopColor: brand + "AA",
                         borderTopWidth: 2,
                       },
                     ]}
                     onLayout={(e) => registerSection("branding", e.nativeEvent.layout.y)}
                   >
-                    <View style={styles.sectionHeaderRow}>
-                      <View
-                        style={[
-                          styles.sectionIconBadge,
-                          { borderColor: brand + "80", backgroundColor: brand + "1A" },
-                        ]}
-                      >
-                        <Ionicons name="briefcase-outline" size={16} color={brand} />
-                      </View>
-                      <Text style={[styles.sectionTitle, { color: brand }]}>Company / Branding</Text>
-                    </View>
+                    <SectionHeader icon="briefcase-outline" title="Company / Branding" />
                     <Text style={[styles.sectionSubtitle, { color: theme.textMuted }]}>
                       Shown on PDF reports for clients and your boss.
                     </Text>
@@ -724,7 +831,9 @@ export default function SettingsScreen() {
                     </View>
 
                     <View style={styles.fieldBlock}>
-                      <Text style={[styles.fieldLabel, { color: theme.textSecondary }]}>License / ID / tagline</Text>
+                      <Text style={[styles.fieldLabel, { color: theme.textSecondary }]}>
+                        License / ID / tagline
+                      </Text>
                       <TextInput
                         style={[
                           styles.fieldInput,
@@ -745,169 +854,115 @@ export default function SettingsScreen() {
                   </View>
                 ) : null}
 
-                {/* DATA & BACKUP */}
+                {/* ✅ DATA & BACKUP (redesigned into clean rows) */}
                 <View
                   style={[
                     styles.sectionCard,
                     {
-                      backgroundColor: theme.cardBackground + "F2",
-                      borderColor: theme.cardBorder + "55",
+                      backgroundColor: cardBg,
+                      borderColor: cardBorder,
                       borderTopColor: brand + "AA",
                       borderTopWidth: 2,
+                      paddingHorizontal: 12,
+                      paddingVertical: 12,
                     },
                   ]}
                   onLayout={(e) => registerSection("backup", e.nativeEvent.layout.y)}
                 >
-                  <View style={styles.dataHeaderRow}>
-                    <View style={{ flex: 1, paddingRight: 8 }}>
-                      <View style={styles.sectionHeaderRow}>
-                        <View
-                          style={[
-                            styles.sectionIconBadge,
-                            { borderColor: brand + "80", backgroundColor: brand + "1A" },
-                          ]}
-                        >
-                          <Ionicons name="shield-checkmark-outline" size={16} color={brand} />
-                        </View>
-                        <Text style={[styles.sectionTitle, { color: brand }]}>Data & Backup</Text>
-                      </View>
-                      <Text style={[styles.sectionSubtitle, { color: theme.textMuted }]}>
-                        Manual offline backup for your jobs
-                      </Text>
-                    </View>
+                  <SectionHeader
+                    icon="shield-checkmark-outline"
+                    title="Data & Backup"
+                    metaRight={`Last backup: ${formatLastExport()}`}
+                  />
 
-                    <Text style={[styles.lastExportText, { color: theme.textMuted }]} numberOfLines={3}>
-                      Last backup: {formatLastExport()}
-                    </Text>
+                  <View style={{ marginTop: 6 }}>
+                    <SettingsRow
+                      title="Copy backup"
+                      subtitle="Copies all jobs to your clipboard"
+                      rightButtonText="Copy"
+                      onPressButton={handleExportJobs}
+                    />
+                    <RowDivider />
+                    <SettingsRow
+                      title="Restore backup"
+                      subtitle="Replaces jobs using your clipboard backup"
+                      rightButtonText="Restore"
+                      onPressButton={handleImportJobs}
+                    />
                   </View>
 
-                  <View style={styles.dataRow}>
-                    <View style={{ flex: 1 }}>
-                      <Text style={[styles.fieldLabel, { color: theme.textSecondary }]}>
-                        Create a backup (copy all jobs)
-                      </Text>
-                      <Text style={[styles.fieldHelp, { color: theme.textMuted, lineHeight: 15 }]}>
-                        Copies all your jobs into the clipboard so you can paste them into Notes, email, or Files and
-                        keep them safe.
-                      </Text>
-                    </View>
-
-                    <TouchableOpacity
-                      style={[styles.linkButton, { backgroundColor: brand + "22", borderColor: brand + "AA" }]}
-                      onPress={handleExportJobs}
-                      activeOpacity={0.85}
-                    >
-                      <Text style={[styles.linkButtonText, { color: brand }]}>Copy backup</Text>
-                    </TouchableOpacity>
-                  </View>
-
-                  <View style={[styles.dataRow, { marginTop: 18 }]}>
-                    <View style={{ flex: 1 }}>
-                      <Text style={[styles.fieldLabel, { color: theme.textSecondary }]}>
-                        Restore using copied backup
-                      </Text>
-                      <Text style={[styles.fieldHelp, { color: theme.textMuted, lineHeight: 15 }]}>
-                        Open your saved backup in Notes or email, select all the text and tap Copy, then return here
-                        and restore your jobs.
-                      </Text>
-                    </View>
-
-                    <TouchableOpacity
-                      style={[styles.linkButton, { backgroundColor: brand + "22", borderColor: brand + "AA" }]}
-                      onPress={handleImportJobs}
-                      activeOpacity={0.85}
-                    >
-                      <Text style={[styles.linkButtonText, { color: brand }]}>Use copied backup</Text>
-                    </TouchableOpacity>
-                  </View>
+                  <Text style={[styles.smallHint, { color: theme.textMuted }]}>
+                    Tip: Paste your backup into Notes/Files so it’s saved outside the clipboard.
+                  </Text>
                 </View>
 
-                {/* ACCOUNT */}
+                {/* ✅ ACCOUNT (clean row) */}
                 <View
                   style={[
                     styles.sectionCard,
                     {
-                      backgroundColor: theme.cardBackground + "F2",
-                      borderColor: theme.cardBorder + "55",
+                      backgroundColor: cardBg,
+                      borderColor: cardBorder,
                       borderTopColor: brand + "AA",
                       borderTopWidth: 2,
+                      paddingHorizontal: 12,
+                      paddingVertical: 12,
                     },
                   ]}
                   onLayout={(e) => registerSection("account", e.nativeEvent.layout.y)}
                 >
-                  <View style={styles.sectionHeaderRow}>
-                    <View
-                      style={[
-                        styles.sectionIconBadge,
-                        { borderColor: brand + "80", backgroundColor: brand + "1A" },
-                      ]}
-                    >
-                      <Ionicons name="person-circle-outline" size={16} color={brand} />
-                      </View>
-                    <Text style={[styles.sectionTitle, { color: brand }]}>
-                      Account{isEmployee ? " (Employee)" : isOwner ? " (Owner)" : isIndependent ? " (Independent)" : ""}
-                    </Text>
+                  <SectionHeader
+                    icon="person-circle-outline"
+                    title={`Account${isEmployee ? " (Employee)" : isOwner ? " (Owner)" : isIndependent ? " (Independent)" : ""}`}
+                  />
+
+                  <View style={{ marginTop: 6 }}>
+                    <SettingsRow
+                      title="Log out"
+                      subtitle="Sign out of Traktr on this device"
+                      rightButtonText="Log out"
+                      danger
+                      onPressButton={handleLogout}
+                    />
                   </View>
-
-                  <Text style={[styles.sectionSubtitle, { color: theme.textMuted }]}>
-                    Log out of Traktr on this device.
-                  </Text>
-
-                  <TouchableOpacity
-                    style={[styles.logoutButton, { borderColor: brand + "AA", backgroundColor: brand + "1A" }]}
-                    onPress={handleLogout}
-                    activeOpacity={0.9}
-                  >
-                    <Ionicons name="log-out-outline" size={16} color={brand} />
-                    <Text style={[styles.logoutText, { color: brand }]}>Log out</Text>
-                  </TouchableOpacity>
                 </View>
 
-                {/* ABOUT */}
+                {/* ✅ ABOUT (rows + chevrons) */}
                 <View
                   style={[
                     styles.sectionCard,
                     {
-                      backgroundColor: theme.cardBackground + "F2",
-                      borderColor: theme.cardBorder + "55",
+                      backgroundColor: cardBg,
+                      borderColor: cardBorder,
                       borderTopColor: brand + "AA",
                       borderTopWidth: 2,
+                      paddingHorizontal: 12,
+                      paddingVertical: 12,
                     },
                   ]}
                   onLayout={(e) => registerSection("about", e.nativeEvent.layout.y)}
                 >
-                  <View style={styles.sectionHeaderRow}>
-                    <View
-                      style={[
-                        styles.sectionIconBadge,
-                        { borderColor: brand + "80", backgroundColor: brand + "1A" },
-                      ]}
-                    >
-                      <Ionicons name="information-circle-outline" size={16} color={brand} />
-                    </View>
-                    <Text style={[styles.sectionTitle, { color: brand }]}>About Traktr</Text>
+                  <SectionHeader icon="information-circle-outline" title="About" />
+
+                  <View style={{ marginTop: 6 }}>
+                    <SettingsRow
+                      title="About this app"
+                      subtitle="Version, purpose, and future plans"
+                      rightLabel="Details"
+                      onPressRow={() => router.push("/app-info")}
+                    />
+                    <RowDivider />
+                    <SettingsRow
+                      title="Feedback"
+                      subtitle="Share ideas or report issues"
+                      rightLabel="Email"
+                      onPressRow={handleSendFeedback}
+                    />
                   </View>
-
-                  <TouchableOpacity style={styles.aboutRow} onPress={() => router.push("/app-info")} activeOpacity={0.8}>
-                    <View style={{ flex: 1 }}>
-                      <Text style={[styles.rowTitle, { color: theme.textPrimary }]}>About this app</Text>
-                      <Text style={[styles.rowSubtitle, { color: theme.textMuted }]}>
-                        See version, purpose, and future plans.
-                      </Text>
-                    </View>
-                    <Text style={[styles.rowValue, { color: brand }]}>Details</Text>
-                  </TouchableOpacity>
-
-                  <TouchableOpacity style={styles.aboutRow} onPress={handleSendFeedback} activeOpacity={0.8}>
-                    <View style={{ flex: 1 }}>
-                      <Text style={[styles.rowTitle, { color: theme.textPrimary }]}>Feedback</Text>
-                      <Text style={[styles.rowSubtitle, { color: theme.textMuted }]}>
-                        Share ideas or report issues.
-                      </Text>
-                    </View>
-                    <Text style={[styles.rowValue, { color: brand }]}>Email</Text>
-                  </TouchableOpacity>
                 </View>
+
+                {/* Spacer so bottom nav doesn’t feel cramped */}
+                <View style={{ height: 10 }} />
               </View>
             </TouchableWithoutFeedback>
           </ScrollView>
@@ -945,20 +1000,37 @@ const styles = StyleSheet.create({
   },
   headerTitle: { fontSize: 18, fontFamily: "Athiti-Bold" },
 
-  scrollContent: { gap: 12 },
+  scrollContent: {
+    paddingBottom: 24,
+  },
+  
+  
 
   sectionCard: {
     borderRadius: 18,
     paddingHorizontal: 14,
     paddingVertical: 12,
     borderWidth: 1,
+  
+    // ✅ spacing between cards (works on ALL RN versions)
+    marginBottom: 14,
+  
     shadowColor: "#000",
     shadowOpacity: 0.12,
     shadowRadius: 16,
     shadowOffset: { width: 0, height: 8 },
     elevation: 4,
   },
-  sectionHeaderRow: { flexDirection: "row", alignItems: "center", marginBottom: 4 },
+  
+
+  // New: strong section header (fixes “disabled headers” look)
+  sectionHeaderShell: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 10,
+  },
+  sectionHeaderLeft: { flexDirection: "row", alignItems: "center", flexShrink: 1 },
   sectionIconBadge: {
     width: 26,
     height: 26,
@@ -968,70 +1040,62 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     marginRight: 8,
   },
-  sectionTitle: { fontSize: 14, fontFamily: "Athiti-Bold" },
-  sectionSubtitle: { fontSize: 11, marginBottom: 6, fontFamily: "Athiti-Regular" },
+  sectionTitleStrong: { fontSize: 15, fontFamily: "Athiti-Bold", flexShrink: 1 },
+  sectionMetaRight: {
+    fontSize: 10.5,
+    textAlign: "right",
+    maxWidth: "46%",
+    fontFamily: "Athiti-Regular",
+  },
 
-  rowTitle: { fontSize: 13, fontFamily: "Athiti-SemiBold" },
-  rowSubtitle: { fontSize: 11, marginTop: 2, fontFamily: "Athiti-Regular" },
-  rowValue: { fontSize: 13, fontFamily: "Athiti-SemiBold", marginLeft: 12 },
+  sectionSubtitle: { fontSize: 11, marginTop: 6, marginBottom: 6, fontFamily: "Athiti-Regular" },
 
   fieldBlock: { marginTop: 10 },
   fieldLabel: { fontSize: 12, fontFamily: "Athiti-SemiBold" },
   fieldHelp: { fontSize: 11, marginTop: 2, marginBottom: 4, fontFamily: "Athiti-Regular" },
   fieldInput: {
-    borderRadius: 10,
+    borderRadius: 12,
     borderWidth: 1,
     paddingHorizontal: 10,
-    paddingVertical: 8,
+    paddingVertical: 9,
     fontSize: 13,
     fontFamily: "Athiti-Regular",
   },
 
-  dataHeaderRow: {
+  // Row-based settings layout (this is what fixes the “mashed together” look)
+  settingsRow: {
     flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "flex-start",
-    marginBottom: 8,
+    alignItems: "center",
+    gap: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 2,
   },
-  lastExportText: {
-    fontSize: 10,
-    textAlign: "right",
-    flexShrink: 1,
-    maxWidth: "50%",
-    fontFamily: "Athiti-Regular",
-  },
-  dataRow: { flexDirection: "row", alignItems: "flex-start", marginTop: 10 },
+  rowTextWrap: { flex: 1, paddingRight: 10 },
+  rowTitleStrong: { fontSize: 13.5, fontFamily: "Athiti-SemiBold" },
+  rowSubtitle: { fontSize: 11, marginTop: 2, fontFamily: "Athiti-Regular", lineHeight: 14 },
 
-  linkButton: {
+  rowRight: { flexDirection: "row", alignItems: "center", gap: 10 },
+  rowRightLabel: { fontSize: 12.5, fontFamily: "Athiti-SemiBold" },
+
+  rowDivider: {
+    height: 1,
+    width: "100%",
+    marginLeft: 2,
+  },
+
+  rowPillBtn: {
     paddingHorizontal: 14,
-    paddingVertical: 7,
+    paddingVertical: 8,
     borderRadius: 999,
     borderWidth: 1,
     justifyContent: "center",
     minHeight: 34,
-    shadowColor: "#000",
-    shadowOpacity: 0.12,
-    shadowRadius: 6,
-    shadowOffset: { width: 0, height: 3 },
   },
-  linkButtonText: { fontSize: 12, fontFamily: "Athiti-SemiBold" },
+  rowPillBtnText: { fontSize: 12, fontFamily: "Athiti-SemiBold" },
 
-  aboutRow: { flexDirection: "row", alignItems: "center", marginTop: 10, paddingVertical: 6 },
+  smallHint: { marginTop: 10, fontSize: 10.5, fontFamily: "Athiti-Regular", lineHeight: 14 },
 
-  logoutButton: {
-    marginTop: 10,
-    borderRadius: 999,
-    borderWidth: 1,
-    paddingVertical: 10,
-    paddingHorizontal: 12,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 8,
-  },
-  logoutText: { fontSize: 14, fontFamily: "Athiti-Bold" },
-
-  inviteRow: { flexDirection: "row", alignItems: "flex-start", marginTop: 8 },
+  // Company invites existing styling (kept, but headers now stronger)
   inviteActionsRow: {
     flexDirection: "row",
     flexWrap: "wrap",
