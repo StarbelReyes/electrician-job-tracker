@@ -3,19 +3,13 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useFonts } from "expo-font";
 import { Slot, usePathname, useRouter } from "expo-router";
 import { StatusBar } from "expo-status-bar";
-import React, { useEffect, useMemo } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { AppState, AppStateStatus, StyleSheet, View } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
-import {
-  SafeAreaProvider,
-  useSafeAreaInsets,
-} from "react-native-safe-area-context";
+import { SafeAreaProvider, useSafeAreaInsets } from "react-native-safe-area-context";
 import BottomNavBar from "../components/BottomNavBar";
 import { JobsProvider } from "../context/JobsContext";
-import {
-  PreferencesProvider,
-  usePreferences,
-} from "../context/PreferencesContext";
+import { PreferencesProvider, usePreferences } from "../context/PreferencesContext";
 import { firebaseAuth } from "../firebaseConfig";
 
 const USER_STORAGE_KEY = "EJT_USER_SESSION";
@@ -37,6 +31,9 @@ function RootShell() {
   const pathname = usePathname();
   const insets = useSafeAreaInsets();
   const { theme } = usePreferences();
+
+  const [session, setSession] = useState<Session | null>(null);
+  const role: Role = (session?.role ?? "independent") as Role;
 
   /**
    * ✅ Never mount BottomNavBar on auth / index / join flows
@@ -68,6 +65,63 @@ function RootShell() {
     return false;
   }, [pathname]);
 
+  /**
+   * ✅ Read session whenever:
+   * - app resumes
+   * - route changes (keeps nav role accurate if user just updated profile/session)
+   */
+  useEffect(() => {
+    let mounted = true;
+
+    const loadSession = async () => {
+      try {
+        const stored = await AsyncStorage.getItem(USER_STORAGE_KEY);
+        if (!mounted) return;
+
+        if (!stored) {
+          setSession(null);
+          return;
+        }
+
+        try {
+          const parsed = JSON.parse(stored) as Session;
+          setSession(parsed);
+        } catch {
+          setSession(null);
+        }
+      } catch (err) {
+        console.warn("[LAYOUT] loadSession error:", err);
+        setSession(null);
+      }
+    };
+
+    loadSession();
+
+    const onChange = (state: AppStateStatus) => {
+      if (state === "active") loadSession();
+    };
+
+    const sub = AppState.addEventListener("change", onChange);
+
+    return () => {
+      mounted = false;
+      sub.remove();
+    };
+  }, [pathname]);
+
+  /**
+   * ✅ Employee should NEVER access /add-job
+   * If they somehow navigate there, kick them to /home
+   */
+  useEffect(() => {
+    if (!pathname) return;
+    if (role !== "employee") return;
+
+    if (pathname === "/add-job" || pathname.startsWith("/add-job/")) {
+      router.replace("/home" as any);
+    }
+  }, [pathname, role, router]);
+
   const activeTab = useMemo<TabKey | null>(() => {
     if (pathname === "/home") return "home";
     if (pathname === "/add-job") return "add";
@@ -76,7 +130,21 @@ function RootShell() {
     return null;
   }, [pathname]);
 
-  const showBottomNav = !!activeTab && !isAuthOrIndexRoute;
+  /**
+   * ✅ Hide Add tab for employees (nav visibility rule)
+   * NOTE: actual tab removal is done inside BottomNavBar too.
+   */
+  const isTabAllowedForRole = useMemo(() => {
+    if (!activeTab) return false;
+    if (isAuthOrIndexRoute) return false;
+
+    if (role === "employee") {
+      return activeTab !== "add";
+    }
+    return true; // owner + independent keep all tabs
+  }, [activeTab, isAuthOrIndexRoute, role]);
+
+  const showBottomNav = !!activeTab && isTabAllowedForRole;
 
   const TAB_BAR_HEIGHT = 56;
   const tabBarTotalHeight = showBottomNav ? TAB_BAR_HEIGHT + insets.bottom : 0;
@@ -112,18 +180,18 @@ function RootShell() {
         const stored = await AsyncStorage.getItem(USER_STORAGE_KEY);
         if (!mounted || !stored) return;
 
-        let session: Session | null = null;
+        let s: Session | null = null;
         try {
-          session = JSON.parse(stored);
+          s = JSON.parse(stored);
         } catch {
-          session = null;
+          s = null;
         }
-        if (!session) return;
+        if (!s) return;
 
-        const role = session.role;
-        const companyId = session.companyId ?? null;
+        const r = s.role;
+        const companyId = s.companyId ?? null;
 
-        const mustJoin = role === "employee" && !companyId;
+        const mustJoin = r === "employee" && !companyId;
 
         if (mustJoin && p !== "/join-company") {
           router.replace("/join-company" as any);
@@ -153,7 +221,9 @@ function RootShell() {
         <Slot />
       </View>
 
-      {showBottomNav ? <BottomNavBar active={activeTab as TabKey} /> : null}
+      {showBottomNav ? (
+        <BottomNavBar active={activeTab as TabKey} role={role} />
+      ) : null}
     </View>
   );
 }
@@ -162,9 +232,7 @@ function ThemedStatusBar() {
   const { theme, themeName } = usePreferences();
   const barStyle = themeName === "light" ? "dark" : "light";
 
-  return (
-    <StatusBar style={barStyle} backgroundColor={theme.screenBackground} />
-  );
+  return <StatusBar style={barStyle} backgroundColor={theme.screenBackground} />;
 }
 
 export default function RootLayout() {

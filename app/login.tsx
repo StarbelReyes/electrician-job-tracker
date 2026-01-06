@@ -40,6 +40,10 @@ type UserProfile = {
   name?: string;
   role?: Role;
   companyId?: string | null;
+
+  // ✅ add these so login can decide profile-setup routing
+  photoUrl?: string;
+  profileComplete?: boolean;
 };
 
 export default function LoginScreen() {
@@ -85,7 +89,7 @@ export default function LoginScreen() {
 
   // FORM STATE
   const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
+  const [password, setPassword] = useState(""); // ✅ DO NOT trim password
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
 
@@ -102,7 +106,7 @@ export default function LoginScreen() {
 
   const handleLoginPress = async () => {
     const trimmedEmail = email.trim();
-    const rawPassword = password; // ✅ DO NOT trim password
+    const rawPassword = password;
 
     if (!trimmedEmail || !rawPassword) {
       return Alert.alert("Error", "Please fill in all fields.");
@@ -112,19 +116,12 @@ export default function LoginScreen() {
     setLoading(true);
 
     try {
-      const cred = await signInWithEmailAndPassword(
-        firebaseAuth,
-        trimmedEmail,
-        rawPassword
-      );
-
+      const cred = await signInWithEmailAndPassword(firebaseAuth, trimmedEmail, rawPassword);
       const user = cred.user;
 
       // Fetch Firestore profile (source of truth for role + company)
       let profile: UserProfile | null = null;
       try {
-        // ✅ This assumes user doc id == uid.
-        // If your schema doesn't do that, this will NOT find the profile.
         const userRef = doc(db, "users", user.uid);
         const snap = await getDoc(userRef);
         if (snap.exists()) {
@@ -136,8 +133,17 @@ export default function LoginScreen() {
       }
 
       const role = (profile?.role ?? "independent") as Role;
-      const companyId =
-        typeof profile?.companyId === "string" ? profile!.companyId : null;
+      const companyId = typeof profile?.companyId === "string" ? profile!.companyId : null;
+
+      // ✅ Determine if employee must complete profile
+      const hasName = typeof profile?.name === "string" && profile.name.trim().length >= 2;
+      const hasPhoto = typeof profile?.photoUrl === "string" && profile.photoUrl.length > 10;
+      const profileComplete = !!profile?.profileComplete && hasName && hasPhoto;
+
+      const needsProfileSetup =
+        role === "employee" &&
+        !!companyId &&
+        (!profileComplete || !hasName || !hasPhoto);
 
       const session = {
         uid: user.uid,
@@ -145,6 +151,8 @@ export default function LoginScreen() {
         name: profile?.name ?? "",
         role,
         companyId,
+        photoUrl: profile?.photoUrl ?? "",
+        profileComplete: !!profileComplete,
         provider: "firebase-email",
         loggedInAt: new Date().toISOString(),
       };
@@ -154,11 +162,16 @@ export default function LoginScreen() {
       LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
       await AsyncStorage.setItem(USER_STORAGE_KEY, JSON.stringify(session));
 
+      // ✅ Route logic
       const nextRoute =
-        role === "employee" && !companyId ? "/join-company" : "/home";
+        role === "employee" && !companyId
+          ? "/join-company"
+          : needsProfileSetup
+          ? "/profile-setup"
+          : "/home";
 
       Alert.alert("Success", `Welcome back, ${user.email ?? "electrician"}!`, [
-        { text: "Continue", onPress: () => router.replace(nextRoute) },
+        { text: "Continue", onPress: () => router.replace(nextRoute as any) },
       ]);
     } catch (err: any) {
       console.warn("Firebase login error:", err);
@@ -177,7 +190,7 @@ export default function LoginScreen() {
 
       Alert.alert("Login failed", message);
     } finally {
-      setLoading(false); // ✅ always stop loading
+      setLoading(false);
     }
   };
 
@@ -193,16 +206,11 @@ export default function LoginScreen() {
         <View style={{ flex: 1, backgroundColor: theme.screenBackground }}>
           <ScrollView
             style={{ flex: 1 }}
-            contentContainerStyle={[
-              styles.screen,
-              { backgroundColor: theme.screenBackground },
-            ]}
+            contentContainerStyle={[styles.screen, { backgroundColor: theme.screenBackground }]}
             keyboardShouldPersistTaps="handled"
           >
             <View style={styles.headerRow}>
-              <Text style={[styles.appTitle, { color: theme.headerText }]}>
-                THE TRAKTR APP
-              </Text>
+              <Text style={[styles.appTitle, { color: theme.headerText }]}>THE TRAKTR APP</Text>
             </View>
 
             <View
@@ -214,9 +222,7 @@ export default function LoginScreen() {
                 },
               ]}
             >
-              <Text style={[styles.cardTitle, { color: theme.textPrimary }]}>
-                Welcome back
-              </Text>
+              <Text style={[styles.cardTitle, { color: theme.textPrimary }]}>Welcome back</Text>
               <Text style={[styles.cardSubtitle, { color: theme.textMuted }]}>
                 Log in to keep tracking your jobs, notes, and photos.
               </Text>
@@ -327,12 +333,7 @@ export default function LoginScreen() {
                   activeOpacity={0.9}
                   disabled={isBusy}
                 >
-                  <Text
-                    style={[
-                      styles.primaryButtonText,
-                      { color: theme.primaryButtonText },
-                    ]}
-                  >
+                  <Text style={[styles.primaryButtonText, { color: theme.primaryButtonText }]}>
                     {loading ? "Logging in..." : "Continue"}
                   </Text>
                 </TouchableOpacity>
@@ -346,18 +347,10 @@ export default function LoginScreen() {
 }
 
 const styles = StyleSheet.create({
-  screen: {
-    flexGrow: 1,
-    paddingTop: 48,
-    paddingHorizontal: 18,
-  },
-  headerRow: {
-    marginBottom: 12,
-  },
-  appTitle: {
-    fontSize: 22,
-    fontWeight: "700",
-  },
+  screen: { flexGrow: 1, paddingTop: 48, paddingHorizontal: 18 },
+  headerRow: { marginBottom: 12 },
+  appTitle: { fontSize: 22, fontWeight: "700" },
+
   card: {
     borderRadius: 22,
     borderWidth: 1,
@@ -369,15 +362,9 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 8 },
     elevation: 8,
   },
-  cardTitle: {
-    fontSize: 20,
-    fontWeight: "800",
-    marginBottom: 4,
-  },
-  cardSubtitle: {
-    fontSize: 12,
-    marginBottom: 16,
-  },
+  cardTitle: { fontSize: 20, fontWeight: "800", marginBottom: 4 },
+  cardSubtitle: { fontSize: 12, marginBottom: 16 },
+
   inputShell: {
     flexDirection: "row",
     alignItems: "center",
@@ -387,14 +374,9 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     marginBottom: 10,
   },
-  input: {
-    flex: 1,
-    fontSize: 14,
-  },
-  eyeButton: {
-    paddingHorizontal: 6,
-    paddingVertical: 4,
-  },
+  input: { flex: 1, fontSize: 14 },
+  eyeButton: { paddingHorizontal: 6, paddingVertical: 4 },
+
   linksRow: {
     flexDirection: "row",
     justifyContent: "space-between",
@@ -402,11 +384,8 @@ const styles = StyleSheet.create({
     marginTop: 4,
     marginBottom: 10,
   },
-  linkTextSmall: {
-    fontSize: 12,
-    fontWeight: "600",
-    textDecorationLine: "underline",
-  },
+  linkTextSmall: { fontSize: 12, fontWeight: "600", textDecorationLine: "underline" },
+
   primaryButton: {
     borderRadius: 999,
     paddingVertical: 14,
@@ -416,8 +395,5 @@ const styles = StyleSheet.create({
     shadowRadius: 10,
     shadowOffset: { width: 0, height: 6 },
   },
-  primaryButtonText: {
-    fontSize: 15,
-    fontWeight: "700",
-  },
+  primaryButtonText: { fontSize: 15, fontWeight: "700" },
 });

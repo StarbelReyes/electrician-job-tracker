@@ -41,6 +41,12 @@ type Session = {
   loggedInAt?: string;
 };
 
+function getErrMessage(err: any) {
+  if (!err) return "Unknown error";
+  if (typeof err === "string") return err;
+  return err?.message || err?.code || "Unknown error";
+}
+
 export default function ProfileScreen() {
   const router = useRouter();
   const { isReady, theme, accentColor } = usePreferences();
@@ -111,13 +117,15 @@ export default function ProfileScreen() {
           if (liveName) setName(liveName);
           if (livePhoto) setPhotoUri(livePhoto);
 
-          // ✅ also keep session in sync (so Home avatar + assign list uses the latest)
           const nextSession: Session = {
             ...(session ?? ({ uid } as Session)),
             uid,
             email: (email ?? "") as any,
             role: (d?.role ?? session?.role ?? "employee") as Role,
-            companyId: typeof d?.companyId === "string" ? String(d.companyId) : session?.companyId ?? null,
+            companyId:
+              typeof d?.companyId === "string"
+                ? String(d.companyId)
+                : session?.companyId ?? null,
             name: liveName || session?.name,
             photoUrl: livePhoto || session?.photoUrl || null,
             profileComplete: Boolean(d?.profileComplete ?? session?.profileComplete ?? false),
@@ -160,7 +168,6 @@ export default function ProfileScreen() {
       return;
     }
 
-    // expo-image-picker changed API: keep it compatible with your current setup
     const mediaTypes =
       (ImagePicker as any).MediaType?.Images ??
       (ImagePicker as any).MediaTypeOptions?.Images;
@@ -183,7 +190,6 @@ export default function ProfileScreen() {
   const uploadProfilePhoto = async (localUri: string) => {
     if (!uid) throw new Error("Missing uid");
 
-    // If already remote, keep it
     const isRemote =
       localUri.startsWith("https://") ||
       localUri.startsWith("http://") ||
@@ -191,10 +197,6 @@ export default function ProfileScreen() {
 
     if (isRemote) return localUri;
 
-    // ✅ IMPORTANT:
-    // Do NOT depend on companyId for the upload path.
-    // This way your employee can set profile even before join-company,
-    // and Home can still read users/{uid}.photoUrl.
     const objectPath = `users/${uid}/profile.jpg`;
     const storageRef = ref(storage, objectPath);
 
@@ -231,12 +233,8 @@ export default function ProfileScreen() {
       // 1) Upload if needed
       const photoUrl = await uploadProfilePhoto(photoUri);
 
-      // 2) users/{uid} is ALWAYS the source of truth
+      // 2) Save user doc (source of truth) — if THIS succeeds, we consider profile saved.
       const userRef = doc(db, "users", uid);
-
-      // decide completion rule:
-      // - employees MUST have both
-      // - owners/independent also can have both (we’ll mark complete if both exist)
       const profileComplete = Boolean(trimmedName && photoUrl);
 
       await setDoc(
@@ -247,35 +245,14 @@ export default function ProfileScreen() {
           name: trimmedName,
           photoUrl,
           profileComplete,
-
-          // keep these consistent for reads/rules
           role: (session?.role ?? "employee") as Role,
           companyId: companyId ?? null,
-
           updatedAt: serverTimestamp(),
         },
         { merge: true }
       );
 
-      // 3) If employee AND has companyId, also write companies/{companyId}/employees/{uid}
-      // (This is what your Owner assign list can use later if you choose.)
-      if (companyId) {
-        const employeeRef = doc(db, "companies", companyId, "employees", uid);
-        await setDoc(
-          employeeRef,
-          {
-            uid,
-            email: email ?? "",
-            name: trimmedName,
-            photoUrl,
-            role: (session?.role ?? "employee") as Role,
-            updatedAt: serverTimestamp(),
-          },
-          { merge: true }
-        );
-      }
-
-      // 4) Update AsyncStorage session so Home shows avatar instantly
+      // 3) Update session immediately (Home avatar updates from session)
       const nextSession: Session = {
         ...(session ?? ({ uid } as Session)),
         uid,
@@ -291,13 +268,46 @@ export default function ProfileScreen() {
       await AsyncStorage.setItem(USER_STORAGE_KEY, JSON.stringify(nextSession));
       setSession(nextSession);
 
-      // 5) If this was part of “profile required” flow, go home
+      // 4) Best-effort sync to companies/{companyId}/employees/{uid}
+      // IMPORTANT: do NOT fail the whole save if this is blocked by rules.
+      if (companyId) {
+        try {
+          const employeeRef = doc(db, "companies", companyId, "employees", uid);
+          const empSnap = await getDoc(employeeRef);
+
+          // Employee cannot create a full employee doc in your rules — only update existing
+          if (empSnap.exists()) {
+            await setDoc(
+              employeeRef,
+              {
+                uid,
+                email: email ?? "",
+                name: trimmedName,
+                photoUrl,
+                profileComplete,
+                updatedAt: serverTimestamp(),
+              },
+              { merge: true }
+            );
+          } else {
+            console.warn(
+              "SYNC SKIP: employee doc not created yet (join flow creates limited fields only)."
+            );
+          }
+        } catch (e) {
+          console.warn("SYNC WARN: employee mirror update blocked:", e);
+          // Do NOT throw.
+        }
+      }
+
+      // 5) Success
       Alert.alert("Saved", "Your profile was updated.", [
         { text: "OK", onPress: () => router.replace("/home" as any) },
       ]);
     } catch (err) {
+      const msg = getErrMessage(err);
       console.warn("Profile save error:", err);
-      Alert.alert("Could not save", "Please try again.");
+      Alert.alert("Could not save", msg || "Please try again.");
     } finally {
       setSaving(false);
     }
@@ -426,11 +436,7 @@ export default function ProfileScreen() {
                 </TouchableOpacity>
               </Animated.View>
 
-              <TouchableOpacity
-                onPress={() => router.back()}
-                activeOpacity={0.85}
-                style={styles.backBtn}
-              >
+              <TouchableOpacity onPress={() => router.back()} activeOpacity={0.85} style={styles.backBtn}>
                 <Text style={[styles.backText, { color: theme.textMuted }]}>Back</Text>
               </TouchableOpacity>
             </View>

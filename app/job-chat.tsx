@@ -1,7 +1,7 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as ImagePicker from "expo-image-picker";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
   Animated,
@@ -19,52 +19,52 @@ import {
 } from "react-native";
 import ImageViewing from "react-native-image-viewing";
 import { API_BASE_URL } from "../constants/api";
+import { THEME_STORAGE_KEY, ThemeName, themes } from "../constants/appTheme";
+
+// ✅ Firestore realtime chat
 import {
-  THEME_STORAGE_KEY,
-  ThemeName,
-  themes,
-} from "../constants/appTheme";
-import useJobChatStore, {
-  ChatIntent,
-  ChatMessage,
-} from "../hooks/useJobChatStore";
+  addDoc,
+  collection,
+  limit,
+  onSnapshot,
+  orderBy,
+  query,
+  serverTimestamp,
+} from "firebase/firestore";
+import { db } from "../firebaseConfig"; // <-- adjust if needed
 
 // 👇 REAL AI SERVER URL – now using your shared API_BASE_URL
-// ngrok forwards this to http://localhost:4001 on your Mac
 const AI_GATE_BASE_URL = API_BASE_URL;
 
 // helper for time display
 const formatTime = (ts: number) =>
   new Date(ts).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
 
-// Seed messages so brand-new chats aren’t empty
-const createSeedMessages = (): ChatMessage[] => {
-  const now = Date.now();
-  return [
-    {
-      id: "seed-1",
-      authorLabel: "You",
-      role: "you",
-      text: "Hey Vic, panel is installed and wired. Waiting on inspection.",
-      createdAt: now - 1000 * 60 * 15,
-      intent: "progress",
-    },
-    {
-      id: "seed-2",
-      authorLabel: "Vic",
-      role: "boss",
-      text: "Nice. After inspection, send me a photo of the panel with labels.",
-      createdAt: now - 1000 * 60 * 10,
-      intent: "other",
-    },
-  ];
+/** ---------------- TYPES ---------------- **/
+type ChatIntent = "progress" | "issue" | "materials" | "other";
+
+type ChatMessage = {
+  id: string;
+  authorLabel: string;
+  role: "boss" | "employee";
+  text: string;
+  createdAt: number;
+  intent: ChatIntent;
+  imageUri?: string | null;
+  senderUid?: string | null;
 };
 
-const SEED_MESSAGES: ChatMessage[] = createSeedMessages();
+type Session = {
+  uid?: string;
+  name?: string;
+  role?: "owner" | "employee" | "independent";
+  companyId?: string;
+};
+
+const SESSION_KEY = "EJT_USER_SESSION";
 
 /** ---------------- AI HELPERS ---------------- **/
 
-// classify intent from final cleaned text
 function classifyIntentFromText(text: string): ChatIntent {
   const lower = text.toLowerCase();
 
@@ -104,7 +104,6 @@ function classifyIntentFromText(text: string): ChatIntent {
   return "other";
 }
 
-// Old local mini-AI (offline fallback)
 function runAiGateLocal(raw: string): { previewText: string; intent: ChatIntent } {
   const trimmed = raw.trim().replace(/\s+/g, " ");
   if (!trimmed) {
@@ -113,7 +112,6 @@ function runAiGateLocal(raw: string): { previewText: string; intent: ChatIntent 
 
   let cleaned = trimmed;
 
-  // If user writes "hey vic" make it structured
   if (/hey\s+vic/i.test(cleaned)) {
     cleaned = cleaned.replace(/hey\s+vic[, ]*/i, "");
     cleaned = `Hey Vic,\n\n${cleaned.trim()}`;
@@ -129,7 +127,6 @@ function runAiGateLocal(raw: string): { previewText: string; intent: ChatIntent 
   return { previewText: cleaned, intent };
 }
 
-// Real AI gate – talks to your Node server first, then falls back to local
 async function runAiGate(
   raw: string,
   jobTitle: string | undefined,
@@ -172,7 +169,6 @@ async function runAiGate(
   } catch (err: any) {
     console.error("AI gate request failed:", err);
 
-    // show simple error, then fallback so the button still works
     Alert.alert(
       "AI not available",
       "There was a problem talking to the AI helper. Using the local helper instead."
@@ -186,8 +182,7 @@ async function runAiGate(
 
 export default function JobChatScreen() {
   const router = useRouter();
-  const { id, title } =
-    useLocalSearchParams<{ id?: string; title?: string }>();
+  const { id, title } = useLocalSearchParams<{ id?: string; title?: string }>();
 
   const jobId = id ?? "default";
 
@@ -195,22 +190,18 @@ export default function JobChatScreen() {
   const [themeName, setThemeName] = useState<ThemeName>("dark");
   const theme = themes[themeName] ?? themes.dark;
 
-  // PERSISTENT CHAT STORE (per job)
-  const {
-    messages,
-    appendMessage,
-    isLoaded,
-  } = useJobChatStore({
-    jobId,
-    seedMessages: SEED_MESSAGES,
-  });
+  // SESSION (for sender + company scope)
+  const [session, setSession] = useState<Session | null>(null);
+  const companyId = session?.companyId ?? "";
+
+  // realtime messages
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [isLoaded, setIsLoaded] = useState(false);
 
   // draft + AI preview
   const [chatDraft, setChatDraft] = useState("");
   const [aiPreviewText, setAiPreviewText] = useState("");
-  const [aiPreviewIntent, setAiPreviewIntent] = useState<ChatIntent | null>(
-    null
-  );
+  const [aiPreviewIntent, setAiPreviewIntent] = useState<ChatIntent | null>(null);
   const [isHelperOpen, setIsHelperOpen] = useState(false);
 
   const screenScale = useRef(new Animated.Value(1.04)).current;
@@ -219,9 +210,7 @@ export default function JobChatScreen() {
   // fullscreen image viewer state
   const [imageViewerVisible, setImageViewerVisible] = useState(false);
   const [imageViewerIndex, setImageViewerIndex] = useState(0);
-  const [imageViewerImages, setImageViewerImages] = useState<
-    { uri: string }[]
-  >([]);
+  const [imageViewerImages, setImageViewerImages] = useState<{ uri: string }[]>([]);
 
   // Load theme
   useEffect(() => {
@@ -238,6 +227,20 @@ export default function JobChatScreen() {
     loadTheme();
   }, []);
 
+  // Load session
+  useEffect(() => {
+    const loadSession = async () => {
+      try {
+        const raw = await AsyncStorage.getItem(SESSION_KEY);
+        if (!raw) return;
+        setSession(JSON.parse(raw));
+      } catch (e) {
+        console.warn("Failed to load session for chat:", e);
+      }
+    };
+    loadSession();
+  }, []);
+
   // Small entrance animation
   useEffect(() => {
     Animated.timing(screenScale, {
@@ -252,12 +255,85 @@ export default function JobChatScreen() {
     scrollRef.current.scrollToEnd({ animated: true });
   };
 
-  // scroll when new messages come in (after store loaded)
+  // ✅ Firestore real-time subscription
+  const messagesRef = useMemo(() => {
+    if (!companyId || !jobId) return null;
+    return collection(db, "companies", companyId, "jobs", jobId, "messages");
+  }, [companyId, jobId]);
+
+  useEffect(() => {
+    if (!messagesRef) return;
+
+    const q = query(messagesRef, orderBy("createdAt", "asc"), limit(250));
+
+    const unsub = onSnapshot(
+      q,
+      (snap) => {
+        const next: ChatMessage[] = snap.docs.map((d) => {
+          const data: any = d.data();
+          const createdAtMs =
+            data?.createdAt?.toMillis?.() ??
+            (typeof data?.createdAt === "number" ? data.createdAt : Date.now());
+
+          return {
+            id: d.id,
+            authorLabel: data.authorLabel ?? "Member",
+            role: data.role ?? "employee",
+            text: data.text ?? "",
+            createdAt: createdAtMs,
+            intent: data.intent ?? "other",
+            imageUri: data.imageUri ?? null,
+            senderUid: data.senderUid ?? null,
+          };
+        });
+
+        setMessages(next);
+        setIsLoaded(true);
+      },
+      (err) => {
+        console.warn("Chat snapshot error:", err);
+        setIsLoaded(true);
+      }
+    );
+
+    return () => unsub();
+  }, [messagesRef]);
+
+  // scroll when new messages come in (after loaded)
   useEffect(() => {
     if (!isLoaded) return;
     const timeout = setTimeout(scrollToBottom, 60);
     return () => clearTimeout(timeout);
   }, [messages.length, isLoaded]);
+
+  const authorLabel = session?.name?.trim() ? session.name.trim() : "You";
+  const roleForChat: "boss" | "employee" = session?.role === "owner" ? "boss" : "employee";
+
+  // ✅ send to Firestore
+  const sendMessage = async (payload: {
+    text: string;
+    intent: ChatIntent;
+    imageUri?: string | null;
+  }) => {
+    if (!messagesRef) {
+      Alert.alert("Chat not ready", "Missing companyId or jobId for chat.");
+      return;
+    }
+    if (!session?.uid) {
+      Alert.alert("Not signed in", "Missing user session.");
+      return;
+    }
+
+    await addDoc(messagesRef, {
+      text: payload.text ?? "",
+      intent: payload.intent ?? "other",
+      imageUri: payload.imageUri ?? null,
+      authorLabel,
+      role: roleForChat,
+      senderUid: session.uid,
+      createdAt: serverTimestamp(),
+    });
+  };
 
   // 🔥 NOW ASYNC – uses real AI gate + fallback
   const handleRunAiOnDraft = async () => {
@@ -266,11 +342,7 @@ export default function JobChatScreen() {
       return;
     }
 
-    const { previewText, intent } = await runAiGate(
-      chatDraft,
-      title,
-      jobId
-    );
+    const { previewText, intent } = await runAiGate(chatDraft, title, jobId);
 
     if (!previewText) return;
 
@@ -281,19 +353,15 @@ export default function JobChatScreen() {
     scrollToBottom();
   };
 
-  const handleSendFromAiPreview = () => {
+  const handleSendFromAiPreview = async () => {
     if (!aiPreviewText.trim()) return;
 
-    const newMessage: ChatMessage = {
-      id: `msg-${Date.now()}`,
-      authorLabel: "You",
-      role: "you",
+    await sendMessage({
       text: aiPreviewText.trim(),
-      createdAt: Date.now(),
       intent: aiPreviewIntent || "other",
-    };
+      imageUri: null,
+    });
 
-    appendMessage(newMessage);
     setChatDraft("");
     setAiPreviewText("");
     setAiPreviewIntent(null);
@@ -315,10 +383,7 @@ export default function JobChatScreen() {
     try {
       const { status } = await ImagePicker.requestCameraPermissionsAsync();
       if (status !== "granted") {
-        Alert.alert(
-          "Camera permission needed",
-          "Enable camera access to send job photos in chat."
-        );
+        Alert.alert("Camera permission needed", "Enable camera access to send job photos in chat.");
         return;
       }
 
@@ -332,17 +397,12 @@ export default function JobChatScreen() {
       const asset = result.assets?.[0];
       if (!asset?.uri) return;
 
-      const newMessage: ChatMessage = {
-        id: `photo-${Date.now()}`,
-        authorLabel: "You",
-        role: "you",
-        text: chatDraft.trim(), // optional caption
-        createdAt: Date.now(),
-        intent: "progress", // default for photos (can tweak later)
+      await sendMessage({
+        text: chatDraft.trim(),
+        intent: "progress",
         imageUri: asset.uri,
-      };
+      });
 
-      appendMessage(newMessage);
       setChatDraft("");
       setIsHelperOpen(false);
       setTimeout(scrollToBottom, 80);
@@ -355,13 +415,9 @@ export default function JobChatScreen() {
   // Pick an existing photo from library and send it
   const handlePickFromLibrary = async () => {
     try {
-      const { status } =
-        await ImagePicker.requestMediaLibraryPermissionsAsync();
+      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (status !== "granted") {
-        Alert.alert(
-          "Photos permission needed",
-          "Enable photo library access to send saved photos."
-        );
+        Alert.alert("Photos permission needed", "Enable photo library access to send saved photos.");
         return;
       }
 
@@ -376,17 +432,12 @@ export default function JobChatScreen() {
       const asset = result.assets?.[0];
       if (!asset?.uri) return;
 
-      const newMessage: ChatMessage = {
-        id: `library-${Date.now()}`,
-        authorLabel: "You",
-        role: "you",
-        text: chatDraft.trim(), // optional caption
-        createdAt: Date.now(),
+      await sendMessage({
+        text: chatDraft.trim(),
         intent: "progress",
         imageUri: asset.uri,
-      };
+      });
 
-      appendMessage(newMessage);
       setChatDraft("");
       setIsHelperOpen(false);
       setTimeout(scrollToBottom, 80);
@@ -402,11 +453,9 @@ export default function JobChatScreen() {
     if (kind === "progress") {
       snippet = "Finished roughing in this room, starting to pull home runs.";
     } else if (kind === "issue") {
-      snippet =
-        "No power at this receptacle. Breaker is on, getting 0V at the device.";
+      snippet = "No power at this receptacle. Breaker is on, getting 0V at the device.";
     } else if (kind === "materials") {
-      snippet =
-        "Need more material: [qty] of [EMT/BX/breakers]. Let me know if I should grab it.";
+      snippet = "Need more material: [qty] of [EMT/BX/breakers]. Let me know if I should grab it.";
     }
 
     if (!snippet) return;
@@ -435,9 +484,7 @@ export default function JobChatScreen() {
           },
         ]}
       >
-        <Text style={[styles.intentPillText, { color: theme.textSecondary }]}>
-          {label}
-        </Text>
+        <Text style={[styles.intentPillText, { color: theme.textSecondary }]}>{label}</Text>
       </View>
     );
   };
@@ -452,9 +499,7 @@ export default function JobChatScreen() {
     const index = imageMessages.findIndex((m) => m.id === messageId);
     const safeIndex = index < 0 ? 0 : index;
 
-    setImageViewerImages(
-      imageMessages.map((m) => ({ uri: m.imageUri as string }))
-    );
+    setImageViewerImages(imageMessages.map((m) => ({ uri: m.imageUri as string })));
     setImageViewerIndex(safeIndex);
     setImageViewerVisible(true);
   };
@@ -485,28 +530,14 @@ export default function JobChatScreen() {
       >
         {/* Header */}
         <View style={styles.headerRow}>
-          <TouchableOpacity
-            style={styles.backButton}
-            onPress={() => router.back()}
-            activeOpacity={0.8}
-          >
-            <Text style={[styles.backText, { color: theme.headerMuted }]}>
-              ← Back
-            </Text>
+          <TouchableOpacity style={styles.backButton} onPress={() => router.back()} activeOpacity={0.8}>
+            <Text style={[styles.backText, { color: theme.headerMuted }]}>← Back</Text>
           </TouchableOpacity>
 
           <View style={styles.headerTitleBlock}>
-            <Text style={[styles.headerTitle, { color: theme.headerText }]}>
-              Team Chat
-            </Text>
-            <Text
-              style={[styles.headerSubtitle, { color: theme.headerMuted }]}
-            >
-              {title
-                ? String(title)
-                : id
-                ? `Job #${id}`
-                : "Job-based internal chat"}
+            <Text style={[styles.headerTitle, { color: theme.headerText }]}>Team Chat</Text>
+            <Text style={[styles.headerSubtitle, { color: theme.headerMuted }]}>
+              {title ? String(title) : id ? `Job #${id}` : "Job-based internal chat"}
             </Text>
           </View>
 
@@ -526,19 +557,8 @@ export default function JobChatScreen() {
           >
             <View style={styles.chatCardHeader}>
               <View>
-                <Text
-                  style={[
-                    styles.chatTitle,
-                    {
-                      color: theme.textPrimary,
-                    },
-                  ]}
-                >
-                  Team Chat (Internal)
-                </Text>
-                <Text
-                  style={[styles.chatSubtitle, { color: theme.textMuted }]}
-                >
+                <Text style={[styles.chatTitle, { color: theme.textPrimary }]}>Team Chat (Internal)</Text>
+                <Text style={[styles.chatSubtitle, { color: theme.textMuted }]}>
                   Job-only messages. No pricing, hours, or invoices here.
                 </Text>
               </View>
@@ -553,7 +573,9 @@ export default function JobChatScreen() {
               onContentSizeChange={scrollToBottom}
             >
               {messages.map((msg) => {
-                const isYou = msg.role === "you";
+                const isYou =
+                  !!session?.uid && !!msg.senderUid ? msg.senderUid === session.uid : msg.authorLabel === authorLabel;
+
                 return (
                   <View
                     key={msg.id}
@@ -571,12 +593,7 @@ export default function JobChatScreen() {
                           { backgroundColor: theme.cardSecondaryBackground },
                         ]}
                       >
-                        <Text
-                          style={[
-                            styles.avatarInitial,
-                            { color: theme.textPrimary },
-                          ]}
-                        >
+                        <Text style={[styles.avatarInitial, { color: theme.textPrimary }]}>
                           {msg.authorLabel.charAt(0).toUpperCase()}
                         </Text>
                       </View>
@@ -586,9 +603,7 @@ export default function JobChatScreen() {
                       style={[
                         styles.messageBubble,
                         {
-                          backgroundColor: isYou
-                            ? theme.primaryButtonBackground
-                            : theme.cardSecondaryBackground,
+                          backgroundColor: isYou ? theme.primaryButtonBackground : theme.cardSecondaryBackground,
                           borderTopLeftRadius: isYou ? 18 : 6,
                           borderTopRightRadius: isYou ? 6 : 18,
                         },
@@ -599,9 +614,7 @@ export default function JobChatScreen() {
                           style={[
                             styles.messageAuthor,
                             {
-                              color: isYou
-                                ? theme.primaryButtonText
-                                : theme.textSecondary,
+                              color: isYou ? theme.primaryButtonText : theme.textSecondary,
                             },
                           ]}
                         >
@@ -611,14 +624,8 @@ export default function JobChatScreen() {
                       </View>
 
                       {msg.imageUri && (
-                        <TouchableOpacity
-                          activeOpacity={0.9}
-                          onPress={() => openImageViewerForMessage(msg.id)}
-                        >
-                          <Image
-                            source={{ uri: msg.imageUri }}
-                            style={styles.messageImage}
-                          />
+                        <TouchableOpacity activeOpacity={0.9} onPress={() => openImageViewerForMessage(msg.id)}>
+                          <Image source={{ uri: msg.imageUri }} style={styles.messageImage} />
                         </TouchableOpacity>
                       )}
 
@@ -627,9 +634,7 @@ export default function JobChatScreen() {
                           style={[
                             styles.messageText,
                             {
-                              color: isYou
-                                ? theme.primaryButtonText
-                                : theme.textPrimary,
+                              color: isYou ? theme.primaryButtonText : theme.textPrimary,
                             },
                           ]}
                         >
@@ -641,9 +646,7 @@ export default function JobChatScreen() {
                         style={[
                           styles.messageTime,
                           {
-                            color: isYou
-                              ? "rgba(255,255,255,0.75)"
-                              : theme.textMuted,
+                            color: isYou ? "rgba(255,255,255,0.75)" : theme.textMuted,
                           },
                         ]}
                       >
@@ -657,82 +660,35 @@ export default function JobChatScreen() {
 
             {/* AI Preview */}
             {aiPreviewText ? (
-              <View
-                style={[
-                  styles.aiPreviewCard,
-                  { borderColor: theme.cardBorder },
-                ]}
-              >
+              <View style={[styles.aiPreviewCard, { borderColor: theme.cardBorder }]}>
                 <View style={styles.aiPreviewHeaderRow}>
-                  <Text
-                    style={[
-                      styles.aiPreviewLabel,
-                      { color: theme.textSecondary },
-                    ]}
-                  >
-                    AI Review
-                  </Text>
+                  <Text style={[styles.aiPreviewLabel, { color: theme.textSecondary }]}>AI Review</Text>
                 </View>
+
                 {renderIntentLabel(aiPreviewIntent)}
-                <Text
-                  style={[styles.aiPreviewText, { color: theme.textPrimary }]}
-                >
-                  {aiPreviewText}
-                </Text>
+
+                <Text style={[styles.aiPreviewText, { color: theme.textPrimary }]}>{aiPreviewText}</Text>
 
                 <View style={styles.aiPreviewButtonsRow}>
                   <TouchableOpacity
-                    style={[
-                      styles.aiSecondaryButton,
-                      {
-                        borderColor: theme.cardBorder,
-                      },
-                    ]}
+                    style={[styles.aiSecondaryButton, { borderColor: theme.cardBorder }]}
                     onPress={handleEditFromPreview}
                     activeOpacity={0.9}
                   >
-                    <Text
-                      style={[
-                        styles.aiSecondaryButtonText,
-                        { color: theme.textPrimary },
-                      ]}
-                    >
-                      Edit text
-                    </Text>
+                    <Text style={[styles.aiSecondaryButtonText, { color: theme.textPrimary }]}>Edit text</Text>
                   </TouchableOpacity>
 
                   <TouchableOpacity
-                    style={[
-                      styles.aiPrimaryButton,
-                      { backgroundColor: theme.primaryButtonBackground },
-                    ]}
+                    style={[styles.aiPrimaryButton, { backgroundColor: theme.primaryButtonBackground }]}
                     onPress={handleSendFromAiPreview}
                     activeOpacity={0.9}
                   >
-                    <Text
-                      style={[
-                        styles.aiPrimaryButtonText,
-                        { color: theme.primaryButtonText },
-                      ]}
-                    >
-                      Send to chat
-                    </Text>
+                    <Text style={[styles.aiPrimaryButtonText, { color: theme.primaryButtonText }]}>Send to chat</Text>
                   </TouchableOpacity>
                 </View>
 
-                <TouchableOpacity
-                  style={styles.aiPreviewCancel}
-                  onPress={handleCancelAiPreview}
-                  activeOpacity={0.7}
-                >
-                  <Text
-                    style={[
-                      styles.aiPreviewCancelText,
-                      { color: theme.textMuted },
-                    ]}
-                  >
-                    Cancel
-                  </Text>
+                <TouchableOpacity style={styles.aiPreviewCancel} onPress={handleCancelAiPreview} activeOpacity={0.7}>
+                  <Text style={[styles.aiPreviewCancelText, { color: theme.textMuted }]}>Cancel</Text>
                 </TouchableOpacity>
               </View>
             ) : null}
@@ -749,124 +705,55 @@ export default function JobChatScreen() {
                 ]}
               >
                 <View style={styles.helperHeaderRow}>
-                  <Text
-                    style={[
-                      styles.helperLabel,
-                      { color: theme.textPrimary },
-                    ]}
-                  >
-                    Quick helpers
-                  </Text>
-                  <Text
-                    style={[
-                      styles.helperHint,
-                      { color: theme.textMuted },
-                    ]}
-                  >
-                    Tap to auto-fill or attach
-                  </Text>
+                  <Text style={[styles.helperLabel, { color: theme.textPrimary }]}>Quick helpers</Text>
+                  <Text style={[styles.helperHint, { color: theme.textMuted }]}>Tap to auto-fill or attach</Text>
                 </View>
 
                 {/* Message templates */}
                 <View style={styles.helperSectionRow}>
-                  <Text
-                    style={[
-                      styles.helperSectionLabel,
-                      { color: theme.textSecondary },
-                    ]}
-                  >
-                    Message templates
-                  </Text>
+                  <Text style={[styles.helperSectionLabel, { color: theme.textSecondary }]}>Message templates</Text>
                   <View style={styles.helperChipsRow}>
                     <TouchableOpacity
                       style={styles.helperChip}
                       activeOpacity={0.8}
                       onPress={() => handleSelectHelperSnippet("progress")}
                     >
-                      <Text
-                        style={[
-                          styles.helperChipText,
-                          { color: theme.textPrimary },
-                        ]}
-                      >
-                        Progress update
-                      </Text>
+                      <Text style={[styles.helperChipText, { color: theme.textPrimary }]}>Progress update</Text>
                     </TouchableOpacity>
                     <TouchableOpacity
                       style={styles.helperChip}
                       activeOpacity={0.8}
                       onPress={() => handleSelectHelperSnippet("issue")}
                     >
-                      <Text
-                        style={[
-                          styles.helperChipText,
-                          { color: theme.textPrimary },
-                        ]}
-                      >
-                        Issue / no power
-                      </Text>
+                      <Text style={[styles.helperChipText, { color: theme.textPrimary }]}>Issue / no power</Text>
                     </TouchableOpacity>
                     <TouchableOpacity
                       style={styles.helperChip}
                       activeOpacity={0.8}
                       onPress={() => handleSelectHelperSnippet("materials")}
                     >
-                      <Text
-                        style={[
-                          styles.helperChipText,
-                          { color: theme.textPrimary },
-                        ]}
-                      >
-                        Materials needed
-                      </Text>
+                      <Text style={[styles.helperChipText, { color: theme.textPrimary }]}>Materials needed</Text>
                     </TouchableOpacity>
                   </View>
                 </View>
 
                 {/* Photo actions */}
                 <View style={[styles.helperSectionRow, { marginTop: 8 }]}>
-                  <Text
-                    style={[
-                      styles.helperSectionLabel,
-                      { color: theme.textSecondary },
-                    ]}
-                  >
-                    Photos
-                  </Text>
+                  <Text style={[styles.helperSectionLabel, { color: theme.textSecondary }]}>Photos</Text>
                   <View style={styles.helperChipsRow}>
                     <TouchableOpacity
-                      style={[
-                        styles.helperChip,
-                        { backgroundColor: theme.primaryButtonBackground },
-                      ]}
+                      style={[styles.helperChip, { backgroundColor: theme.primaryButtonBackground }]}
                       activeOpacity={0.8}
                       onPress={handleTakePhoto}
                     >
-                      <Text
-                        style={[
-                          styles.helperChipText,
-                          { color: theme.primaryButtonText },
-                        ]}
-                      >
-                        📷 Take photo
-                      </Text>
+                      <Text style={[styles.helperChipText, { color: theme.primaryButtonText }]}>📷 Take photo</Text>
                     </TouchableOpacity>
                     <TouchableOpacity
-                      style={[
-                        styles.helperChip,
-                        { backgroundColor: theme.primaryButtonBackground },
-                      ]}
+                      style={[styles.helperChip, { backgroundColor: theme.primaryButtonBackground }]}
                       activeOpacity={0.8}
                       onPress={handlePickFromLibrary}
                     >
-                      <Text
-                        style={[
-                          styles.helperChipText,
-                          { color: theme.primaryButtonText },
-                        ]}
-                      >
-                        🖼 From library
-                      </Text>
+                      <Text style={[styles.helperChipText, { color: theme.primaryButtonText }]}>🖼 From library</Text>
                     </TouchableOpacity>
                   </View>
                 </View>
@@ -883,7 +770,6 @@ export default function JobChatScreen() {
                 },
               ]}
             >
-              {/* Left icon (quick helpers for new hires) */}
               <TouchableOpacity
                 style={styles.inputIconButton}
                 activeOpacity={0.7}
@@ -901,7 +787,6 @@ export default function JobChatScreen() {
                 </Text>
               </TouchableOpacity>
 
-              {/* Text field */}
               <TextInput
                 style={[
                   styles.chatInput,
@@ -917,17 +802,12 @@ export default function JobChatScreen() {
                 onFocus={scrollToBottom}
               />
 
-              {/* Small Review (AI) button */}
               <TouchableOpacity
                 style={[
                   styles.inputAiButton,
                   {
-                    backgroundColor: hasDraft
-                      ? theme.primaryButtonBackground
-                      : theme.cardBackground,
-                    borderColor: hasDraft
-                      ? "transparent"
-                      : theme.cardBorder,
+                    backgroundColor: hasDraft ? theme.primaryButtonBackground : theme.cardBackground,
+                    borderColor: hasDraft ? "transparent" : theme.cardBorder,
                     opacity: hasDraft ? 1 : 0.6,
                   },
                 ]}
@@ -939,9 +819,7 @@ export default function JobChatScreen() {
                   style={[
                     styles.inputAiButtonText,
                     {
-                      color: hasDraft
-                        ? theme.primaryButtonText
-                        : theme.textMuted,
+                      color: hasDraft ? theme.primaryButtonText : theme.textMuted,
                     },
                   ]}
                 >
@@ -956,12 +834,13 @@ export default function JobChatScreen() {
   );
 }
 
+/** ---------- STYLES (unchanged) ---------- **/
 const styles = StyleSheet.create({
   screen: {
     flex: 1,
     paddingTop: 48,
     paddingHorizontal: 18,
-    paddingBottom: 8, // tighter so chat hugs keyboard more
+    paddingBottom: 8,
   },
 
   headerRow: {
@@ -996,7 +875,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     paddingHorizontal: 14,
     paddingTop: 12,
-    paddingBottom: 8, // reduced
+    paddingBottom: 8,
   },
   chatCardHeader: {
     marginBottom: 8,
@@ -1138,7 +1017,6 @@ const styles = StyleSheet.create({
     fontSize: 11,
   },
 
-  // Helper bar
   helperBar: {
     borderRadius: 16,
     borderWidth: 1,
@@ -1183,7 +1061,6 @@ const styles = StyleSheet.create({
     fontWeight: "500",
   },
 
-  // New IG-style input bar
   inputContainer: {
     flexDirection: "row",
     alignItems: "center",
@@ -1223,7 +1100,6 @@ const styles = StyleSheet.create({
     fontWeight: "700",
   },
 
-  // old reviewButton styles left unused (safe to delete later if you want)
   reviewButton: {
     marginTop: 8,
     borderRadius: 999,

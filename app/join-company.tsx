@@ -25,10 +25,13 @@ type Session = {
   uid: string;
   email?: string | null;
   name?: string;
+  photoURL?: string | null;
   role?: "owner" | "employee" | "independent";
   companyId?: string | null;
+  companyName?: string | null;
   provider?: string;
   createdAt?: string;
+  profileComplete?: boolean;
 };
 
 function normalizeJoinCode(raw: string) {
@@ -106,12 +109,16 @@ export default function JoinCompanyScreen() {
 
       if (!joinSnap.exists()) {
         setLoading(false);
-        return Alert.alert("Not found", "That join code was not found. Check the code and try again.");
+        return Alert.alert(
+          "Not found",
+          "That join code was not found. Check the code and try again."
+        );
       }
 
       const joinData = joinSnap.data() as any;
       const companyId = joinData?.companyId as string | undefined;
-      const companyName = (joinData?.companyName as string | undefined) ?? "Company";
+      const companyName =
+        (joinData?.companyName as string | undefined) ?? "Company";
 
       if (!companyId) {
         setLoading(false);
@@ -125,9 +132,15 @@ export default function JoinCompanyScreen() {
         {
           joinedAt: serverTimestamp(),
           joinCodeUsed: code,
+          // ✅ profile fields (will be filled in /profile-setup)
+          name: "",
+          photoUrl: "",
+          email: firebaseAuth.currentUser?.email ?? "",
+          updatedAt: serverTimestamp(),
         },
-        { merge: false }
+        { merge: true }
       );
+      
 
       // ✅ 3) Upsert users/{uid}
       const userRef = doc(db, "users", authedUid);
@@ -137,6 +150,8 @@ export default function JoinCompanyScreen() {
           companyId,
           role: "employee",
           updatedAt: serverTimestamp(),
+          // ✅ profile flags (we will complete these in profile-setup)
+          profileComplete: false,
         },
         { merge: true }
       );
@@ -156,7 +171,9 @@ export default function JoinCompanyScreen() {
         ...(session ?? { uid: authedUid }),
         uid: authedUid,
         companyId,
+        companyName,
         role: "employee",
+        profileComplete: false,
       };
 
       await AsyncStorage.setItem(USER_STORAGE_KEY, JSON.stringify(nextSession));
@@ -164,8 +181,10 @@ export default function JoinCompanyScreen() {
       setLoading(false);
 
       Alert.alert("Joined", `You joined ${companyName}.`, [
-        { text: "Continue", onPress: () => router.replace("/home") },
+        { text: "Continue", onPress: () => router.replace("/profile-setup" as any) },
       ]);
+      
+      
     } catch (err) {
       console.warn("Join company error:", err);
       setLoading(false);
@@ -267,7 +286,9 @@ export default function JoinCompanyScreen() {
                 },
               ]}
             >
-              <Text style={[styles.helpText, { color: theme.textMuted }]}>Need help? I don’t have a join code</Text>
+              <Text style={[styles.helpText, { color: theme.textMuted }]}>
+                Need help? I don’t have a join code
+              </Text>
             </TouchableOpacity>
 
             <TouchableOpacity
@@ -321,7 +342,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     shadowOpacity: 0.28,
     shadowRadius: 10,
-    shadowOffset: { width: 0, height: 6 },
+    shadowOffset: { width: 0, height: 0 },
     elevation: 3,
   },
   primaryButtonText: { fontSize: 15, fontWeight: "700" },

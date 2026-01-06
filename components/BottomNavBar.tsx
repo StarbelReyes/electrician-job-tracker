@@ -1,7 +1,7 @@
 // components/BottomNavBar.tsx
 import { Ionicons } from "@expo/vector-icons";
 import { Href, useRouter } from "expo-router";
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Animated,
   Easing,
@@ -14,10 +14,12 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { usePreferences } from "../context/PreferencesContext";
 
+type Role = "owner" | "employee" | "independent";
 type TabKey = "home" | "add" | "trash" | "settings";
 
 export type BottomNavBarProps = {
   active: TabKey;
+  role?: Role; // ✅ NEW
 };
 
 const ORDER: TabKey[] = ["home", "add", "trash", "settings"] as const;
@@ -47,13 +49,25 @@ type Layout = { x: number; width: number };
 
 const TAB_BAR_HEIGHT = 56;
 
-export default function BottomNavBar({ active }: BottomNavBarProps) {
+export default function BottomNavBar({ active, role = "independent" }: BottomNavBarProps) {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { theme, accentColor } = usePreferences();
 
   // ✅ Brand should come from accent system (your #FF0800)
   const brand = accentColor;
+
+  // ✅ Which tabs should be visible
+  const visibleOrder = useMemo<TabKey[]>(() => {
+    if (role === "employee") return ORDER.filter((t) => t !== "add");
+    return ORDER;
+  }, [role]);
+
+  // ✅ If employee somehow lands on /add-job, highlight Home pill instead
+  const effectiveActive: TabKey = useMemo(() => {
+    if (role === "employee" && active === "add") return "home";
+    return active;
+  }, [active, role]);
 
   const layoutsRef = useRef<Record<TabKey, Layout | null>>({
     home: null,
@@ -68,27 +82,30 @@ export default function BottomNavBar({ active }: BottomNavBarProps) {
   const pillW = useRef(new Animated.Value(56)).current;
   const pillOpacity = useRef(new Animated.Value(0)).current;
 
-  const computeTarget = useCallback((tab: TabKey) => {
-    const l = layoutsRef.current[tab];
-    if (!l) return null;
+  const computeTarget = useCallback(
+    (tab: TabKey) => {
+      const l = layoutsRef.current[tab];
+      if (!l) return null;
 
-    const targetW = Math.max(56, Math.min(l.width, 92));
-    const centerX = l.x + l.width / 2;
-    const targetX = centerX - targetW / 2;
+      const targetW = Math.max(56, Math.min(l.width, 92));
+      const centerX = l.x + l.width / 2;
+      const targetX = centerX - targetW / 2;
 
-    return { x: targetX, w: targetW };
-  }, []);
+      return { x: targetX, w: targetW };
+    },
+    []
+  );
 
   const setToActiveInstant = useCallback(() => {
-    const t = computeTarget(active);
+    const t = computeTarget(effectiveActive);
     if (!t) return;
     pillX.setValue(t.x);
     pillW.setValue(t.w);
     pillOpacity.setValue(1);
-  }, [active, computeTarget, pillOpacity, pillW, pillX]);
+  }, [effectiveActive, computeTarget, pillOpacity, pillW, pillX]);
 
   const animateToActive = useCallback(() => {
-    const t = computeTarget(active);
+    const t = computeTarget(effectiveActive);
     if (!t) return;
 
     Animated.parallel([
@@ -111,13 +128,15 @@ export default function BottomNavBar({ active }: BottomNavBarProps) {
         useNativeDriver: false,
       }),
     ]).start();
-  }, [active, computeTarget, pillOpacity, pillW, pillX]);
+  }, [effectiveActive, computeTarget, pillOpacity, pillW, pillX]);
 
   const onTabLayout = (key: TabKey) => (e: LayoutChangeEvent) => {
     const { x, width } = e.nativeEvent.layout;
     layoutsRef.current[key] = { x, width };
 
-    const allMeasured = ORDER.every((k) => layoutsRef.current[k] != null);
+    // ✅ IMPORTANT: only wait for visible tabs to measure
+    const allMeasured = visibleOrder.every((k) => layoutsRef.current[k] != null);
+
     if (allMeasured && !isReady) {
       setIsReady(true);
       requestAnimationFrame(setToActiveInstant);
@@ -125,12 +144,21 @@ export default function BottomNavBar({ active }: BottomNavBarProps) {
   };
 
   useEffect(() => {
+    // ✅ If role changes (employee <-> owner), reset measuring so pill snaps correctly
+    setIsReady(false);
+    // Clear layouts so re-measure is clean
+    layoutsRef.current = { home: null, add: null, trash: null, settings: null };
+    pillOpacity.setValue(0);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [role]);
+
+  useEffect(() => {
     if (!isReady) return;
     animateToActive();
-  }, [active, isReady, animateToActive]);
+  }, [effectiveActive, isReady, animateToActive]);
 
   const handlePress = (tab: TabKey) => {
-    if (tab === active) return;
+    if (tab === effectiveActive) return;
     router.replace(ROUTES[tab]);
   };
 
@@ -143,8 +171,6 @@ export default function BottomNavBar({ active }: BottomNavBarProps) {
 
   return (
     <View
-      // ✅ Touch-safety: container will NOT steal touches from screens above it.
-      // Pressables inside still work because children can receive touches.
       pointerEvents="box-none"
       style={[
         styles.wrap,
@@ -156,11 +182,7 @@ export default function BottomNavBar({ active }: BottomNavBarProps) {
         },
       ]}
     >
-      <View
-        // ✅ Explicitly allow touches on the tab row itself
-        pointerEvents="auto"
-        style={styles.inner}
-      >
+      <View pointerEvents="auto" style={styles.inner}>
         <Animated.View
           pointerEvents="none"
           style={[
@@ -175,8 +197,8 @@ export default function BottomNavBar({ active }: BottomNavBarProps) {
           ]}
         />
 
-        {ORDER.map((tab) => {
-          const isTabActive = tab === active;
+        {visibleOrder.map((tab) => {
+          const isTabActive = tab === effectiveActive;
           const tint = tintFor(isTabActive);
 
           return (
